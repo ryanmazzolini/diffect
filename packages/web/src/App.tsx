@@ -28,6 +28,15 @@ export function App() {
     }
   }, []);
 
+  const refreshDiff = useCallback(async () => {
+    if (!repo) return;
+    try {
+      setDiff(await api.diff(repo, { worktree, target }));
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [repo, worktree, target]);
+
   useEffect(() => {
     api
       .workspace()
@@ -45,12 +54,16 @@ export function App() {
   }, [repo]);
 
   useEffect(() => {
-    if (!repo) return;
-    api
-      .diff(repo, { worktree, target })
-      .then(setDiff)
-      .catch((e) => setError(String(e)));
-  }, [repo, worktree, target]);
+    refreshDiff();
+  }, [refreshDiff]);
+
+  // Live updates: re-fetch the affected panel when the daemon reports a change.
+  useEffect(() => {
+    return api.subscribe((type) => {
+      if (type === "thread.changed") refreshThreads();
+      else if (type === "diff.changed") refreshDiff();
+    });
+  }, [refreshThreads, refreshDiff]);
 
   if (error) {
     return (
@@ -70,13 +83,15 @@ export function App() {
   const openCount = threads.filter((t) => t.status === "open").length;
   const byStatus =
     filter === "all" ? threads : threads.filter((t) => t.status === filter);
-  // Scope the inbox to the repo/worktree currently being viewed.
-  const visible = byStatus.filter(
+  // Inline diff threads are scoped to the repo/worktree being viewed; the inbox
+  // stays cross-repo so unresolved feedback elsewhere remains visible.
+  const inlineThreads = threads.filter(
     (t) => t.repo === repo && (worktree === null || t.worktree === worktree),
   );
   const multiRepo = workspace.repos.length > 1;
   const worktrees = currentRepo?.worktrees ?? [];
   const multiWorktree = worktrees.length > 1;
+  const editors = workspace.editors ?? [];
 
   return (
     <div className="app">
@@ -139,7 +154,8 @@ export function App() {
             repo={repo}
             worktree={worktree}
             diff={diff}
-            threads={visible}
+            threads={inlineThreads}
+            editors={editors}
             onChanged={refreshThreads}
           />
         </section>
@@ -155,7 +171,12 @@ export function App() {
               </button>
             ))}
           </div>
-          <ThreadList threads={visible} onChanged={refreshThreads} />
+          <ThreadList
+            threads={byStatus}
+            editors={editors}
+            showRepo={multiRepo}
+            onChanged={refreshThreads}
+          />
         </aside>
       </main>
     </div>

@@ -2,6 +2,7 @@ import type {
   AddCommentRequest,
   CreateThreadRequest,
   DismissThreadRequest,
+  OpenRequest,
   RepoDiff,
   ResolveThreadRequest,
   Thread,
@@ -58,6 +59,25 @@ export const api = {
 
   dismiss: (id: string, req: DismissThreadRequest = {}) =>
     post(`/threads/${encodeURIComponent(id)}/dismiss`, req),
+
+  open: (req: OpenRequest) =>
+    fetch("/open", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => json<{ ok: boolean }>(r)),
+
+  /**
+   * Subscribe to live daemon events; calls onChange with the event type.
+   * Returns an unsubscribe function. EventSource auto-reconnects on drop.
+   */
+  subscribe: (onChange: (type: string) => void): (() => void) => {
+    const es = new EventSource("/events");
+    const handler = (e: Event) => onChange(e.type);
+    es.addEventListener("diff.changed", handler);
+    es.addEventListener("thread.changed", handler);
+    return () => es.close();
+  },
 };
 
 function post(path: string, body: unknown): Promise<Thread> {

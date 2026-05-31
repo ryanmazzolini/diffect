@@ -8,9 +8,11 @@ import { api } from "../api.js";
  */
 export function ThreadConversation({
   thread,
+  editors = [],
   onChanged,
 }: {
   thread: Thread;
+  editors?: string[];
   onChanged: () => void;
 }) {
   const [replying, setReplying] = useState(false);
@@ -106,6 +108,26 @@ export function ThreadConversation({
                 Dismiss
               </button>
             </>
+          )}
+          {editors.length > 0 && thread.file && thread.line !== null && (
+            <button
+              className="ghost"
+              disabled={busy}
+              title={`Open ${thread.file}:${thread.line} in ${editors[0]}`}
+              onClick={() =>
+                run(() =>
+                  api.open({
+                    repo: thread.repo,
+                    worktree: thread.worktree,
+                    file: thread.file!,
+                    line: thread.line!,
+                    editor: editors[0]!,
+                  }),
+                )
+              }
+            >
+              Open
+            </button>
           )}
         </div>
       )}

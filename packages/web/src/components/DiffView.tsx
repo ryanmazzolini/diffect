@@ -8,10 +8,11 @@ interface Props {
   worktree: string | null;
   diff: RepoDiff | null;
   threads: Thread[];
+  editors: string[];
   onChanged: () => void;
 }
 
-export function DiffView({ repo, worktree, diff, threads, onChanged }: Props) {
+export function DiffView({ repo, worktree, diff, threads, editors, onChanged }: Props) {
   if (!diff) return <div className="loading">Loading diff…</div>;
   if (diff.files.length === 0) {
     return <div className="empty">No changes in this target.</div>;
@@ -25,6 +26,7 @@ export function DiffView({ repo, worktree, diff, threads, onChanged }: Props) {
           worktree={worktree}
           file={file}
           threads={threads.filter((t) => t.file === file.path)}
+          editors={editors}
           onChanged={onChanged}
         />
       ))}
@@ -37,12 +39,14 @@ function FileDiff({
   worktree,
   file,
   threads,
+  editors,
   onChanged,
 }: {
   repo: string;
   worktree: string | null;
   file: DiffFile;
   threads: Thread[];
+  editors: string[];
   onChanged: () => void;
 }) {
   // Which new-side line currently has its comment form open.
@@ -71,6 +75,7 @@ function FileDiff({
                   key={li}
                   line={line}
                   threads={lineThreads}
+                  editors={editors}
                   onChanged={onChanged}
                   isCommenting={commenting === line.new && line.new !== null}
                   onComment={() => line.new && setCommenting(line.new)}
@@ -103,6 +108,7 @@ function FileDiff({
 function LineRow({
   line,
   threads,
+  editors,
   onChanged,
   isCommenting,
   onComment,
@@ -110,6 +116,7 @@ function LineRow({
 }: {
   line: DiffLine;
   threads: Thread[];
+  editors: string[];
   onChanged: () => void;
   isCommenting: boolean;
   onComment: () => void;
@@ -142,7 +149,7 @@ function LineRow({
           <td className="ln" />
           <td className="ln" />
           <td className="code">
-            <ThreadConversation thread={t} onChanged={onChanged} />
+            <ThreadConversation thread={t} editors={editors} onChanged={onChanged} />
           </td>
         </tr>
       ))}

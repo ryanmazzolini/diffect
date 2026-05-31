@@ -3,9 +3,14 @@ import { ThreadConversation } from "./ThreadConversation.js";
 
 export function ThreadList({
   threads,
+  editors = [],
+  showRepo = false,
   onChanged,
 }: {
   threads: Thread[];
+  editors?: string[];
+  /** Show the repo (and worktree) on each card — used for the cross-repo inbox. */
+  showRepo?: boolean;
   onChanged: () => void;
 }) {
   if (threads.length === 0) {
@@ -22,11 +27,17 @@ export function ThreadList({
       {threads.map((t) => (
         <div className={`thread-card status-${t.status}`} key={t.id}>
           <div className="thread-card-head">
+            {showRepo && (
+              <span className="repo-chip">
+                {t.repo}
+                {t.worktree ? ` · ${t.worktree}` : ""}
+              </span>
+            )}
             <span className="loc">
               {t.file ? `${t.file}:${t.line ?? "?"}` : "general"}
             </span>
           </div>
-          <ThreadConversation thread={t} onChanged={onChanged} />
+          <ThreadConversation thread={t} editors={editors} onChanged={onChanged} />
         </div>
       ))}
     </div>

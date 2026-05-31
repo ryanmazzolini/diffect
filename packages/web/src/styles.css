@@ -74,6 +74,15 @@ body {
 .target-select {
   font-weight: 600;
 }
+.repo-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+}
 .spacer {
   flex: 1;
 }
