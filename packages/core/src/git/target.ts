@@ -20,10 +20,14 @@ export function normalizeTarget(spec: string | null | undefined): ReviewTarget {
     return { spec: s, kind: "staged" };
   if (s === "unstaged") return { spec: s, kind: "unstaged" };
 
-  // Range: a..b (two- or three-dot).
-  const range = /^(.+?)\.\.\.?(.+)$/.exec(s);
-  if (range) {
-    return { spec: s, kind: "range", from: range[1], to: range[2] };
+  // Range: three-dot (symmetric/merge-base) must be distinguished from two-dot.
+  const threeDot = /^(.+?)\.\.\.(.+)$/.exec(s);
+  if (threeDot) {
+    return { spec: s, kind: "range", from: threeDot[1], to: threeDot[2], threeDot: true };
+  }
+  const twoDot = /^(.+?)\.\.(.+)$/.exec(s);
+  if (twoDot) {
+    return { spec: s, kind: "range", from: twoDot[1], to: twoDot[2], threeDot: false };
   }
   // Anything else is a single ref compared against the working tree.
   return { spec: s, kind: "ref", from: s };
@@ -59,8 +63,10 @@ export async function computeTargetDiff(
     }
 
     case "range": {
-      // Pure commit range — no working tree, no untracked.
-      const files = await diffArgs(repoRoot, [`${target.from}..${target.to}`]);
+      // Pure commit range — no working tree, no untracked. Preserve dot count;
+      // three-dot is the symmetric (merge-base) comparison.
+      const op = target.threeDot ? "..." : "..";
+      const files = await diffArgs(repoRoot, [`${target.from}${op}${target.to}`]);
       return { repo: ".", target: target.spec, files };
     }
   }

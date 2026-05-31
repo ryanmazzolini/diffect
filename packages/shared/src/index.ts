@@ -69,6 +69,8 @@ export interface ReviewTarget {
   from?: string;
   /** For "range": the right side. */
   to?: string;
+  /** For "range": true if the spec used three-dot (symmetric) syntax. */
+  threeDot?: boolean;
 }
 
 export interface WorktreeSummary {

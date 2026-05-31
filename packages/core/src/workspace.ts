@@ -60,7 +60,7 @@ export async function discoverWorkspace(workspacePath: string): Promise<Workspac
     );
   }
 
-  const repos = await groupIntoRepos(root, treeRoots);
+  const repos = await groupIntoRepos(treeRoots);
   return { root, repos };
 }
 
@@ -87,7 +87,10 @@ async function findWorkingTrees(root: string): Promise<string[]> {
       return;
     }
     for (const e of entries) {
-      if (!e.isDirectory() || e.name === "node_modules" || e.name.startsWith("."))
+      if (!e.isDirectory()) continue;
+      // Skip known-noise dirs, but still descend into other dotted dirs so a
+      // repo checked out into e.g. `.config` is discoverable.
+      if (e.name === "node_modules" || e.name === ".git" || e.name === ".reviews")
         continue;
       await walk(join(dir, e.name), depth + 1);
     }
@@ -109,10 +112,7 @@ async function isWorkingTree(dir: string): Promise<boolean> {
 }
 
 /** Group working trees into repos keyed by their shared git common dir. */
-async function groupIntoRepos(
-  workspaceRoot: string,
-  treeRoots: string[],
-): Promise<DiscoveredRepo[]> {
+async function groupIntoRepos(treeRoots: string[]): Promise<DiscoveredRepo[]> {
   const byCommonDir = new Map<string, DiscoveredWorktree[]>();
   const order: string[] = [];
 

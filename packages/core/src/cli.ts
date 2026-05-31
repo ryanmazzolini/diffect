@@ -13,7 +13,7 @@ import { loadRefreshedThreads } from "./reviews/refresh.js";
 import { computeAnchor, readSideLines } from "./reviews/anchors.js";
 import { resolveWorkBase } from "./git/diff.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
-import { discoverWorkspace, findRepo, resolveRepoRoot } from "./workspace.js";
+import { discoverWorkspace, resolveRepoRoot } from "./workspace.js";
 import { gitTry } from "./git/exec.js";
 
 // --- shared helpers --------------------------------------------------------
@@ -81,6 +81,29 @@ function printThread(t: Thread): void {
   process.stdout.write(JSON.stringify(t, null, 2) + "\n");
 }
 
+/**
+ * Resolve the target repo from --repo. Defaults to the sole repo in a
+ * single-repo workspace; in a multi-repo workspace requires --repo rather than
+ * silently picking one (which would mis-route a comment to the wrong repo).
+ */
+function requireRepo(
+  ws: { repos: { name: string }[] },
+  flags: Flags,
+): { name: string } {
+  const requested = flags.options.get("repo");
+  if (requested) {
+    const repo = ws.repos.find((r) => r.name === requested);
+    if (!repo) fail(`unknown repo: ${requested}`);
+    return repo;
+  }
+  if (ws.repos.length === 1) return ws.repos[0]!;
+  fail(
+    `workspace has ${ws.repos.length} repos; pass --repo <${ws.repos
+      .map((r) => r.name)
+      .join("|")}>`,
+  );
+}
+
 // --- commands --------------------------------------------------------------
 
 async function cmdList(argv: string[]): Promise<number> {
@@ -117,12 +140,10 @@ async function cmdList(argv: string[]): Promise<number> {
 
 async function cmdDiff(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set(["json"]));
-  const repoName = flags.options.get("repo");
   const worktree = flags.options.get("worktree") ?? null;
   const root = await resolveWorkspaceRoot(process.cwd());
   const ws = await discoverWorkspace(root);
-  const repo = repoName ? findRepo(ws, repoName) : ws.repos[0];
-  if (!repo) fail(`unknown repo: ${repoName}`);
+  const repo = requireRepo(ws, flags);
   const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
   if (!treeRoot) fail(`unknown worktree: ${worktree}`);
   const target = normalizeTarget(flags.options.get("target"));
@@ -154,10 +175,7 @@ async function cmdComment(argv: string[]): Promise<number> {
   if (!body) fail("--body is required");
   const root = await resolveWorkspaceRoot(process.cwd());
   const ws = await discoverWorkspace(root);
-  const repo = flags.options.get("repo")
-    ? findRepo(ws, flags.options.get("repo")!)
-    : ws.repos[0];
-  if (!repo) fail(`could not determine repo; pass --repo`);
+  const repo = requireRepo(ws, flags);
   const worktree = flags.options.get("worktree") ?? null;
   const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
   if (!treeRoot) fail(`unknown worktree: ${worktree}`);
