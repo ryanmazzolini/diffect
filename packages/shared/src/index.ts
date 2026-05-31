@@ -94,6 +94,16 @@ export interface WorkspaceInfo {
   root: string;
   repos: RepoSummary[];
   openThreadCount: number;
+  /** Editors detected on the host, for the open-in-editor handoff. */
+  editors: string[];
+}
+
+export interface OpenRequest {
+  repo: string;
+  worktree?: string | null;
+  file: string;
+  line: number;
+  editor: string;
 }
 
 export type Severity = "must-fix" | "suggestion" | "nit" | "question";

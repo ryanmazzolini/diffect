@@ -7,6 +7,7 @@ import type {
   AddCommentRequest,
   CreateThreadRequest,
   DismissThreadRequest,
+  OpenRequest,
   ResolveThreadRequest,
   ThreadAnchor,
 } from "@diffect/shared";
@@ -22,6 +23,8 @@ import {
   UnknownThreadError,
 } from "./reviews/event-log.js";
 import { loadRefreshedThreads } from "./reviews/refresh.js";
+import { EventHub } from "./events.js";
+import { detectEditors, openInEditor, UnknownEditorError } from "./editor.js";
 import {
   discoverWorkspace,
   findRepo,
@@ -42,6 +45,8 @@ interface RouteContext {
   ws: Workspace;
   now: () => string;
   webRoot?: string;
+  events: EventHub;
+  editors: string[];
 }
 
 /**
@@ -51,13 +56,18 @@ interface RouteContext {
  */
 export async function createServer(opts: DaemonOptions): Promise<Server> {
   const ws = await discoverWorkspace(opts.workspacePath);
+  const events = new EventHub(ws);
+  events.start();
+  const editors = await detectEditors();
   const ctx: RouteContext = {
     ws,
     now: opts.now ?? (() => new Date().toISOString()),
     webRoot: opts.webRoot,
+    events,
+    editors,
   };
 
-  return createHttpServer((req, res) => {
+  const server = createHttpServer((req, res) => {
     handle(ctx, req, res).catch((err) => {
       if (err instanceof BodyTooLargeError) {
         // Close the connection after responding: the client may still be
@@ -78,6 +88,10 @@ export async function createServer(opts: DaemonOptions): Promise<Server> {
       sendJson(res, 500, { error: "internal error" });
     });
   });
+
+  // Tear down filesystem watchers when the server closes.
+  server.on("close", () => ctx.events.close());
+  return server;
 }
 
 async function handle(
@@ -89,11 +103,18 @@ async function handle(
   const path = url.pathname;
   const method = req.method ?? "GET";
 
+  // --- Live updates (SSE) -------------------------------------------------
+  if (method === "GET" && path === "/events") {
+    const dispose = ctx.events.addClient(res);
+    req.on("close", dispose);
+    return; // keep the connection open
+  }
+
   // --- API routes ---------------------------------------------------------
   if (method === "GET" && path === "/workspace") {
     const threads = await loadThreads(ctx.ws.root);
     const open = threads.filter((t) => t.status === "open").length;
-    return sendJson(res, 200, await summarizeWorkspace(ctx.ws, open));
+    return sendJson(res, 200, await summarizeWorkspace(ctx.ws, open, ctx.editors));
   }
 
   if (method === "GET" && path === "/threads") {
@@ -163,6 +184,29 @@ async function handle(
     const id = decodeURIComponent(dismissMatch[1]!);
     const body = (await readJsonBody<DismissThreadRequest>(req)) ?? {};
     return withThread(res, () => dismissThread(ctx.ws.root, id, body, ctx.now()));
+  }
+
+  // --- Editor handoff -----------------------------------------------------
+  if (method === "POST" && path === "/open") {
+    const body = await readJsonBody<OpenRequest>(req);
+    if (!body || !body.file || typeof body.line !== "number" || !body.editor) {
+      return sendJson(res, 400, { error: "file, line, and editor are required" });
+    }
+    const repo = body.repo ? findRepo(ctx.ws, body.repo) : undefined;
+    if (!repo) return sendJson(res, 400, { error: `unknown repo: ${body.repo}` });
+    const treeRoot = resolveRepoRoot(ctx.ws, repo.name, body.worktree ?? null);
+    if (!treeRoot) {
+      return sendJson(res, 400, { error: `unknown worktree: ${body.worktree}` });
+    }
+    try {
+      await openInEditor(treeRoot, body.file, body.line, body.editor);
+      return sendJson(res, 200, { ok: true });
+    } catch (err) {
+      if (err instanceof UnknownEditorError) {
+        return sendJson(res, 400, { error: err.message });
+      }
+      throw err;
+    }
   }
 
   // --- Static web assets --------------------------------------------------

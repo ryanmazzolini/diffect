@@ -181,6 +181,7 @@ export function resolveRepoRoot(
 export async function summarizeWorkspace(
   ws: Workspace,
   openThreadCount: number,
+  editors: string[] = [],
 ): Promise<WorkspaceInfo> {
   const repos: RepoSummary[] = await Promise.all(
     ws.repos.map(async (r) => ({
@@ -191,5 +192,5 @@ export async function summarizeWorkspace(
       worktrees: r.worktrees.map((w) => ({ name: w.name, root: w.root })),
     })),
   );
-  return { root: ws.root, repos, openThreadCount };
+  return { root: ws.root, repos, openThreadCount, editors };
 }
