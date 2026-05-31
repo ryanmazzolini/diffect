@@ -52,7 +52,7 @@ export async function createThread(
     side: req.side ?? null,
     line: req.line ?? null,
     endLine: req.endLine ?? null,
-    anchor: null,
+    anchor: req.anchor ?? null,
     severity: req.severity ?? null,
     author: req.author ?? { type: "user" },
     body: req.body,

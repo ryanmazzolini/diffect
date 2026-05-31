@@ -45,6 +45,14 @@ export function ThreadConversation({
         <span className={`status-badge status-${thread.status}`}>
           {thread.status}
         </span>
+        {thread.anchorState === "stale" && (
+          <span
+            className="stale-badge"
+            title="The commented code moved or was removed; this thread is outdated but kept for review."
+          >
+            outdated
+          </span>
+        )}
       </div>
       {thread.comments.map((c) => (
         <div className="comment" key={c.id}>

@@ -8,8 +8,10 @@ import type {
   CreateThreadRequest,
   DismissThreadRequest,
   ResolveThreadRequest,
+  ThreadAnchor,
 } from "@diffect/shared";
-import { computeWorkDiff } from "./git/diff.js";
+import { computeWorkDiff, resolveWorkBase } from "./git/diff.js";
+import { computeAnchor, readSideLines } from "./reviews/anchors.js";
 import {
   addComment,
   createThread,
@@ -18,6 +20,7 @@ import {
   resolveThread,
   UnknownThreadError,
 } from "./reviews/event-log.js";
+import { loadRefreshedThreads } from "./reviews/refresh.js";
 import {
   discoverWorkspace,
   findRepo,
@@ -91,6 +94,13 @@ async function handle(
     return sendJson(res, 200, await summarizeWorkspace(ctx.ws, open));
   }
 
+  if (method === "GET" && path === "/threads") {
+    const status = url.searchParams.get("status");
+    let threads = await loadRefreshedThreads(ctx.ws);
+    if (status) threads = threads.filter((t) => t.status === status);
+    return sendJson(res, 200, threads);
+  }
+
   const diffMatch = /^\/repos\/(.+)\/diff$/.exec(path);
   if (method === "GET" && diffMatch) {
     const repoName = decodeURIComponent(diffMatch[1]!);
@@ -100,22 +110,17 @@ async function handle(
     return sendJson(res, 200, { ...diff, repo: repo.name });
   }
 
-  if (method === "GET" && path === "/threads") {
-    const status = url.searchParams.get("status");
-    let threads = await loadThreads(ctx.ws.root);
-    if (status) threads = threads.filter((t) => t.status === status);
-    return sendJson(res, 200, threads);
-  }
-
   if (method === "POST" && path === "/threads") {
     const body = await readJsonBody<CreateThreadRequest>(req);
     if (!body || typeof body.body !== "string" || !body.body.trim()) {
       return sendJson(res, 400, { error: "body is required" });
     }
-    if (!body.repo || !findRepo(ctx.ws, body.repo)) {
+    const repo = body.repo ? findRepo(ctx.ws, body.repo) : undefined;
+    if (!repo) {
       return sendJson(res, 400, { error: `unknown repo: ${body.repo}` });
     }
-    const thread = await createThread(ctx.ws.root, body, ctx.now());
+    const anchor = await buildAnchor(repo.root, body);
+    const thread = await createThread(ctx.ws.root, { ...body, anchor }, ctx.now());
     return sendJson(res, 201, thread);
   }
 
@@ -149,6 +154,22 @@ async function handle(
   }
 
   sendJson(res, 404, { error: "not found" });
+}
+
+/**
+ * Build the durable anchor for a new thread from the current file content at
+ * creation time. Returns null for general (non-line) threads or unreadable files.
+ */
+async function buildAnchor(
+  repoRoot: string,
+  body: CreateThreadRequest,
+): Promise<ThreadAnchor | null> {
+  if (!body.file || body.line == null) return null;
+  const side = body.side ?? "new";
+  const base = await resolveWorkBase(repoRoot);
+  const lines = await readSideLines(repoRoot, body.file, side, base);
+  if (!lines) return null;
+  return computeAnchor(lines, body.line, body.endLine ?? null, base);
 }
 
 /** Run a thread mutation, mapping a missing thread to 404. */

@@ -6,11 +6,12 @@ import {
   addComment,
   createThread,
   dismissThread,
-  loadThreads,
   resolveThread,
   UnknownThreadError,
 } from "./reviews/event-log.js";
-import { computeWorkDiff } from "./git/diff.js";
+import { loadRefreshedThreads } from "./reviews/refresh.js";
+import { computeAnchor, readSideLines } from "./reviews/anchors.js";
+import { computeWorkDiff, resolveWorkBase } from "./git/diff.js";
 import { discoverWorkspace, findRepo } from "./workspace.js";
 import { gitTry } from "./git/exec.js";
 
@@ -85,7 +86,8 @@ async function cmdList(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set(["json"]));
   const status = flags.options.get("status") as ThreadStatus | undefined;
   const root = await resolveWorkspaceRoot(process.cwd());
-  let threads = await loadThreads(root);
+  const ws = await discoverWorkspace(root);
+  let threads = await loadRefreshedThreads(ws);
   if (status) threads = threads.filter((t) => t.status === status);
 
   if (flags.bools.has("json")) {
@@ -142,20 +144,30 @@ async function cmdComment(argv: string[]): Promise<number> {
   if (!lineStr) fail("--line is required");
   if (!body) fail("--body is required");
   const root = await resolveWorkspaceRoot(process.cwd());
-  const repoName =
-    flags.options.get("repo") ?? (await discoverWorkspace(root)).repos[0]?.name;
-  if (!repoName) fail("could not determine repo; pass --repo");
+  const ws = await discoverWorkspace(root);
+  const repo = flags.options.get("repo")
+    ? findRepo(ws, flags.options.get("repo")!)
+    : ws.repos[0];
+  if (!repo) fail(`could not determine repo; pass --repo`);
+  const side = (flags.options.get("side") as Side) ?? "new";
+  const line = Number(lineStr);
+  const endLine = flags.options.has("end-line")
+    ? Number(flags.options.get("end-line"))
+    : null;
+  // Anchor against the file content at creation so the thread can survive edits.
+  const base = await resolveWorkBase(repo.root);
+  const sideLines = await readSideLines(repo.root, file, side, base);
+  const anchor = sideLines ? computeAnchor(sideLines, line, endLine, base) : null;
   const thread = await createThread(
     root,
     {
-      repo: repoName,
+      repo: repo.name,
       file,
-      side: (flags.options.get("side") as Side) ?? "new",
-      line: Number(lineStr),
-      endLine: flags.options.has("end-line")
-        ? Number(flags.options.get("end-line"))
-        : null,
+      side,
+      line,
+      endLine,
       severity: (flags.options.get("severity") as Severity) ?? null,
+      anchor,
       author: authorFrom(flags),
       body,
     },

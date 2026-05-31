@@ -190,6 +190,8 @@ export interface CreateThreadRequest {
   line?: number | null;
   endLine?: number | null;
   severity?: Severity | null;
+  /** Precomputed durable anchor; the daemon/CLI fills this from file content. */
+  anchor?: ThreadAnchor | null;
   author?: Author;
   body: string;
 }
