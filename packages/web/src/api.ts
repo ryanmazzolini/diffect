@@ -24,15 +24,24 @@ async function json<T>(res: Response): Promise<T> {
 export const api = {
   workspace: () => fetch("/workspace").then((r) => json<WorkspaceInfo>(r)),
 
-  diff: (repo: string) =>
-    fetch(`/repos/${encodeURIComponent(repo)}/diff`).then((r) =>
-      json<RepoDiff>(r),
-    ),
+  diff: (repo: string, opts: { worktree?: string | null; target?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    if (opts.target) q.set("target", opts.target);
+    const qs = q.toString();
+    return fetch(
+      `/repos/${encodeURIComponent(repo)}/diff${qs ? `?${qs}` : ""}`,
+    ).then((r) => json<RepoDiff>(r));
+  },
 
-  threads: (status?: string) =>
-    fetch(`/threads${status ? `?status=${status}` : ""}`).then((r) =>
-      json<Thread[]>(r),
-    ),
+  threads: (opts: { status?: string; repo?: string; worktree?: string | null } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.status) q.set("status", opts.status);
+    if (opts.repo) q.set("repo", opts.repo);
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    const qs = q.toString();
+    return fetch(`/threads${qs ? `?${qs}` : ""}`).then((r) => json<Thread[]>(r));
+  },
 
   createThread: (req: CreateThreadRequest) =>
     fetch("/threads", {

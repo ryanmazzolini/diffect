@@ -10,7 +10,8 @@ import type {
   ResolveThreadRequest,
   ThreadAnchor,
 } from "@diffect/shared";
-import { computeWorkDiff, resolveWorkBase } from "./git/diff.js";
+import { resolveWorkBase } from "./git/diff.js";
+import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { computeAnchor, readSideLines } from "./reviews/anchors.js";
 import {
   addComment,
@@ -24,6 +25,7 @@ import { loadRefreshedThreads } from "./reviews/refresh.js";
 import {
   discoverWorkspace,
   findRepo,
+  resolveRepoRoot,
   summarizeWorkspace,
   type Workspace,
 } from "./workspace.js";
@@ -96,8 +98,13 @@ async function handle(
 
   if (method === "GET" && path === "/threads") {
     const status = url.searchParams.get("status");
+    const repoFilter = url.searchParams.get("repo");
+    const worktreeFilter = url.searchParams.get("worktree");
     let threads = await loadRefreshedThreads(ctx.ws);
     if (status) threads = threads.filter((t) => t.status === status);
+    if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
+    if (worktreeFilter)
+      threads = threads.filter((t) => t.worktree === worktreeFilter);
     return sendJson(res, 200, threads);
   }
 
@@ -106,8 +113,14 @@ async function handle(
     const repoName = decodeURIComponent(diffMatch[1]!);
     const repo = findRepo(ctx.ws, repoName);
     if (!repo) return sendJson(res, 404, { error: `unknown repo: ${repoName}` });
-    const diff = await computeWorkDiff(repo.root);
-    return sendJson(res, 200, { ...diff, repo: repo.name });
+    const worktree = url.searchParams.get("worktree");
+    const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
+    if (!treeRoot) {
+      return sendJson(res, 404, { error: `unknown worktree: ${worktree}` });
+    }
+    const target = normalizeTarget(url.searchParams.get("target"));
+    const diff = await computeTargetDiff(treeRoot, target);
+    return sendJson(res, 200, { ...diff, repo: repo.name, worktree });
   }
 
   if (method === "POST" && path === "/threads") {
@@ -119,7 +132,11 @@ async function handle(
     if (!repo) {
       return sendJson(res, 400, { error: `unknown repo: ${body.repo}` });
     }
-    const anchor = await buildAnchor(repo.root, body);
+    const treeRoot = resolveRepoRoot(ctx.ws, repo.name, body.worktree ?? null);
+    if (!treeRoot) {
+      return sendJson(res, 400, { error: `unknown worktree: ${body.worktree}` });
+    }
+    const anchor = await buildAnchor(treeRoot, body);
     const thread = await createThread(ctx.ws.root, { ...body, anchor }, ctx.now());
     return sendJson(res, 201, thread);
   }

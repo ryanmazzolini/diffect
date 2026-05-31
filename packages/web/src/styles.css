@@ -63,6 +63,17 @@ body {
   font-size: 12px;
   font-weight: 600;
 }
+.selector {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.target-select {
+  font-weight: 600;
+}
 .spacer {
   flex: 1;
 }

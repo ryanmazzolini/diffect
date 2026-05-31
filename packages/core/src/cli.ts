@@ -11,8 +11,9 @@ import {
 } from "./reviews/event-log.js";
 import { loadRefreshedThreads } from "./reviews/refresh.js";
 import { computeAnchor, readSideLines } from "./reviews/anchors.js";
-import { computeWorkDiff, resolveWorkBase } from "./git/diff.js";
-import { discoverWorkspace, findRepo } from "./workspace.js";
+import { resolveWorkBase } from "./git/diff.js";
+import { computeTargetDiff, normalizeTarget } from "./git/target.js";
+import { discoverWorkspace, findRepo, resolveRepoRoot } from "./workspace.js";
 import { gitTry } from "./git/exec.js";
 
 // --- shared helpers --------------------------------------------------------
@@ -85,10 +86,14 @@ function printThread(t: Thread): void {
 async function cmdList(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set(["json"]));
   const status = flags.options.get("status") as ThreadStatus | undefined;
+  const repoFilter = flags.options.get("repo");
+  const worktreeFilter = flags.options.get("worktree");
   const root = await resolveWorkspaceRoot(process.cwd());
   const ws = await discoverWorkspace(root);
   let threads = await loadRefreshedThreads(ws);
   if (status) threads = threads.filter((t) => t.status === status);
+  if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
+  if (worktreeFilter) threads = threads.filter((t) => t.worktree === worktreeFilter);
 
   if (flags.bools.has("json")) {
     process.stdout.write(JSON.stringify(threads, null, 2) + "\n");
@@ -113,20 +118,24 @@ async function cmdList(argv: string[]): Promise<number> {
 async function cmdDiff(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set(["json"]));
   const repoName = flags.options.get("repo");
+  const worktree = flags.options.get("worktree") ?? null;
   const root = await resolveWorkspaceRoot(process.cwd());
   const ws = await discoverWorkspace(root);
   const repo = repoName ? findRepo(ws, repoName) : ws.repos[0];
   if (!repo) fail(`unknown repo: ${repoName}`);
-  const diff = await computeWorkDiff(repo.root);
+  const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
+  if (!treeRoot) fail(`unknown worktree: ${worktree}`);
+  const target = normalizeTarget(flags.options.get("target"));
+  const diff = await computeTargetDiff(treeRoot, target);
 
   if (flags.bools.has("json")) {
     process.stdout.write(
-      JSON.stringify({ ...diff, repo: repo.name }, null, 2) + "\n",
+      JSON.stringify({ ...diff, repo: repo.name, worktree }, null, 2) + "\n",
     );
     return 0;
   }
   if (diff.files.length === 0) {
-    process.stdout.write("No changes in the work target.\n");
+    process.stdout.write(`No changes in the ${target.spec} target.\n`);
     return 0;
   }
   for (const f of diff.files) {
@@ -149,19 +158,23 @@ async function cmdComment(argv: string[]): Promise<number> {
     ? findRepo(ws, flags.options.get("repo")!)
     : ws.repos[0];
   if (!repo) fail(`could not determine repo; pass --repo`);
+  const worktree = flags.options.get("worktree") ?? null;
+  const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
+  if (!treeRoot) fail(`unknown worktree: ${worktree}`);
   const side = (flags.options.get("side") as Side) ?? "new";
   const line = Number(lineStr);
   const endLine = flags.options.has("end-line")
     ? Number(flags.options.get("end-line"))
     : null;
   // Anchor against the file content at creation so the thread can survive edits.
-  const base = await resolveWorkBase(repo.root);
-  const sideLines = await readSideLines(repo.root, file, side, base);
+  const base = await resolveWorkBase(treeRoot);
+  const sideLines = await readSideLines(treeRoot, file, side, base);
   const anchor = sideLines ? computeAnchor(sideLines, line, endLine, base) : null;
   const thread = await createThread(
     root,
     {
       repo: repo.name,
+      worktree,
       file,
       side,
       line,
@@ -187,7 +200,15 @@ async function cmdGeneral(argv: string[]): Promise<number> {
   if (!repoName) fail("could not determine repo; pass --repo");
   const thread = await createThread(
     root,
-    { repo: repoName, file: null, side: null, line: null, author: authorFrom(flags), body },
+    {
+      repo: repoName,
+      worktree: flags.options.get("worktree") ?? null,
+      file: null,
+      side: null,
+      line: null,
+      author: authorFrom(flags),
+      body,
+    },
     now(),
   );
   printThread(thread);
@@ -249,18 +270,18 @@ async function mutate(op: () => Promise<Thread>): Promise<void> {
 const USAGE = `diffect — local-first code review
 
 Usage:
-  diffect list    [--status open|resolved|dismissed] [--json]
-  diffect diff    [--repo R] [--json]
-  diffect comment [--repo R] --file F --line N [--end-line M] [--side new|old]
+  diffect list    [--status open|resolved|dismissed] [--repo R] [--worktree W] [--json]
+  diffect diff    [--repo R] [--worktree W] [--target work|staged|unstaged|<ref>|<a>..<b>] [--json]
+  diffect comment [--repo R] [--worktree W] --file F --line N [--end-line M] [--side new|old]
                   [--severity must-fix|suggestion|nit|question] [--agent NAME] --body "…"
-  diffect general [--repo R] [--agent NAME] --body "…"
+  diffect general [--repo R] [--worktree W] [--agent NAME] --body "…"
   diffect reply   <thread-id> [--agent NAME] --body "…"
   diffect resolve <thread-id> [--summary "…"] [--agent NAME]
   diffect dismiss <thread-id> [--reason "…"]  [--agent NAME]
 
 The CLI reads and writes .reviews/ directly and works whether or not diffectd
 is running. Use --agent NAME to author a thread or reply as an agent. --repo
-defaults to the single repo in the workspace.
+defaults to the single repo in the workspace; --target defaults to work.
 `;
 
 async function main(): Promise<number> {

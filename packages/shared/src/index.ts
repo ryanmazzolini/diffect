@@ -45,18 +45,47 @@ export interface DiffFile {
 
 export interface RepoDiff {
   repo: string;
+  worktree?: string | null;
   target: string;
   files: DiffFile[];
 }
 
-export interface RepoSummary {
-  /** Repo path relative to the workspace root; "." for a single-repo workspace. */
+/**
+ * A normalized review target. The user types a spec (`work`, `staged`, `main`,
+ * `main..feature`, …); it resolves to exactly one of these shapes.
+ */
+export type ReviewTargetKind =
+  | "work" // committed-since-base + unstaged + untracked
+  | "staged" // index vs HEAD
+  | "unstaged" // worktree vs index
+  | "ref" // <ref> vs worktree
+  | "range"; // <a>..<b> commit range
+
+export interface ReviewTarget {
+  /** The original user-facing spec, echoed back for display. */
+  spec: string;
+  kind: ReviewTargetKind;
+  /** For "ref": the single ref. For "range": the left side. */
+  from?: string;
+  /** For "range": the right side. */
+  to?: string;
+}
+
+export interface WorktreeSummary {
   name: string;
-  /** Absolute path on the host. */
+  root: string;
+}
+
+export interface RepoSummary {
+  /** URL-safe repo id, stable across worktrees. */
+  name: string;
+  /** Absolute path on the host (primary worktree). */
   root: string;
   /** Resolved base ref the work target diffs against. */
   base: string | null;
   defaultBranch: string | null;
+  /** Checkouts of this repo; length > 1 is an A/B group. */
+  worktrees: WorktreeSummary[];
 }
 
 export interface WorkspaceInfo {

@@ -6,6 +6,7 @@ const SEVERITIES: Severity[] = ["must-fix", "suggestion", "nit", "question"];
 
 interface Props {
   repo: string;
+  worktree: string | null;
   file: string;
   side: Side;
   line: number;
@@ -13,7 +14,15 @@ interface Props {
   onCreated: () => void;
 }
 
-export function CommentForm({ repo, file, side, line, onCancel, onCreated }: Props) {
+export function CommentForm({
+  repo,
+  worktree,
+  file,
+  side,
+  line,
+  onCancel,
+  onCreated,
+}: Props) {
   const [body, setBody] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
   const [submitting, setSubmitting] = useState(false);
@@ -26,6 +35,7 @@ export function CommentForm({ repo, file, side, line, onCancel, onCreated }: Pro
     try {
       await api.createThread({
         repo,
+        worktree,
         file,
         side,
         line,

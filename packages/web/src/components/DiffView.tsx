@@ -5,15 +5,16 @@ import { ThreadConversation } from "./ThreadConversation.js";
 
 interface Props {
   repo: string;
+  worktree: string | null;
   diff: RepoDiff | null;
   threads: Thread[];
   onChanged: () => void;
 }
 
-export function DiffView({ repo, diff, threads, onChanged }: Props) {
+export function DiffView({ repo, worktree, diff, threads, onChanged }: Props) {
   if (!diff) return <div className="loading">Loading diff…</div>;
   if (diff.files.length === 0) {
-    return <div className="empty">No changes in the work target.</div>;
+    return <div className="empty">No changes in this target.</div>;
   }
   return (
     <div className="diff">
@@ -21,6 +22,7 @@ export function DiffView({ repo, diff, threads, onChanged }: Props) {
         <FileDiff
           key={file.path}
           repo={repo}
+          worktree={worktree}
           file={file}
           threads={threads.filter((t) => t.file === file.path)}
           onChanged={onChanged}
@@ -32,11 +34,13 @@ export function DiffView({ repo, diff, threads, onChanged }: Props) {
 
 function FileDiff({
   repo,
+  worktree,
   file,
   threads,
   onChanged,
 }: {
   repo: string;
+  worktree: string | null;
   file: DiffFile;
   threads: Thread[];
   onChanged: () => void;
@@ -74,6 +78,7 @@ function FileDiff({
                     commenting === line.new && line.new !== null ? (
                       <CommentForm
                         repo={repo}
+                        worktree={worktree}
                         file={file.path}
                         side="new"
                         line={line.new}

@@ -66,16 +66,24 @@ export async function computeWorkDiff(repoRoot: string): Promise<RepoDiff> {
     : // No commits yet: nothing is tracked, so all content shows as untracked.
       [];
 
-  const untracked = await untrackedFiles(repoRoot);
-  const untrackedDiffs = await Promise.all(
-    untracked.map((path) => syntheticAddedFile(repoRoot, path)),
-  );
+  const untrackedDiffs = await syntheticUntrackedDiffs(repoRoot);
 
   return {
     repo: ".",
     target: "work",
-    files: [...tracked, ...untrackedDiffs.filter((f): f is DiffFile => !!f)],
+    files: [...tracked, ...untrackedDiffs],
   };
+}
+
+/** Build synthetic all-added diffs for every untracked, non-ignored file. */
+export async function syntheticUntrackedDiffs(
+  repoRoot: string,
+): Promise<DiffFile[]> {
+  const untracked = await untrackedFiles(repoRoot);
+  const diffs = await Promise.all(
+    untracked.map((path) => syntheticAddedFile(repoRoot, path)),
+  );
+  return diffs.filter((f): f is DiffFile => !!f);
 }
 
 async function diffAgainst(repoRoot: string, base: string): Promise<DiffFile[]> {
