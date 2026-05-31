@@ -1,0 +1,391 @@
+:root {
+  --bg: #0d1117;
+  --bg-elev: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --add-bg: #122117;
+  --add-line: #2ea04326;
+  --del-bg: #2d1214;
+  --del-line: #f8514926;
+  --accent: #2f81f7;
+  --must-fix: #f85149;
+  --suggestion: #d29922;
+  --nit: #8b949e;
+  --question: #a371f7;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+}
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.workspace-path {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40vw;
+}
+.target-chip {
+  background: var(--accent);
+  color: white;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.spacer {
+  flex: 1;
+}
+.inbox {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  overflow: hidden;
+}
+.diff-pane {
+  overflow: auto;
+  padding: 16px;
+}
+.thread-pane {
+  border-left: 1px solid var(--border);
+  overflow: auto;
+  padding: 16px;
+  background: var(--bg-elev);
+}
+
+.loading,
+.empty,
+.error,
+.thread-list-empty {
+  color: var(--muted);
+  padding: 24px;
+}
+.error {
+  color: var(--must-fix);
+}
+
+/* Diff */
+.file {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.file-path {
+  font-weight: 600;
+}
+.status {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.status-added,
+.status-untracked {
+  color: #3fb950;
+}
+.status-deleted {
+  color: var(--must-fix);
+}
+.status-renamed {
+  color: var(--question);
+}
+
+.hunk {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.hunk-header td {
+  background: #1c2333;
+  color: var(--muted);
+  padding: 2px 8px;
+}
+.line td {
+  padding: 0 8px;
+  vertical-align: top;
+}
+.ln {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+  padding-right: 8px !important;
+  border-right: 1px solid var(--border);
+}
+.code {
+  width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  position: relative;
+}
+.line-add {
+  background: var(--add-bg);
+}
+.line-add .code {
+  background: var(--add-line);
+}
+.line-del {
+  background: var(--del-bg);
+}
+.line-del .code {
+  background: var(--del-line);
+}
+.sigil {
+  display: inline-block;
+  width: 1ch;
+  color: var(--muted);
+}
+.comment-btn {
+  position: absolute;
+  left: -2px;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  line-height: 1;
+}
+.line:hover .comment-btn {
+  opacity: 1;
+}
+
+/* Inline thread + comment form */
+.inline-thread,
+.comment-form {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  font-family: -apple-system, sans-serif;
+  font-size: 13px;
+}
+.inline-thread .comment {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+.author {
+  color: var(--muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.comment-form textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.comment-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.comment-form select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+button.primary,
+button.ghost {
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+button.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+button.ghost {
+  background: transparent;
+  color: var(--text);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sev {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--border);
+}
+
+/* Thread list */
+.thread-list h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.thread-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--bg);
+}
+.thread-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.thread-card .loc {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-badge {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.status-open {
+  color: #3fb950;
+}
+.status-resolved {
+  color: var(--muted);
+}
+.status-dismissed {
+  color: var(--muted);
+}
+.thread-card-more {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Status filter bar */
+.filter-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.filter {
+  flex: 1;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+.filter.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* Thread conversation controls */
+.thread-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.thread-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.reply-form textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.thread-card .inline-thread {
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+}

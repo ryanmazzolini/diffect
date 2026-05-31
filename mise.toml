@@ -1,0 +1,8 @@
+[tools]
+node = "24.15.0"
+pnpm = "11.2.2"
+
+[env]
+# Keep the daemon bound to localhost by default; override per-workspace when
+# remote (Tailscale) review is intentional.
+DIFFECTD_HOST = "127.0.0.1"
