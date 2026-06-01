@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from "node:fs";
+import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import type { ServerResponse } from "node:http";
 import { reviewsDir } from "./reviews/event-log.js";
 import type { Workspace } from "./workspace.js";
@@ -28,8 +28,16 @@ export class EventHub {
     if (this.started) return;
     this.started = true;
 
-    // Review store: any write under .reviews/ means threads changed.
-    this.addWatch(reviewsDir(this.ws.root), () => this.emit("thread.changed"));
+    // Review store: any write under .reviews/ means threads changed. Create the
+    // dir first so the watch attaches even before the first comment is written
+    // (fs.watch can't watch a path that doesn't exist yet).
+    const reviews = reviewsDir(this.ws.root);
+    try {
+      mkdirSync(reviews, { recursive: true });
+    } catch {
+      /* best effort; the worktree watch is a fallback */
+    }
+    this.addWatch(reviews, () => this.emit("thread.changed"));
 
     // Worktrees: a source change may change the diff. Recursive watch covers
     // nested files; git's own writes under .git are filtered out below.

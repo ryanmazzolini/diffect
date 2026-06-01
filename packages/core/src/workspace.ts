@@ -128,34 +128,46 @@ async function groupIntoRepos(treeRoots: string[]): Promise<DiscoveredRepo[]> {
     byCommonDir.get(key)!.push({ name: basename(treeRoot), root: treeRoot });
   }
 
-  return order.map((key) => {
+  const repos = order.map((key) => {
     const worktrees = byCommonDir.get(key)!;
     // The primary worktree is the one whose .git is a real dir (commonDir lives
     // inside it); fall back to the first discovered.
     const primary =
       worktrees.find((w) => resolve(w.root, ".git") === key) ?? worktrees[0]!;
     return {
-      name: repoName(workspaceRoot, primary.root, worktrees),
+      name: basename(primary.root),
       root: primary.root,
       commonDir: key,
       worktrees,
     };
   });
+  return dedupeNames(repos);
 }
 
 /**
- * A stable, URL-safe repo name. Prefer the common-dir's parent basename (stable
- * across worktrees); fall back to the primary worktree's basename.
+ * Ensure repo names are unique and URL-safe. Two repos can share a directory
+ * basename (e.g. `frontend/api` and `backend/api`); without disambiguation the
+ * second is unreachable — findRepo returns the first match and threads would
+ * re-anchor against the wrong repo. Collisions get a parent-dir-qualified name,
+ * then a numeric suffix, applied in discovery order so names are deterministic.
  */
-function repoName(
-  workspaceRoot: string,
-  primaryRoot: string,
-  worktrees: DiscoveredWorktree[],
-): string {
-  if (worktrees.length === 1) return basename(primaryRoot);
-  // Multiple worktrees: strip a common trailing suffix so e.g.
-  // "api-main" / "api-feature" → "api" when possible, else use the primary.
-  return basename(primaryRoot);
+function dedupeNames(repos: DiscoveredRepo[]): DiscoveredRepo[] {
+  const counts = new Map<string, number>();
+  for (const r of repos) counts.set(r.name, (counts.get(r.name) ?? 0) + 1);
+
+  const taken = new Set<string>();
+  for (const r of repos) {
+    if ((counts.get(r.name) ?? 0) <= 1) {
+      taken.add(r.name);
+      continue;
+    }
+    const parent = basename(resolve(r.root, ".."));
+    let chosen = `${parent}-${r.name}`;
+    for (let i = 2; taken.has(chosen); i++) chosen = `${r.name}-${i}`;
+    r.name = chosen;
+    taken.add(chosen);
+  }
+  return repos;
 }
 
 /** Look up one repo in the workspace by its name. */
