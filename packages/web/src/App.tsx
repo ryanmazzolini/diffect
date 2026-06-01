@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RepoDiff, Thread, ThreadStatus, WorkspaceInfo } from "@diffect/shared";
 import { api } from "./api.js";
 import { DiffView } from "./components/DiffView.js";
@@ -20,20 +20,29 @@ export function App() {
 
   const currentRepo = workspace?.repos.find((r) => r.name === repo) ?? null;
 
+  // Monotonic tokens so a slow response can never overwrite a newer one — a
+  // burst of SSE events or a selector change must always land last-issued-wins.
+  const threadSeq = useRef(0);
+  const diffSeq = useRef(0);
+
   const refreshThreads = useCallback(async () => {
+    const seq = ++threadSeq.current;
     try {
-      setThreads(await api.threads());
+      const next = await api.threads();
+      if (seq === threadSeq.current) setThreads(next);
     } catch (e) {
-      setError(String(e));
+      if (seq === threadSeq.current) setError(String(e));
     }
   }, []);
 
   const refreshDiff = useCallback(async () => {
     if (!repo) return;
+    const seq = ++diffSeq.current;
     try {
-      setDiff(await api.diff(repo, { worktree, target }));
+      const next = await api.diff(repo, { worktree, target });
+      if (seq === diffSeq.current) setDiff(next);
     } catch (e) {
-      setError(String(e));
+      if (seq === diffSeq.current) setError(String(e));
     }
   }, [repo, worktree, target]);
 
@@ -57,13 +66,18 @@ export function App() {
     refreshDiff();
   }, [refreshDiff]);
 
-  // Live updates: re-fetch the affected panel when the daemon reports a change.
+  // Live updates: subscribe to the daemon's SSE stream exactly once and route
+  // events to the *latest* refreshers via a ref. Re-subscribing whenever a
+  // selector changed would tear the EventSource down and drop events that fire
+  // during the reconnect gap.
+  const refreshers = useRef({ refreshThreads, refreshDiff });
+  refreshers.current = { refreshThreads, refreshDiff };
   useEffect(() => {
     return api.subscribe((type) => {
-      if (type === "thread.changed") refreshThreads();
-      else if (type === "diff.changed") refreshDiff();
+      if (type === "thread.changed") refreshers.current.refreshThreads();
+      else if (type === "diff.changed") refreshers.current.refreshDiff();
     });
-  }, [refreshThreads, refreshDiff]);
+  }, []);
 
   if (error) {
     return (

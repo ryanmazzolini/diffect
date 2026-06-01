@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { promisify } from "node:util";
-import { isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 const run = promisify(execFile);
 
@@ -55,13 +56,36 @@ export async function openInEditor(
   const spec = EDITORS[editor as EditorName];
   if (!spec) throw new UnknownEditorError(`unsupported editor: ${editor}`);
 
-  const root = resolve(repoRoot);
-  const abs = resolve(root, file);
+  // Resolve symlinks on both the repo root and the target so an in-repo symlink
+  // (link -> /etc) can't smuggle the resolved path outside the repo. The target
+  // file may not exist on disk, so realpath the deepest existing ancestor and
+  // re-append the remainder.
+  const root = realpathSafe(resolve(repoRoot));
+  const abs = realpathSafe(resolve(root, file));
   const rel = relative(root, abs);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
     throw new PathEscapeError(`path escapes repo: ${file}`);
   }
 
   const safeLine = Number.isFinite(line) ? Math.max(1, Math.floor(line)) : 1;
   await run(spec.probe, spec.args(abs, safeLine));
+}
+
+/**
+ * realpath that tolerates a non-existent leaf: resolve the longest existing
+ * prefix (following symlinks) and re-attach the part that doesn't exist yet.
+ */
+function realpathSafe(p: string): string {
+  let head = p;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return tail.length ? resolve(realpathSync(head), ...tail) : realpathSync(head);
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return p; // reached the root without resolving
+      tail.unshift(head.slice(parent.length + 1));
+      head = parent;
+    }
+  }
 }

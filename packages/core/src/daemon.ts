@@ -24,7 +24,12 @@ import {
 } from "./reviews/event-log.js";
 import { loadRefreshedThreads } from "./reviews/refresh.js";
 import { EventHub } from "./events.js";
-import { detectEditors, openInEditor, UnknownEditorError } from "./editor.js";
+import {
+  detectEditors,
+  openInEditor,
+  PathEscapeError,
+  UnknownEditorError,
+} from "./editor.js";
 import {
   discoverWorkspace,
   findRepo,
@@ -202,7 +207,9 @@ async function handle(
       await openInEditor(treeRoot, body.file, body.line, body.editor);
       return sendJson(res, 200, { ok: true });
     } catch (err) {
-      if (err instanceof UnknownEditorError) {
+      // Bad input (unsupported editor, path escaping the repo) is a 400, not a
+      // server error.
+      if (err instanceof UnknownEditorError || err instanceof PathEscapeError) {
         return sendJson(res, 400, { error: err.message });
       }
       throw err;
