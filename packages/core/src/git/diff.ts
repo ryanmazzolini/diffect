@@ -114,7 +114,16 @@ async function untrackedFiles(repoRoot: string): Promise<string[]> {
   return stdout
     .split("\n")
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((p) => !isReviewStorePath(p));
+}
+
+/**
+ * Diffect's own review store lives in `.reviews/`. When it's not gitignored it
+ * would otherwise surface as untracked "code" in the work diff — never show it.
+ */
+function isReviewStorePath(path: string): boolean {
+  return path === ".reviews" || path.startsWith(".reviews/");
 }
 
 async function syntheticAddedFile(

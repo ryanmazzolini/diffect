@@ -68,6 +68,21 @@ describe("computeWorkDiff (work target)", () => {
     const diff = await computeWorkDiff(dir);
     expect(diff.files.map((f) => f.path)).toContain("sub/a.txt");
   });
+
+  it("never surfaces the .reviews/ store as untracked work", async () => {
+    await init(dir);
+    await writeFile(join(dir, "a.txt"), "x\n");
+    await git(dir, ["add", "."]);
+    await git(dir, ["commit", "-m", "base"]);
+    // A real source change plus a (non-gitignored) review store write.
+    await writeFile(join(dir, "a.txt"), "X\n");
+    await mkdir(join(dir, ".reviews"), { recursive: true });
+    await writeFile(join(dir, ".reviews", "threads.jsonl"), "{}\n");
+
+    const paths = (await computeWorkDiff(dir)).files.map((f) => f.path);
+    expect(paths).toContain("a.txt");
+    expect(paths.some((p) => p.startsWith(".reviews"))).toBe(false);
+  });
 });
 
 describe("parseUnifiedDiff", () => {

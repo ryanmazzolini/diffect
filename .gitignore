@@ -6,3 +6,8 @@ web/dist/
 .DS_Store
 .reviews/
 .claude/
+
+# Playwright
+test-results/
+playwright-report/
+packages/e2e/screenshots/

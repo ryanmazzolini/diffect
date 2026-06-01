@@ -246,6 +246,11 @@ body {
   font-weight: 600;
   flex-shrink: 0;
 }
+.inline-thread .body {
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .comment-form textarea {
   width: 100%;
   min-height: 56px;
