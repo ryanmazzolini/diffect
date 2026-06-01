@@ -1,8 +1,7 @@
-import type { DiffFile, RepoDiff, ReviewTarget } from "@diffect/shared";
-import { git } from "./exec.js";
+import type { RepoDiff, ReviewTarget } from "@diffect/shared";
 import {
   computeWorkDiff,
-  parseUnifiedDiff,
+  gitDiff,
   resolveWorkBase,
   syntheticUntrackedDiffs,
 } from "./diff.js";
@@ -42,50 +41,32 @@ export async function computeTargetDiff(
     case "work":
       return computeWorkDiff(repoRoot);
 
-    case "staged": {
-      const files = await diffArgs(repoRoot, ["--cached"]);
-      return { repo: ".", target: target.spec, files };
-    }
+    case "staged":
+      return { target: target.spec, files: await gitDiff(repoRoot, ["--cached"]) };
 
     case "unstaged": {
       // Tracked worktree-vs-index changes, plus untracked files.
-      const tracked = await diffArgs(repoRoot, []);
+      const tracked = await gitDiff(repoRoot, []);
       const untracked = await syntheticUntrackedDiffs(repoRoot);
-      return { repo: ".", target: target.spec, files: [...tracked, ...untracked] };
+      return { target: target.spec, files: [...tracked, ...untracked] };
     }
 
     case "ref": {
       // <ref> vs working tree, plus untracked (mirrors `work` but against an
       // explicit ref instead of the merge-base).
-      const tracked = await diffArgs(repoRoot, [target.from!]);
+      const tracked = await gitDiff(repoRoot, [target.from!]);
       const untracked = await syntheticUntrackedDiffs(repoRoot);
-      return { repo: ".", target: target.spec, files: [...tracked, ...untracked] };
+      return { target: target.spec, files: [...tracked, ...untracked] };
     }
 
     case "range": {
-      // Pure commit range — no working tree, no untracked. Preserve dot count;
-      // three-dot is the symmetric (merge-base) comparison.
+      // Pure commit range — no working tree, no untracked. Preserve the dot
+      // count; three-dot is the symmetric (merge-base) comparison.
       const op = target.threeDot ? "..." : "..";
-      const files = await diffArgs(repoRoot, [`${target.from}${op}${target.to}`]);
-      return { repo: ".", target: target.spec, files };
+      const files = await gitDiff(repoRoot, [`${target.from}${op}${target.to}`]);
+      return { target: target.spec, files };
     }
   }
-}
-
-/** Run `git diff` with the given range/flags and parse the unified output. */
-async function diffArgs(repoRoot: string, args: string[]): Promise<DiffFile[]> {
-  const { stdout } = await git(repoRoot, [
-    "-c",
-    "core.quotePath=false",
-    "diff",
-    "--no-color",
-    "--no-ext-diff",
-    "--find-renames",
-    "--find-copies",
-    ...args,
-    "--",
-  ]);
-  return parseUnifiedDiff(stdout);
 }
 
 export { resolveWorkBase };

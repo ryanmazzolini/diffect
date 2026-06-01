@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DAEMON_EVENTS } from "@diffect/shared";
 import type { RepoDiff, Thread, ThreadStatus, WorkspaceInfo } from "@diffect/shared";
 import { api } from "./api.js";
 import { DiffView } from "./components/DiffView.js";
@@ -74,8 +75,8 @@ export function App() {
   refreshers.current = { refreshThreads, refreshDiff };
   useEffect(() => {
     return api.subscribe((type) => {
-      if (type === "thread.changed") refreshers.current.refreshThreads();
-      else if (type === "diff.changed") refreshers.current.refreshDiff();
+      if (type === DAEMON_EVENTS.threadChanged) refreshers.current.refreshThreads();
+      else if (type === DAEMON_EVENTS.diffChanged) refreshers.current.refreshDiff();
     });
   }, []);
 

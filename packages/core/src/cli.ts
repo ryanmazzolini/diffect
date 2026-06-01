@@ -10,7 +10,7 @@ import {
   UnknownThreadError,
 } from "./reviews/event-log.js";
 import { loadRefreshedThreads } from "./reviews/refresh.js";
-import { computeAnchor, readSideLines } from "./reviews/anchors.js";
+import { buildAnchor } from "./reviews/anchors.js";
 import { resolveWorkBase } from "./git/diff.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { discoverWorkspace, resolveRepoRoot } from "./workspace.js";
@@ -75,6 +75,15 @@ function now(): string {
 function fail(message: string): never {
   process.stderr.write(`diffect: ${message}\n`);
   process.exit(1);
+}
+
+/** Parse a 1-based line number, failing on non-integers (e.g. `--line abc`). */
+function positiveInt(value: string, flag: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    fail(`${flag} must be a positive integer, got "${value}"`);
+  }
+  return n;
 }
 
 function printThread(t: Thread): void {
@@ -180,14 +189,13 @@ async function cmdComment(argv: string[]): Promise<number> {
   const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
   if (!treeRoot) fail(`unknown worktree: ${worktree}`);
   const side = (flags.options.get("side") as Side) ?? "new";
-  const line = Number(lineStr);
+  const line = positiveInt(lineStr, "--line");
   const endLine = flags.options.has("end-line")
-    ? Number(flags.options.get("end-line"))
+    ? positiveInt(flags.options.get("end-line")!, "--end-line")
     : null;
   // Anchor against the file content at creation so the thread can survive edits.
   const base = await resolveWorkBase(treeRoot);
-  const sideLines = await readSideLines(treeRoot, file, side, base);
-  const anchor = sideLines ? computeAnchor(sideLines, line, endLine, base) : null;
+  const anchor = await buildAnchor(treeRoot, base, { file, side, line, endLine });
   const thread = await createThread(
     root,
     {

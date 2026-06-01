@@ -1,6 +1,8 @@
+import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
   AddCommentRequest,
   CreateThreadRequest,
+  DaemonEventType,
   DismissThreadRequest,
   OpenRequest,
   RepoDiff,
@@ -71,11 +73,11 @@ export const api = {
    * Subscribe to live daemon events; calls onChange with the event type.
    * Returns an unsubscribe function. EventSource auto-reconnects on drop.
    */
-  subscribe: (onChange: (type: string) => void): (() => void) => {
+  subscribe: (onChange: (type: DaemonEventType) => void): (() => void) => {
     const es = new EventSource("/events");
-    const handler = (e: Event) => onChange(e.type);
-    es.addEventListener("diff.changed", handler);
-    es.addEventListener("thread.changed", handler);
+    for (const type of Object.values(DAEMON_EVENTS)) {
+      es.addEventListener(type, () => onChange(type));
+    }
     return () => es.close();
   },
 };

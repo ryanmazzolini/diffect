@@ -9,11 +9,10 @@ import type {
   DismissThreadRequest,
   OpenRequest,
   ResolveThreadRequest,
-  ThreadAnchor,
 } from "@diffect/shared";
 import { resolveWorkBase } from "./git/diff.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
-import { computeAnchor, readSideLines } from "./reviews/anchors.js";
+import { buildAnchor } from "./reviews/anchors.js";
 import {
   addComment,
   createThread,
@@ -162,7 +161,8 @@ async function handle(
     if (!treeRoot) {
       return sendJson(res, 400, { error: `unknown worktree: ${body.worktree}` });
     }
-    const anchor = await buildAnchor(treeRoot, body);
+    const base = await resolveWorkBase(treeRoot);
+    const anchor = await buildAnchor(treeRoot, base, body);
     const thread = await createThread(ctx.ws.root, { ...body, anchor }, ctx.now());
     return sendJson(res, 201, thread);
   }
@@ -222,22 +222,6 @@ async function handle(
   }
 
   sendJson(res, 404, { error: "not found" });
-}
-
-/**
- * Build the durable anchor for a new thread from the current file content at
- * creation time. Returns null for general (non-line) threads or unreadable files.
- */
-async function buildAnchor(
-  repoRoot: string,
-  body: CreateThreadRequest,
-): Promise<ThreadAnchor | null> {
-  if (!body.file || body.line == null) return null;
-  const side = body.side ?? "new";
-  const base = await resolveWorkBase(repoRoot);
-  const lines = await readSideLines(repoRoot, body.file, side, base);
-  if (!lines) return null;
-  return computeAnchor(lines, body.line, body.endLine ?? null, base);
 }
 
 /** Run a thread mutation, mapping a missing thread to 404. */

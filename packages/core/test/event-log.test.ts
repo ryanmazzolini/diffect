@@ -141,4 +141,42 @@ describe("event log", () => {
     };
     expect(replay([good])).toHaveLength(1);
   });
+
+  it("applies a mutation that appears before its thread.created (merge reorder)", () => {
+    // A git merge can interleave appended lines so a comment.added lands above
+    // the thread.created it targets. Two-pass replay must still apply it.
+    const created = {
+      v: THREAD_SCHEMA_VERSION,
+      type: "thread.created" as const,
+      id: "th_x",
+      ts: "2026-05-31T12:00:00.000Z",
+      repo: "r",
+      worktree: null,
+      file: "a",
+      side: "new" as const,
+      line: 1,
+      endLine: null,
+      anchor: null,
+      severity: null,
+      author: { type: "user" as const },
+      body: "first",
+    };
+    const reply = {
+      v: THREAD_SCHEMA_VERSION,
+      type: "comment.added" as const,
+      ts: "2026-05-31T12:01:00.000Z",
+      thread: "th_x",
+      commentId: "c_1",
+      author: { type: "agent" as const, name: "pi" },
+      body: "reply before create in the log",
+    };
+    // reply is listed BEFORE created.
+    const [t] = replay([reply, created]);
+    expect(t!.comments.map((c) => c.body)).toEqual([
+      "first",
+      "reply before create in the log",
+    ]);
+    // updatedAt reflects the later event even though it came first in the array.
+    expect(t!.updatedAt).toBe("2026-05-31T12:01:00.000Z");
+  });
 });

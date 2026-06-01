@@ -68,11 +68,9 @@ export async function computeWorkDiff(repoRoot: string): Promise<RepoDiff> {
 
   const untrackedDiffs = await syntheticUntrackedDiffs(repoRoot);
 
-  return {
-    repo: ".",
-    target: "work",
-    files: [...tracked, ...untrackedDiffs],
-  };
+  // `repo`/`worktree` are stamped by the caller (daemon/CLI) that knows the
+  // workspace identity; the git layer only produces target + files.
+  return { target: "work", files: [...tracked, ...untrackedDiffs] };
 }
 
 /** Build synthetic all-added diffs for every untracked, non-ignored file. */
@@ -86,12 +84,17 @@ export async function syntheticUntrackedDiffs(
   return diffs.filter((f): f is DiffFile => !!f);
 }
 
-async function diffAgainst(repoRoot: string, base: string): Promise<DiffFile[]> {
-  // Diff base..worktree. No --cached, so unstaged changes are included; base is
-  // a commit, so committed-since-base is included too.
+/**
+ * Run `git diff` with Diffect's canonical flags and parse the unified output.
+ * The flags are correctness-load-bearing — core.quotePath=false keeps non-ASCII
+ * paths literal, and rename/copy detection feeds the parser — so every diff in
+ * the app goes through here rather than re-listing them.
+ */
+export async function gitDiff(
+  repoRoot: string,
+  args: string[],
+): Promise<DiffFile[]> {
   const { stdout } = await git(repoRoot, [
-    // core.quotePath=false keeps non-ASCII paths literal rather than C-quoting
-    // them, so the parser sees real UTF-8 filenames.
     "-c",
     "core.quotePath=false",
     "diff",
@@ -99,10 +102,16 @@ async function diffAgainst(repoRoot: string, base: string): Promise<DiffFile[]> 
     "--no-ext-diff",
     "--find-renames",
     "--find-copies",
-    base,
+    ...args,
     "--",
   ]);
   return parseUnifiedDiff(stdout);
+}
+
+function diffAgainst(repoRoot: string, base: string): Promise<DiffFile[]> {
+  // base..worktree: no --cached, so unstaged changes are included, and base is a
+  // commit, so committed-since-base is included too.
+  return gitDiff(repoRoot, [base]);
 }
 
 async function untrackedFiles(repoRoot: string): Promise<string[]> {

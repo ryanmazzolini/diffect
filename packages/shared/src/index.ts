@@ -5,6 +5,17 @@
 /** Current schema version for the threads.jsonl event log. */
 export const THREAD_SCHEMA_VERSION = 1 as const;
 
+/**
+ * Server-sent event types the daemon broadcasts over `GET /events` and the
+ * browser subscribes to. Shared so a rename can't silently break the live
+ * connection between daemon and SPA.
+ */
+export const DAEMON_EVENTS = {
+  diffChanged: "diff.changed",
+  threadChanged: "thread.changed",
+} as const;
+export type DaemonEventType = (typeof DAEMON_EVENTS)[keyof typeof DAEMON_EVENTS];
+
 export type DiffLineType = "context" | "add" | "del";
 export type Side = "old" | "new";
 
@@ -44,7 +55,9 @@ export interface DiffFile {
 }
 
 export interface RepoDiff {
-  repo: string;
+  /** Stamped by the daemon/CLI that knows the workspace; absent from the raw
+   * git-layer result. */
+  repo?: string;
   worktree?: string | null;
   target: string;
   files: DiffFile[];

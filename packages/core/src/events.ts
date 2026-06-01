@@ -1,10 +1,10 @@
 import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import type { ServerResponse } from "node:http";
+import { DAEMON_EVENTS, type DaemonEventType } from "@diffect/shared";
 import { reviewsDir } from "./reviews/event-log.js";
 import type { Workspace } from "./workspace.js";
 
-/** Server-sent event types the browser subscribes to. */
-export type DaemonEventType = "diff.changed" | "thread.changed";
+export type { DaemonEventType };
 
 /**
  * Watches the workspace's worktrees and `.reviews/` and fans filesystem changes
@@ -37,7 +37,7 @@ export class EventHub {
     } catch {
       /* best effort; the worktree watch is a fallback */
     }
-    this.addWatch(reviews, () => this.emit("thread.changed"));
+    this.addWatch(reviews, () => this.emit(DAEMON_EVENTS.threadChanged));
 
     // Worktrees: a source change may change the diff. Recursive watch covers
     // nested files; git's own writes under .git are filtered out below.
@@ -45,7 +45,7 @@ export class EventHub {
       for (const wt of repo.worktrees) {
         this.addWatch(wt.root, (filename) => {
           if (isIgnoredPath(filename)) return;
-          this.emit("diff.changed");
+          this.emit(DAEMON_EVENTS.diffChanged);
         });
       }
     }

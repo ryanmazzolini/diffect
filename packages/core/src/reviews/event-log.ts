@@ -190,66 +190,60 @@ export async function loadThreads(workspaceRoot: string): Promise<Thread[]> {
   return replay(await readEvents(workspaceRoot));
 }
 
-export async function loadThread(
-  workspaceRoot: string,
-  threadId: string,
-): Promise<Thread | undefined> {
-  return replay(await readEvents(workspaceRoot)).find((t) => t.id === threadId);
-}
-
 /**
- * Deterministically reconstruct threads from an ordered event stream. Events for
- * an unknown thread are ignored, so a truncated/partial log still replays.
+ * Deterministically reconstruct threads from an event stream. Two passes so the
+ * log stays merge-friendly: all `thread.created` events are applied first, then
+ * mutations — a `comment.added`/`resolved`/`dismissed` that happens to sit
+ * before its `thread.created` (e.g. after a git merge reorders lines) is still
+ * applied rather than dropped. Mutations for a genuinely-absent thread are
+ * ignored, so a truncated/partial log still replays.
  */
 export function replay(events: ThreadEvent[]): Thread[] {
   const byId = new Map<string, Thread>();
+
+  // Pass 1: create every thread.
   for (const e of events) {
+    if (e.type !== "thread.created") continue;
+    byId.set(e.id, {
+      id: e.id,
+      repo: e.repo,
+      worktree: e.worktree,
+      file: e.file,
+      side: e.side,
+      line: e.line,
+      endLine: e.endLine,
+      anchor: e.anchor,
+      severity: e.severity,
+      status: "open",
+      anchorState: "active",
+      comments: [
+        { id: genCommentId(e.id, 0), author: e.author, body: e.body, ts: e.ts },
+      ],
+      createdAt: e.ts,
+      updatedAt: e.ts,
+    });
+  }
+
+  // Pass 2: apply comments and status changes in log order.
+  for (const e of events) {
+    if (e.type === "thread.created") continue;
+    const t = byId.get(e.thread);
+    if (!t) continue;
     switch (e.type) {
-      case "thread.created": {
-        byId.set(e.id, {
-          id: e.id,
-          repo: e.repo,
-          worktree: e.worktree,
-          file: e.file,
-          side: e.side,
-          line: e.line,
-          endLine: e.endLine,
-          anchor: e.anchor,
-          severity: e.severity,
-          status: "open",
-          anchorState: "active",
-          comments: [
-            { id: genCommentId(e.id, 0), author: e.author, body: e.body, ts: e.ts },
-          ],
-          createdAt: e.ts,
-          updatedAt: e.ts,
-        });
-        break;
-      }
-      case "comment.added": {
-        const t = byId.get(e.thread);
-        if (!t) break;
+      case "comment.added":
         t.comments.push({ id: e.commentId, author: e.author, body: e.body, ts: e.ts });
-        t.updatedAt = e.ts;
         break;
-      }
-      case "thread.resolved": {
-        const t = byId.get(e.thread);
-        if (!t) break;
+      case "thread.resolved":
         t.status = "resolved";
         appendStatusNote(t, e.author, e.summary, e.ts);
-        t.updatedAt = e.ts;
         break;
-      }
-      case "thread.dismissed": {
-        const t = byId.get(e.thread);
-        if (!t) break;
+      case "thread.dismissed":
         t.status = "dismissed";
         appendStatusNote(t, e.author, e.reason, e.ts);
-        t.updatedAt = e.ts;
         break;
-      }
     }
+    // updatedAt tracks the latest event time, never moving backward.
+    if (e.ts > t.updatedAt) t.updatedAt = e.ts;
   }
   return [...byId.values()];
 }
