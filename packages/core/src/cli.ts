@@ -118,16 +118,25 @@ function requireRepo(
   );
 }
 
-/** Resolve the (repo, worktree, working-tree root) a command targets from flags. */
-async function resolveTarget(
-  flags: Flags,
-): Promise<{ repo: { name: string }; worktree: string | null; treeRoot: string }> {
+/**
+ * Resolve what a command targets from flags:
+ *  - `treeRoot`: the selected worktree's working-tree root (for diff/anchoring),
+ *  - `storeRoot`: the repo's PRIMARY root, which keys the central review store so
+ *    all worktrees of a repo share one log (threads carry the worktree name).
+ */
+async function resolveTarget(flags: Flags): Promise<{
+  repo: { name: string };
+  worktree: string | null;
+  treeRoot: string;
+  storeRoot: string;
+}> {
   const ws = await discoverWorkspace(await resolveWorkspaceRoot(process.cwd()));
   const repo = requireRepo(ws, flags);
   const worktree = flags.options.get("worktree") ?? null;
   const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
   if (!treeRoot) fail(`unknown worktree: ${worktree}`);
-  return { repo, worktree, treeRoot };
+  const storeRoot = resolveRepoRoot(ws, repo.name, null)!; // primary always exists
+  return { repo, worktree, treeRoot, storeRoot };
 }
 
 // --- commands --------------------------------------------------------------
@@ -194,7 +203,7 @@ async function cmdComment(argv: string[]): Promise<number> {
   if (!file) fail("--file is required");
   if (!lineStr) fail("--line is required");
   if (!body) fail("--body is required");
-  const { repo, worktree, treeRoot } = await resolveTarget(flags);
+  const { repo, worktree, treeRoot, storeRoot } = await resolveTarget(flags);
   const side = (flags.options.get("side") as Side) ?? "new";
   const line = positiveInt(lineStr, "--line");
   const endLine = flags.options.has("end-line")
@@ -204,7 +213,7 @@ async function cmdComment(argv: string[]): Promise<number> {
   const base = await resolveWorkBase(treeRoot);
   const anchor = await buildAnchor(treeRoot, base, { file, side, line, endLine });
   const thread = await createThread(
-    treeRoot,
+    storeRoot,
     {
       repo: repo.name,
       worktree,
@@ -227,9 +236,9 @@ async function cmdGeneral(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const body = flags.options.get("body");
   if (!body) fail("--body is required");
-  const { repo, worktree, treeRoot } = await resolveTarget(flags);
+  const { repo, worktree, storeRoot } = await resolveTarget(flags);
   const thread = await createThread(
-    treeRoot,
+    storeRoot,
     {
       repo: repo.name,
       worktree,

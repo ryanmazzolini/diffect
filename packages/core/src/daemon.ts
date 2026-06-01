@@ -166,8 +166,9 @@ async function handle(
     }
     const base = await resolveWorkBase(treeRoot);
     const anchor = await buildAnchor(treeRoot, base, body);
-    // Store keyed by repo root (treeRoot), not the workspace root.
-    const thread = await createThread(treeRoot, { ...body, anchor }, ctx.now());
+    // The store is keyed by the repo's PRIMARY root so all worktrees share one
+    // log (the worktree name lives on the thread); treeRoot is only for anchoring.
+    const thread = await createThread(repo.root, { ...body, anchor }, ctx.now());
     return sendJson(res, 201, thread);
   }
 
