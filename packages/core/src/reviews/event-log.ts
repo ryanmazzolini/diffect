@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import {
   THREAD_EVENT_TYPES,
   THREAD_SCHEMA_VERSION,
@@ -13,15 +13,13 @@ import {
   type ThreadEvent,
 } from "@diffect/shared";
 import { genId } from "./ids.js";
+import { threadsLogPath } from "../store/paths.js";
+import { migrateLegacyStore } from "../store/migrate.js";
 
-/** Location of the canonical review store inside a workspace. */
-export function reviewsDir(workspaceRoot: string): string {
-  return join(workspaceRoot, ".reviews");
-}
-
-export function threadsLogPath(workspaceRoot: string): string {
-  return join(reviewsDir(workspaceRoot), "threads.jsonl");
-}
+// The canonical review store now lives in a central per-user location keyed by
+// repo root (see ../store/paths.ts), not in an in-tree `.reviews/`. Re-export so
+// callers and tests keep one import site for the log path.
+export { threadsLogPath };
 
 /** Raised when an event targets a thread that does not exist. */
 export class UnknownThreadError extends Error {
@@ -32,12 +30,12 @@ export class UnknownThreadError extends Error {
 }
 
 /**
- * Append a `thread.created` event and return the resulting thread. Creates
- * `.reviews/threads.jsonl` on first write. The file is the source of truth, so
- * this works whether or not the daemon is running.
+ * Append a `thread.created` event and return the resulting thread. Creates the
+ * repo's central log on first write. The file is the source of truth, so this
+ * works whether or not the daemon is running.
  */
 export async function createThread(
-  workspaceRoot: string,
+  repoRoot: string,
   req: CreateThreadRequest,
   now: string,
 ): Promise<Thread> {
@@ -57,18 +55,18 @@ export async function createThread(
     author: req.author ?? { type: "user" },
     body: req.body,
   };
-  await appendEvent(workspaceRoot, event);
+  await appendEvent(repoRoot, event);
   return requireThread(replay([event]), event.id);
 }
 
 /** Append a reply to an existing thread and return the updated thread. */
 export async function addComment(
-  workspaceRoot: string,
+  repoRoot: string,
   threadId: string,
   req: AddCommentRequest,
   now: string,
 ): Promise<Thread> {
-  const events = await readEvents(workspaceRoot);
+  const events = await readEvents(repoRoot);
   requireThread(replay(events), threadId); // validate existence before writing
   const event: ThreadEvent = {
     v: THREAD_SCHEMA_VERSION,
@@ -79,17 +77,17 @@ export async function addComment(
     author: req.author ?? { type: "user" },
     body: req.body,
   };
-  await appendEvent(workspaceRoot, event);
+  await appendEvent(repoRoot, event);
   return requireThread(replay([...events, event]), threadId);
 }
 
 export async function resolveThread(
-  workspaceRoot: string,
+  repoRoot: string,
   threadId: string,
   req: ResolveThreadRequest,
   now: string,
 ): Promise<Thread> {
-  const events = await readEvents(workspaceRoot);
+  const events = await readEvents(repoRoot);
   requireThread(replay(events), threadId);
   const event: ThreadEvent = {
     v: THREAD_SCHEMA_VERSION,
@@ -99,17 +97,17 @@ export async function resolveThread(
     author: req.author ?? { type: "user" },
     summary: req.summary ?? null,
   };
-  await appendEvent(workspaceRoot, event);
+  await appendEvent(repoRoot, event);
   return requireThread(replay([...events, event]), threadId);
 }
 
 export async function dismissThread(
-  workspaceRoot: string,
+  repoRoot: string,
   threadId: string,
   req: DismissThreadRequest,
   now: string,
 ): Promise<Thread> {
-  const events = await readEvents(workspaceRoot);
+  const events = await readEvents(repoRoot);
   requireThread(replay(events), threadId);
   const event: ThreadEvent = {
     v: THREAD_SCHEMA_VERSION,
@@ -119,28 +117,46 @@ export async function dismissThread(
     author: req.author ?? { type: "user" },
     reason: req.reason ?? null,
   };
-  await appendEvent(workspaceRoot, event);
+  await appendEvent(repoRoot, event);
   return requireThread(replay([...events, event]), threadId);
 }
 
 async function appendEvent(
-  workspaceRoot: string,
+  repoRoot: string,
   event: ThreadEvent,
 ): Promise<void> {
-  const path = threadsLogPath(workspaceRoot);
+  // Fold a legacy in-tree store into the central log before the first write so
+  // appends never split history across two locations.
+  await migrateLegacyStore(repoRoot);
+  const path = threadsLogPath(repoRoot);
   await mkdir(dirname(path), { recursive: true });
   await appendFile(path, JSON.stringify(event) + "\n", "utf8");
 }
 
-/** Read and parse every event from the log, skipping blank/corrupt lines. */
-export async function readEvents(workspaceRoot: string): Promise<ThreadEvent[]> {
-  let raw: string;
+/**
+ * Read the raw log text, folding in a legacy in-tree store on a first miss.
+ * Returns null when no log exists yet (so the repo simply has no threads).
+ */
+async function readLogRaw(repoRoot: string): Promise<string | null> {
   try {
-    raw = await readFile(threadsLogPath(workspaceRoot), "utf8");
+    return await readFile(threadsLogPath(repoRoot), "utf8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  // A missing central log may predate migration; attempt it once, then re-read.
+  await migrateLegacyStore(repoRoot);
+  try {
+    return await readFile(threadsLogPath(repoRoot), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
+}
+
+/** Read and parse every event from the log, skipping blank/corrupt lines. */
+export async function readEvents(repoRoot: string): Promise<ThreadEvent[]> {
+  const raw = await readLogRaw(repoRoot);
+  if (raw === null) return [];
   const events: ThreadEvent[] = [];
   const lines = raw.split("\n");
   // The last non-empty line is the only place a partial write can land (a crash
@@ -161,7 +177,7 @@ export async function readEvents(workspaceRoot: string): Promise<ThreadEvent[]> 
       events.push(parsed);
     } else if (i !== lastNonEmpty) {
       process.stderr.write(
-        `diffect: skipping unparseable event at ${threadsLogPath(workspaceRoot)}:${i + 1}\n`,
+        `diffect: skipping unparseable event at ${threadsLogPath(repoRoot)}:${i + 1}\n`,
       );
     }
   }
@@ -186,8 +202,8 @@ function parseEvent(line: string): ThreadEvent | null {
 }
 
 /** Load all threads by replaying the event log. */
-export async function loadThreads(workspaceRoot: string): Promise<Thread[]> {
-  return replay(await readEvents(workspaceRoot));
+export async function loadThreads(repoRoot: string): Promise<Thread[]> {
+  return replay(await readEvents(repoRoot));
 }
 
 /**

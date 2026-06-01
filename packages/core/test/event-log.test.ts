@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 describe("event log", () => {
-  it("creates .reviews/threads.jsonl on first write and round-trips", async () => {
+  it("creates the central threads log on first write and round-trips", async () => {
     const created = await createThread(
       dir,
       {

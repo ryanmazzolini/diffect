@@ -28,7 +28,7 @@ afterEach(async () => {
  * daemon conceptually stopped, the CLI's file store sees it.
  */
 describe("daemon → file store round trip", () => {
-  it("POST /threads writes to .reviews/ that loadThreads (CLI path) then reads", async () => {
+  it("POST /threads writes the central store that loadThreads (CLI path) then reads", async () => {
     const server = await createServer({
       workspacePath: dir,
       now: () => "2026-05-31T12:00:00.000Z",

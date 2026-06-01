@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { Author, Severity, Side, Thread, ThreadStatus } from "@diffect/shared";
 import {
   addComment,
@@ -9,7 +8,10 @@ import {
   resolveThread,
   UnknownThreadError,
 } from "./reviews/event-log.js";
-import { loadRefreshedThreads } from "./reviews/refresh.js";
+import {
+  findRepoRootForThread,
+  loadRefreshedThreads,
+} from "./reviews/refresh.js";
 import { buildAnchor } from "./reviews/anchors.js";
 import { resolveWorkBase } from "./git/diff.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
@@ -19,21 +21,24 @@ import { gitTry } from "./git/exec.js";
 // --- shared helpers --------------------------------------------------------
 
 /**
- * Resolve the workspace root the CLI operates on. Walk up from cwd looking for
- * an existing `.reviews/` directory (the canonical store); if none exists yet,
- * fall back to the git working-tree root so the first write lands beside the
- * code under review.
+ * Resolve the workspace root the CLI operates on: the git working-tree root of
+ * cwd, falling back to cwd itself. Review data lives in the central store keyed
+ * by repo root (see store/paths.ts), not beside the code.
  */
 async function resolveWorkspaceRoot(start: string): Promise<string> {
-  let dir = resolve(start);
-  for (;;) {
-    if (existsSync(resolve(dir, ".reviews"))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
   const top = await gitTry(start, ["rev-parse", "--show-toplevel"]);
   return top ? resolve(top) : resolve(start);
+}
+
+/**
+ * Resolve which repo's central store owns a thread id (for reply/resolve/dismiss,
+ * which carry only an id). Discovers the workspace from cwd, then scans repos.
+ */
+async function requireThreadRepoRoot(id: string): Promise<string> {
+  const ws = await discoverWorkspace(await resolveWorkspaceRoot(process.cwd()));
+  const repoRoot = await findRepoRootForThread(ws, id);
+  if (!repoRoot) fail(`unknown thread: ${id}`);
+  return repoRoot;
 }
 
 interface Flags {
@@ -113,6 +118,18 @@ function requireRepo(
   );
 }
 
+/** Resolve the (repo, worktree, working-tree root) a command targets from flags. */
+async function resolveTarget(
+  flags: Flags,
+): Promise<{ repo: { name: string }; worktree: string | null; treeRoot: string }> {
+  const ws = await discoverWorkspace(await resolveWorkspaceRoot(process.cwd()));
+  const repo = requireRepo(ws, flags);
+  const worktree = flags.options.get("worktree") ?? null;
+  const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
+  if (!treeRoot) fail(`unknown worktree: ${worktree}`);
+  return { repo, worktree, treeRoot };
+}
+
 // --- commands --------------------------------------------------------------
 
 async function cmdList(argv: string[]): Promise<number> {
@@ -149,12 +166,7 @@ async function cmdList(argv: string[]): Promise<number> {
 
 async function cmdDiff(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set(["json"]));
-  const worktree = flags.options.get("worktree") ?? null;
-  const root = await resolveWorkspaceRoot(process.cwd());
-  const ws = await discoverWorkspace(root);
-  const repo = requireRepo(ws, flags);
-  const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
-  if (!treeRoot) fail(`unknown worktree: ${worktree}`);
+  const { repo, worktree, treeRoot } = await resolveTarget(flags);
   const target = normalizeTarget(flags.options.get("target"));
   const diff = await computeTargetDiff(treeRoot, target);
 
@@ -182,12 +194,7 @@ async function cmdComment(argv: string[]): Promise<number> {
   if (!file) fail("--file is required");
   if (!lineStr) fail("--line is required");
   if (!body) fail("--body is required");
-  const root = await resolveWorkspaceRoot(process.cwd());
-  const ws = await discoverWorkspace(root);
-  const repo = requireRepo(ws, flags);
-  const worktree = flags.options.get("worktree") ?? null;
-  const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
-  if (!treeRoot) fail(`unknown worktree: ${worktree}`);
+  const { repo, worktree, treeRoot } = await resolveTarget(flags);
   const side = (flags.options.get("side") as Side) ?? "new";
   const line = positiveInt(lineStr, "--line");
   const endLine = flags.options.has("end-line")
@@ -197,7 +204,7 @@ async function cmdComment(argv: string[]): Promise<number> {
   const base = await resolveWorkBase(treeRoot);
   const anchor = await buildAnchor(treeRoot, base, { file, side, line, endLine });
   const thread = await createThread(
-    root,
+    treeRoot,
     {
       repo: repo.name,
       worktree,
@@ -220,15 +227,12 @@ async function cmdGeneral(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const body = flags.options.get("body");
   if (!body) fail("--body is required");
-  const root = await resolveWorkspaceRoot(process.cwd());
-  const repoName =
-    flags.options.get("repo") ?? (await discoverWorkspace(root)).repos[0]?.name;
-  if (!repoName) fail("could not determine repo; pass --repo");
+  const { repo, worktree, treeRoot } = await resolveTarget(flags);
   const thread = await createThread(
-    root,
+    treeRoot,
     {
-      repo: repoName,
-      worktree: flags.options.get("worktree") ?? null,
+      repo: repo.name,
+      worktree,
       file: null,
       side: null,
       line: null,
@@ -247,8 +251,8 @@ async function cmdReply(argv: string[]): Promise<number> {
   const body = flags.options.get("body");
   if (!id) fail('usage: diffect reply <thread-id> --body "…"');
   if (!body) fail("--body is required");
-  const root = await resolveWorkspaceRoot(process.cwd());
-  await mutate(() => addComment(root, id, { author: authorFrom(flags), body }, now()));
+  const repoRoot = await requireThreadRepoRoot(id);
+  await mutate(() => addComment(repoRoot, id, { author: authorFrom(flags), body }, now()));
   return 0;
 }
 
@@ -256,10 +260,10 @@ async function cmdResolve(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const id = flags.positionals[0];
   if (!id) fail('usage: diffect resolve <thread-id> [--summary "…"]');
-  const root = await resolveWorkspaceRoot(process.cwd());
+  const repoRoot = await requireThreadRepoRoot(id);
   await mutate(() =>
     resolveThread(
-      root,
+      repoRoot,
       id,
       { author: authorFrom(flags), summary: flags.options.get("summary") ?? null },
       now(),
@@ -272,10 +276,10 @@ async function cmdDismiss(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const id = flags.positionals[0];
   if (!id) fail('usage: diffect dismiss <thread-id> [--reason "…"]');
-  const root = await resolveWorkspaceRoot(process.cwd());
+  const repoRoot = await requireThreadRepoRoot(id);
   await mutate(() =>
     dismissThread(
-      root,
+      repoRoot,
       id,
       { author: authorFrom(flags), reason: flags.options.get("reason") ?? null },
       now(),
@@ -305,8 +309,8 @@ Usage:
   diffect resolve <thread-id> [--summary "…"] [--agent NAME]
   diffect dismiss <thread-id> [--reason "…"]  [--agent NAME]
 
-The CLI reads and writes .reviews/ directly and works whether or not diffectd
-is running. Use --agent NAME to author a thread or reply as an agent. --repo
+The CLI reads and writes the central review store directly and works whether or
+not diffectd is running. Use --agent NAME to author a thread or reply as an agent. --repo
 defaults to the single repo in the workspace; --target defaults to work.
 `;
 

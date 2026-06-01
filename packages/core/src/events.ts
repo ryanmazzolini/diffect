@@ -1,7 +1,7 @@
 import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import type { ServerResponse } from "node:http";
 import { DAEMON_EVENTS, type DaemonEventType } from "@diffect/shared";
-import { reviewsDir } from "./reviews/event-log.js";
+import { repoStoreDir } from "./store/paths.js";
 import type { Workspace } from "./workspace.js";
 
 export type { DaemonEventType };
@@ -28,16 +28,18 @@ export class EventHub {
     if (this.started) return;
     this.started = true;
 
-    // Review store: any write under .reviews/ means threads changed. Create the
-    // dir first so the watch attaches even before the first comment is written
-    // (fs.watch can't watch a path that doesn't exist yet).
-    const reviews = reviewsDir(this.ws.root);
-    try {
-      mkdirSync(reviews, { recursive: true });
-    } catch {
-      /* best effort; the worktree watch is a fallback */
+    // Review stores: one central log per repo now lives outside the worktree.
+    // Any write there means threads changed. Create each dir first so the watch
+    // attaches before the first comment (fs.watch needs an existing path).
+    for (const repo of this.ws.repos) {
+      const store = repoStoreDir(repo.root);
+      try {
+        mkdirSync(store, { recursive: true });
+      } catch {
+        /* best effort */
+      }
+      this.addWatch(store, () => this.emit(DAEMON_EVENTS.threadChanged));
     }
-    this.addWatch(reviews, () => this.emit(DAEMON_EVENTS.threadChanged));
 
     // Worktrees: a source change may change the diff. Recursive watch covers
     // nested files; git's own writes under .git are filtered out below.

@@ -17,11 +17,14 @@ import {
   addComment,
   createThread,
   dismissThread,
-  loadThreads,
   resolveThread,
   UnknownThreadError,
 } from "./reviews/event-log.js";
-import { loadRefreshedThreads } from "./reviews/refresh.js";
+import {
+  findRepoRootForThread,
+  loadAllThreads,
+  loadRefreshedThreads,
+} from "./reviews/refresh.js";
 import { EventHub } from "./events.js";
 import {
   detectEditors,
@@ -116,7 +119,7 @@ async function handle(
 
   // --- API routes ---------------------------------------------------------
   if (method === "GET" && path === "/workspace") {
-    const threads = await loadThreads(ctx.ws.root);
+    const threads = await loadAllThreads(ctx.ws);
     const open = threads.filter((t) => t.status === "open").length;
     return sendJson(res, 200, await summarizeWorkspace(ctx.ws, open, ctx.editors));
   }
@@ -163,7 +166,8 @@ async function handle(
     }
     const base = await resolveWorkBase(treeRoot);
     const anchor = await buildAnchor(treeRoot, base, body);
-    const thread = await createThread(ctx.ws.root, { ...body, anchor }, ctx.now());
+    // Store keyed by repo root (treeRoot), not the workspace root.
+    const thread = await createThread(treeRoot, { ...body, anchor }, ctx.now());
     return sendJson(res, 201, thread);
   }
 
@@ -174,21 +178,27 @@ async function handle(
     if (!body || typeof body.body !== "string" || !body.body.trim()) {
       return sendJson(res, 400, { error: "body is required" });
     }
-    return withThread(res, () => addComment(ctx.ws.root, id, body, ctx.now()));
+    return withThread(res, async () =>
+      addComment(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+    );
   }
 
   const resolveMatch = /^\/threads\/([^/]+)\/resolve$/.exec(path);
   if (method === "POST" && resolveMatch) {
     const id = decodeURIComponent(resolveMatch[1]!);
     const body = (await readJsonBody<ResolveThreadRequest>(req)) ?? {};
-    return withThread(res, () => resolveThread(ctx.ws.root, id, body, ctx.now()));
+    return withThread(res, async () =>
+      resolveThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+    );
   }
 
   const dismissMatch = /^\/threads\/([^/]+)\/dismiss$/.exec(path);
   if (method === "POST" && dismissMatch) {
     const id = decodeURIComponent(dismissMatch[1]!);
     const body = (await readJsonBody<DismissThreadRequest>(req)) ?? {};
-    return withThread(res, () => dismissThread(ctx.ws.root, id, body, ctx.now()));
+    return withThread(res, async () =>
+      dismissThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+    );
   }
 
   // --- Editor handoff -----------------------------------------------------
@@ -222,6 +232,17 @@ async function handle(
   }
 
   sendJson(res, 404, { error: "not found" });
+}
+
+/**
+ * Resolve the central store (repo root) that owns a thread id, scanning every
+ * repo in the workspace. Throws UnknownThreadError (→ 404 via withThread) when
+ * no repo claims it, so mutations carrying only an id route to the right log.
+ */
+async function requireRepoRoot(ctx: RouteContext, id: string): Promise<string> {
+  const root = await findRepoRootForThread(ctx.ws, id);
+  if (!root) throw new UnknownThreadError(id);
+  return root;
 }
 
 /** Run a thread mutation, mapping a missing thread to 404. */

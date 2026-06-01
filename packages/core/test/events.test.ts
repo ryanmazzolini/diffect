@@ -50,7 +50,7 @@ async function waitForEvent(
 }
 
 describe("daemon SSE /events", () => {
-  it("emits thread.changed when .reviews/ is written", async () => {
+  it("emits thread.changed when the central store is written", async () => {
     const server = await createServer({ workspacePath: dir });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     const { port } = server.address() as AddressInfo;
