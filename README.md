@@ -1,96 +1,94 @@
 # Diffect
 
-A local-first code review tool. Canonical review state lives in a workspace-local
-`.reviews/` folder — not a database, profile, or daemon process — so the browser
-UI, the CLI, and agents are all peers over the same on-disk store.
+Local-first code review. Review state lives in a `.reviews/` folder next to your
+code — no database, no account, no server-owned state — so the browser UI, the
+CLI, and agents are equal peers over the same files.
 
-- **`diffect`** — the CLI. Reads and writes `.reviews/` directly; works whether
-  or not the daemon is running.
-- **`diffectd`** — the web/API daemon. Serves the browser review UI plus a
-  JSON/SSE API from the machine where the repos live.
+- **`diffectd`** — serves the browser review UI and a JSON/SSE API from the
+  machine where your repos live.
+- **`diffect`** — the CLI; reads and writes `.reviews/` directly, with or without
+  the daemon running.
 
-This repo is built in vertical slices; see
-[`.plans/2026-05-31-diffect-review-mvp/plan.md`](.plans/2026-05-31-diffect-review-mvp/plan.md).
+## What it does
 
-## Status — MVP complete (slices 1–5)
+Open a workspace of one or more git repos (worktrees included) and review any
+target — `work`, `staged`, `unstaged`, a ref, or an `a..b` range. Comments anchor
+to a line range, re-anchor as the code changes, and are flagged *stale* when their
+range disappears — never silently dropped. The browser updates live over SSE and
+can open a `file:line` in your editor. The same threads are available to an agent
+through `.reviews/threads.jsonl`.
 
-A reviewer can open a workspace (one or many repos, including A/B worktrees),
-review any target (`work`/`staged`/`unstaged`/a ref/a range), leave durable
-anchored comments from the browser, and hand them to an agent through the same
-`.reviews/threads.jsonl` the browser uses. Comments survive edited code
-(re-anchoring) or surface as *outdated* when their range is gone. The browser
-refreshes live over SSE and can hand off a `file:line` to a local editor.
-
-What's intentionally deferred: automatic AI review passes, guided tours, GitHub
-sync, daemon-owned `apply` orchestration, and remote auth beyond trusted
-local/Tailscale use.
+Not yet built: adding workspaces from the UI, AI review passes, GitHub sync, and
+auth for remote access.
 
 ## Layout
 
 ```
 packages/
-  shared/   TS contract types shared by the daemon, CLI, and web UI
-  core/     diffect CLI + diffectd daemon + git diff + .reviews/ event log
-  web/      React + Vite browser review UI (served by diffectd)
+  shared/  contract types shared by daemon, CLI, and web UI
+  core/    diffect CLI + diffectd daemon + git diff + .reviews/ event log
+  web/     React + Vite browser UI (served by diffectd)
 ```
+
+## Run it
+
+```sh
+pnpm install
+mise run daemon -- --workspace /path/to/repo   # builds, then serves
+# → open http://127.0.0.1:7421
+```
+
+`--workspace` defaults to the current directory; drop it to review the repo
+you're standing in (omitted, `mise run daemon` reviews Diffect itself).
+
+`mise tasks` lists the rest: `dev` (Vite hot-reload UI), `build`, and `test`.
+
+Comment on a line in the browser, then drive the same threads from the CLI. The
+CLI runs *inside* the repo you're reviewing, so it's a standalone command rather
+than a mise task; until it's published to npm (`npx diffect`), alias it:
+
+```sh
+alias diffect="node /path/to/diffect/packages/core/dist/cli.js"
+
+cd /path/to/repo
+diffect list --status open                     # what needs attention
+diffect comment --file src/a.ts --line 42 --severity must-fix --body "…"
+diffect reply <id> --agent pi --body "fixed"   # author as an agent
+diffect resolve <id> --summary "…"
+diffect dismiss <id> --reason "…"
+```
+
+The default target is `work` (committed-since-base + unstaged + untracked). Pick
+another with `--target staged|unstaged|<ref>|<a>..<b>`, and a specific checkout
+with `--repo`/`--worktree`. See [`integrations/pi/`](integrations/pi/README.md)
+for agent notes.
 
 ## Develop
 
-Tooling is pinned with [mise](https://mise.jdx.dev) (`node`, `pnpm`); deps use
-pnpm with lifecycle scripts blocked by default and a 3-day release-age cooldown
-(`.npmrc`) as supply-chain hardening.
+Tooling is pinned with [mise](https://mise.jdx.dev); dependencies install with
+lifecycle scripts disabled and a 3-day release-age cooldown (`.npmrc`).
 
 ```sh
 mise install        # node + pnpm
 pnpm install
-
-# Build (shared must build before core/web resolve @diffect/shared):
-pnpm -C packages/shared build
-pnpm -C packages/core   build
-pnpm -C packages/web    build
-
-pnpm -r --filter @diffect/core test    # vitest fixtures (real git repos)
+mise run build
+mise run test
 ```
-
-## Try it
-
-```sh
-# Build, then point the daemon at any git repo:
-node packages/core/dist/daemon-bin.js --workspace /path/to/repo --port 7421
-# open http://127.0.0.1:7421, comment on a line, then with the daemon stopped:
-cd /path/to/repo && node /path/to/diffect/packages/core/dist/cli.js list --status open --json
-```
-
-The default review target is **`work`**: everything changed for the slice —
-committed-since-base, unstaged, and untracked. Other targets:
-
-```sh
-diffect diff --target staged          # index vs HEAD
-diffect diff --target unstaged        # worktree vs index (+ untracked)
-diffect diff --target main..feature   # a commit range
-diffect diff --repo api --worktree feat   # a specific repo/worktree
-```
-
-### CLI ⇄ agent loop
-
-```sh
-diffect list --status open --json                 # what needs attention
-diffect comment --file src/a.ts --line 42 --severity must-fix --body "…"
-diffect reply <id> --agent pi --body "fixed"      # author as an agent
-diffect resolve <id> --summary "…"  ·  diffect dismiss <id> --reason "…"
-```
-
-See [`integrations/pi/`](integrations/pi/README.md) for the agent integration
-notes.
 
 ## `.reviews/` visibility
 
-The review store is a plain folder next to the code. Its visibility is yours to
-choose: gitignore it to keep reviews private, or commit it to share them. Diffect
-treats both the same — it never assumes one or the other.
+The store is a plain folder beside your code. Gitignore it to keep reviews
+private, or commit it to share them — Diffect treats both the same.
 
 ## Networking
 
-`diffectd` binds to **`127.0.0.1`** by default (override with `--host`). For
-phone/remote review, bind to a Tailscale interface; there is no auth yet, so only
-expose it inside a trusted network.
+`diffectd` binds to `127.0.0.1` (override with `--host`). There is no auth yet, so
+only expose it inside a trusted network (e.g. a Tailscale interface) for
+phone/remote review.
+
+## Related projects
+
+- [**diffity**](https://diffity.com) by [Kamran Ahmed](https://kamranahmed.se) — a
+  GitHub-style git diff viewer in the browser. Diffect's diff view is modeled on
+  it, then adds a local-first review layer (`.reviews/`) shared by the CLI and
+  agents.
