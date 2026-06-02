@@ -126,7 +126,8 @@ body {
   color: var(--muted);
   font-size: 13px;
 }
-.theme-toggle {
+.theme-toggle,
+.pane-toggle {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -136,11 +137,20 @@ body {
   line-height: 1;
   cursor: pointer;
 }
+.pane-resizer {
+  cursor: col-resize;
+  background: var(--border);
+  opacity: 0.4;
+}
+.pane-resizer:hover {
+  opacity: 1;
+  background: var(--accent);
+}
 
 .layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 340px;
+  /* gridTemplateColumns is set inline from usePaneLayout (width/collapsed). */
   overflow: hidden;
 }
 .diff-pane {
@@ -351,15 +361,15 @@ body {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px 10px;
-  margin: 6px 0;
+  padding: 6px 8px;
+  margin: 4px 0;
   font-family: -apple-system, sans-serif;
   font-size: 13px;
 }
 .inline-thread .comment {
   display: flex;
   gap: 8px;
-  padding: 2px 0;
+  padding: 1px 0;
 }
 .author {
   color: var(--muted);
@@ -522,12 +532,12 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .thread-actions {
   display: flex;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 .reply-form textarea {
   width: 100%;
