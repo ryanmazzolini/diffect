@@ -3,6 +3,7 @@ import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Thread } from "@diffect/sh
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
+import { useLineSelection, type LineSelection } from "../useLineSelection.js";
 import { CommentForm } from "./CommentForm.js";
 import { DiffStat } from "./DiffStat.js";
 import { ThreadConversation } from "./ThreadConversation.js";
@@ -62,42 +63,14 @@ function FileDiff({
   onChanged: () => void;
 }) {
   const lang = langForPath(file.path); // resolved once per file
-  // In-progress gutter selection (new-side line numbers); the comment form opens
-  // for the whole selected range.
-  const [sel, setSel] = useState<{ anchor: number; head: number } | null>(null);
-  const [form, setForm] = useState<{ start: number; end: number } | null>(null);
-
-  const selRange = sel
-    ? { lo: Math.min(sel.anchor, sel.head), hi: Math.max(sel.anchor, sel.head) }
-    : null;
-
-  // Click a line number to start a selection; shift-click to extend a range.
-  const onGutter = (lineNo: number, shift: boolean) => {
-    setForm(null);
-    setSel((prev) =>
-      shift && prev
-        ? { anchor: prev.anchor, head: lineNo }
-        : { anchor: lineNo, head: lineNo },
-    );
-  };
-
-  // Open the comment form for the active selection if this line is in it, else
-  // just this line.
-  const openComment = (lineNo: number) => {
-    const range =
-      selRange && lineNo >= selRange.lo && lineNo <= selRange.hi
-        ? { start: selRange.lo, end: selRange.hi }
-        : { start: lineNo, end: lineNo };
-    setForm(range);
-    // Keep the highlight in sync with what the form will comment on, so opening
-    // a single-line form outside an old selection doesn't leave a stale range lit.
-    setSel({ anchor: range.start, head: range.end });
-  };
-
-  const closeForm = () => {
-    setForm(null);
-    setSel(null);
-  };
+  // Largest new-side line number, to clamp keyboard range extension.
+  const maxLine = file.hunks.reduce(
+    (m, h) => Math.max(m, h.newStart + h.newLines - 1),
+    0,
+  );
+  // Gutter selection (click / shift-click / drag / keyboard) over new-side lines.
+  const { range: selRange, form, gutterProps, openComment, closeForm } =
+    useLineSelection(maxLine);
 
   // Context lines unfolded above a hunk (new-side), keyed by hunk index.
   const [expanded, setExpanded] = useState<Record<number, DiffLine[]>>({});
@@ -186,7 +159,7 @@ function FileDiff({
                   editors={editors}
                   onChanged={onChanged}
                   selected={selected}
-                  onGutter={onGutter}
+                  gutterProps={gutterProps}
                   onComment={() => line.new && openComment(line.new)}
                   commentForm={
                     form !== null && line.new === form.end ? (
@@ -271,7 +244,7 @@ function LineRow({
   editors,
   onChanged,
   selected,
-  onGutter,
+  gutterProps,
   onComment,
   commentForm,
 }: {
@@ -281,7 +254,7 @@ function LineRow({
   editors: string[];
   onChanged: () => void;
   selected: boolean;
-  onGutter: (lineNo: number, shift: boolean) => void;
+  gutterProps: LineSelection["gutterProps"];
   onComment: () => void;
   commentForm: React.ReactNode;
 }) {
@@ -292,12 +265,12 @@ function LineRow({
         <td className="ln">{line.old ?? ""}</td>
         <td
           className={`ln${canComment ? " ln-clickable" : ""}`}
-          onClick={
-            canComment ? (e) => onGutter(line.new!, e.shiftKey) : undefined
-          }
           title={
-            canComment ? "Click to select; shift-click to extend a range" : undefined
+            canComment
+              ? "Click, shift-click, or drag to select; Enter to comment"
+              : undefined
           }
+          {...(canComment ? gutterProps(line.new!) : {})}
         >
           {line.new ?? ""}
         </td>
