@@ -10,6 +10,8 @@ interface Props {
   file: string;
   side: Side;
   line: number;
+  /** End of a multi-line range; null/equal-to-line means a single line. */
+  endLine?: number | null;
   onCancel: () => void;
   onCreated: () => void;
 }
@@ -20,6 +22,7 @@ export function CommentForm({
   file,
   side,
   line,
+  endLine = null,
   onCancel,
   onCreated,
 }: Props) {
@@ -39,6 +42,7 @@ export function CommentForm({
         file,
         side,
         line,
+        endLine: endLine && endLine !== line ? endLine : null,
         severity: severity || null,
         body: body.trim(),
       });
@@ -53,7 +57,9 @@ export function CommentForm({
     <div className="comment-form">
       <textarea
         autoFocus
-        placeholder={`Comment on ${file}:${line}`}
+        placeholder={`Comment on ${file}:${line}${
+          endLine && endLine !== line ? `-${endLine}` : ""
+        }`}
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => {

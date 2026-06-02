@@ -22,6 +22,7 @@
   --hl-number: #79c0ff;
   --hl-func: #d2a8ff;
   --hl-type: #ffa657;
+  --sel-bg: #388bfd40;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -48,6 +49,7 @@
   --hl-number: #0550ae;
   --hl-func: #8250df;
   --hl-type: #953800;
+  --sel-bg: #0969da26;
 }
 
 * {
@@ -226,6 +228,17 @@ body {
   user-select: none;
   padding-right: 8px !important;
   border-right: 1px solid var(--border);
+}
+.ln-clickable {
+  cursor: pointer;
+}
+.ln-clickable:hover {
+  color: var(--accent);
+}
+/* Multi-line comment selection (translucent so add/del tint still shows). */
+.line-selected td.code,
+.line-selected td.ln {
+  background: var(--sel-bg);
 }
 .code {
   width: 100%;

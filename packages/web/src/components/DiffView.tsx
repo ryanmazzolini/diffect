@@ -50,9 +50,40 @@ function FileDiff({
   editors: string[];
   onChanged: () => void;
 }) {
-  // Which new-side line currently has its comment form open.
-  const [commenting, setCommenting] = useState<number | null>(null);
   const lang = langForPath(file.path); // resolved once per file
+  // In-progress gutter selection (new-side line numbers); the comment form opens
+  // for the whole selected range.
+  const [sel, setSel] = useState<{ anchor: number; head: number } | null>(null);
+  const [form, setForm] = useState<{ start: number; end: number } | null>(null);
+
+  const selRange = sel
+    ? { lo: Math.min(sel.anchor, sel.head), hi: Math.max(sel.anchor, sel.head) }
+    : null;
+
+  // Click a line number to start a selection; shift-click to extend a range.
+  const onGutter = (lineNo: number, shift: boolean) => {
+    setForm(null);
+    setSel((prev) =>
+      shift && prev
+        ? { anchor: prev.anchor, head: lineNo }
+        : { anchor: lineNo, head: lineNo },
+    );
+  };
+
+  // Open the comment form for the active selection if this line is in it, else
+  // just this line.
+  const openComment = (lineNo: number) => {
+    setForm(
+      selRange && lineNo >= selRange.lo && lineNo <= selRange.hi
+        ? { start: selRange.lo, end: selRange.hi }
+        : { start: lineNo, end: lineNo },
+    );
+  };
+
+  const closeForm = () => {
+    setForm(null);
+    setSel(null);
+  };
 
   return (
     <div className="file">
@@ -72,6 +103,11 @@ function FileDiff({
               const lineThreads = line.new
                 ? threads.filter((t) => t.side === "new" && t.line === line.new)
                 : [];
+              const selected =
+                line.new !== null &&
+                selRange !== null &&
+                line.new >= selRange.lo &&
+                line.new <= selRange.hi;
               return (
                 <LineRow
                   key={li}
@@ -80,19 +116,21 @@ function FileDiff({
                   threads={lineThreads}
                   editors={editors}
                   onChanged={onChanged}
-                  isCommenting={commenting === line.new && line.new !== null}
-                  onComment={() => line.new && setCommenting(line.new)}
+                  selected={selected}
+                  onGutter={onGutter}
+                  onComment={() => line.new && openComment(line.new)}
                   commentForm={
-                    commenting === line.new && line.new !== null ? (
+                    form !== null && line.new === form.end ? (
                       <CommentForm
                         repo={repo}
                         worktree={worktree}
                         file={file.path}
                         side="new"
-                        line={line.new}
-                        onCancel={() => setCommenting(null)}
+                        line={form.start}
+                        endLine={form.end}
+                        onCancel={closeForm}
                         onCreated={() => {
-                          setCommenting(null);
+                          closeForm();
                           onChanged();
                         }}
                       />
@@ -150,7 +188,8 @@ function LineRow({
   threads,
   editors,
   onChanged,
-  isCommenting,
+  selected,
+  onGutter,
   onComment,
   commentForm,
 }: {
@@ -159,25 +198,36 @@ function LineRow({
   threads: Thread[];
   editors: string[];
   onChanged: () => void;
-  isCommenting: boolean;
+  selected: boolean;
+  onGutter: (lineNo: number, shift: boolean) => void;
   onComment: () => void;
   commentForm: React.ReactNode;
 }) {
   const canComment = line.new !== null;
   return (
     <>
-      <tr className={`line line-${line.type}`}>
+      <tr className={`line line-${line.type}${selected ? " line-selected" : ""}`}>
         <td className="ln">{line.old ?? ""}</td>
-        <td className="ln">{line.new ?? ""}</td>
+        <td
+          className={`ln${canComment ? " ln-clickable" : ""}`}
+          onClick={
+            canComment ? (e) => onGutter(line.new!, e.shiftKey) : undefined
+          }
+          title={
+            canComment ? "Click to select; shift-click to extend a range" : undefined
+          }
+        >
+          {line.new ?? ""}
+        </td>
         <td className="code">
           <span className="sigil">
             {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
           </span>
           <span className="text">{highlightLine(line.text, lang)}</span>
-          {canComment && !isCommenting && (
+          {canComment && !commentForm && (
             <button
               className="comment-btn"
-              title="Comment on this line"
+              title="Comment on this line or selection"
               onClick={onComment}
             >
               +
@@ -195,7 +245,7 @@ function LineRow({
           </td>
         </tr>
       ))}
-      {isCommenting && (
+      {commentForm && (
         <tr className="comment-form-row">
           <td className="ln" />
           <td className="ln" />
