@@ -1,32 +1,33 @@
 # Diffect
 
-Local-first code review. Review state lives in a `.reviews/` folder next to your
-code — no database, no account, no server-owned state — so the browser UI, the
-CLI, and agents are equal peers over the same files.
+Local-first code review. Review state is a local append-only event log under
+`~/.config/diffect/` — no database, no account, no server-owned automation — so
+the browser UI, the CLI, and agents are equal peers over the same files.
 
 - **`diffectd`** — serves the browser review UI and a JSON/SSE API from the
   machine where your repos live.
-- **`diffect`** — the CLI; reads and writes `.reviews/` directly, with or without
+- **`diffect`** — the CLI; reads and writes the store directly, with or without
   the daemon running.
 
 ## What it does
 
-Open a workspace of one or more git repos (worktrees included) and review any
-target — `work`, `staged`, `unstaged`, a ref, or an `a..b` range. Comments anchor
-to a line range, re-anchor as the code changes, and are flagged *stale* when their
-range disappears — never silently dropped. The browser updates live over SSE and
-can open a `file:line` in your editor. The same threads are available to an agent
-through `.reviews/threads.jsonl`.
+Review one or more git repos across one or more workspaces at once (add them from
+the sidebar; worktrees included). Pick any target — `work`, `staged`, `unstaged`,
+a ref, or a GitHub-style base↔compare range. The diff is syntax-highlighted, with
+light/dark themes, a resizable thread pane, and unfoldable context. Comment on a
+line or a selected range; comments re-anchor as the code changes and are flagged
+*stale* when their range disappears — never silently dropped. Resolve, dismiss, or
+delete threads. The browser updates live over SSE and can open a `file:line` in
+your editor. The same threads are available to an agent through the event log.
 
-Not yet built: adding workspaces from the UI, AI review passes, GitHub sync, and
-auth for remote access.
+Not yet built: AI review passes, GitHub sync, and auth for remote access.
 
 ## Layout
 
 ```
 packages/
   shared/  contract types shared by daemon, CLI, and web UI
-  core/    diffect CLI + diffectd daemon + git diff + .reviews/ event log
+  core/    diffect CLI + diffectd daemon + git diff + central event log
   web/     React + Vite browser UI (served by diffectd)
 ```
 
@@ -75,10 +76,15 @@ mise run build
 mise run test
 ```
 
-## `.reviews/` visibility
+## Where reviews live
 
-The store is a plain folder beside your code. Gitignore it to keep reviews
-private, or commit it to share them — Diffect treats both the same.
+Review state is a per-user store at `$XDG_CONFIG_HOME/diffect/` (default
+`~/.config/diffect/`): one append-only `threads.jsonl` per repo, keyed by the
+repo's path, plus a `workspaces.json` registry of known workspace paths. It's
+plain local files — host-private, not committed with your code, and equally
+readable/writable by the CLI, the daemon, and agents. A legacy in-tree
+`.reviews/threads.jsonl` from older versions is migrated into the store on first
+access (the original is left as a backup).
 
 ## Networking
 
@@ -90,5 +96,5 @@ phone/remote review.
 
 - [**diffity**](https://diffity.com) by [Kamran Ahmed](https://kamranahmed.se) — a
   GitHub-style git diff viewer in the browser. Diffect's diff view is modeled on
-  it, then adds a local-first review layer (`.reviews/`) shared by the CLI and
+  it, then adds a local-first review layer (the event log) shared by the CLI and
   agents.
