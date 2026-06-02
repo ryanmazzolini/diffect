@@ -1,5 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "ignoreDependencies": ["@diffect/shared"],
-  "production": { "dupes": true }
+  "production": { "dupes": true },
+  "health": {
+    "maxCyclomatic": 20,
+    "maxCognitive": 15,
+    "maxCrap": 1000
+  }
 }
