@@ -15,10 +15,21 @@ interface Props {
   diff: RepoDiff | null;
   threads: Thread[];
   editors: string[];
+  viewed: Set<string>;
+  onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }
 
-export function DiffView({ repo, worktree, diff, threads, editors, onChanged }: Props) {
+export function DiffView({
+  repo,
+  worktree,
+  diff,
+  threads,
+  editors,
+  viewed,
+  onToggleViewed,
+  onChanged,
+}: Props) {
   const [crossFileOpen, setCrossFileOpen] = useState(false);
   const dialog = crossFileOpen ? (
     <CrossFileDialog
@@ -68,7 +79,10 @@ export function DiffView({ repo, worktree, diff, threads, editors, onChanged }: 
         </button>
       </div>
       {diff.files.length === 0 ? (
-        <div className="empty">No changes in this target.</div>
+        <div className="empty">
+          No changes in this target. Try a different compare target above, or
+          comment on another file.
+        </div>
       ) : (
         diff.files.map((file) => (
           <FileDiff
@@ -78,6 +92,8 @@ export function DiffView({ repo, worktree, diff, threads, editors, onChanged }: 
             file={file}
             threads={threads.filter((t) => t.file === file.path)}
             editors={editors}
+            viewed={viewed.has(file.path)}
+            onToggleViewed={() => onToggleViewed(file.path)}
             onChanged={onChanged}
           />
         ))
@@ -200,6 +216,8 @@ function FileDiff({
   file,
   threads,
   editors,
+  viewed,
+  onToggleViewed,
   onChanged,
 }: {
   repo: string;
@@ -207,6 +225,8 @@ function FileDiff({
   file: DiffFile;
   threads: Thread[];
   editors: string[];
+  viewed: boolean;
+  onToggleViewed: () => void;
   onChanged: () => void;
 }) {
   const lang = langForPath(file.path); // resolved once per file
@@ -245,13 +265,23 @@ function FileDiff({
   };
 
   return (
-    <div className="file" id={`file-${file.path}`}>
+    <div className={`file${viewed ? " viewed" : ""}`} id={`file-${file.path}`}>
       <div className="file-header">
         <span className={`status status-${file.status}`}>{file.status}</span>
         <span className="file-path">{file.path}</span>
         <DiffStat additions={file.additions} deletions={file.deletions} />
+        <label className="viewed-toggle" title="Mark this file viewed (collapses it)">
+          <input
+            type="checkbox"
+            aria-label="Viewed"
+            checked={viewed}
+            onChange={onToggleViewed}
+          />
+          Viewed
+        </label>
       </div>
-      {file.hunks.map((hunk, hi) => {
+      {!viewed &&
+        file.hunks.map((hunk, hi) => {
         const gap = gapAbove(file.hunks, hi);
         const exp = expanded[hi];
         return (

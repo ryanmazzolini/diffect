@@ -21,6 +21,7 @@ export function DiffStat({ additions, deletions, countsHidden = false }: Props) 
       )}
       <span
         className="diffstat-blocks"
+        role="img"
         aria-label={`${additions} additions, ${deletions} deletions`}
       >
         {blocks.map((kind, i) => (

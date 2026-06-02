@@ -9,6 +9,8 @@ interface Props {
   onTarget: (target: string) => void;
   refs: RefList | null;
   openCount: number;
+  viewedCount: number;
+  fileCount: number;
   theme: Theme;
   onToggleTheme: () => void;
   paneCollapsed: boolean;
@@ -25,6 +27,8 @@ export function Topbar({
   onTarget,
   refs,
   openCount,
+  viewedCount,
+  fileCount,
   theme,
   onToggleTheme,
   paneCollapsed,
@@ -50,6 +54,11 @@ export function Topbar({
       <TargetPicker target={target} onTarget={onTarget} refs={refs} />
 
       <span className="spacer" />
+      {fileCount > 0 && (
+        <span className="viewed-count">
+          {viewedCount}/{fileCount} viewed
+        </span>
+      )}
       <span className="inbox">{openCount} open</span>
       <button
         type="button"

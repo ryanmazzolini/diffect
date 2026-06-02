@@ -95,6 +95,17 @@ body {
   font-size: 14px;
 }
 
+/* Honour users who ask the OS to reduce motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Visible keyboard focus on every interactive control. Custom-styled buttons
  * (gutter cells, sidebar items, filters) previously had no :focus styling at
  * all, leaving keyboard users with no focus indicator. */
@@ -375,7 +386,8 @@ body {
 .spacer {
   flex: 1;
 }
-.inbox {
+.inbox,
+.viewed-count {
   color: var(--muted);
   font-size: 13px;
 }
@@ -454,8 +466,12 @@ body {
 }
 .repo-item.active,
 .wt-item.active {
-  background: var(--accent);
-  color: var(--on-accent);
+  /* Selection = tint background + an accent bar, keeping normal text colour so
+   * it meets contrast (accent-on-tint and white-on-accent both fail AA here). */
+  background: var(--sel-bg);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .worktree-list {
   padding-left: 12px;
@@ -605,6 +621,18 @@ body {
 /* Push the diffstat to the right edge of the file header. */
 .file-header .diffstat {
   margin-left: auto;
+}
+.viewed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.file.viewed .file-header {
+  opacity: 0.65;
 }
 .status {
   text-transform: uppercase;
@@ -1163,9 +1191,10 @@ button:disabled {
   cursor: pointer;
 }
 .filter.active {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--sel-bg);
+  color: var(--text);
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 /* Thread conversation controls */

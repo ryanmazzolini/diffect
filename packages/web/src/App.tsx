@@ -40,6 +40,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [viewed, setViewed] = useState<Set<string>>(new Set());
   const diffPaneRef = useRef<HTMLElement>(null);
 
   const toggleTheme = () => {
@@ -58,10 +59,37 @@ export function App() {
     api.workspaces().then(setEntries).catch(() => setEntries([]));
   }, []);
 
-  const selectFile = (path: string) => {
+  const selectFile = useCallback((path: string) => {
     setActiveFile(path);
     document.getElementById(`file-${path}`)?.scrollIntoView({ block: "start" });
-  };
+  }, []);
+
+  // Per-file "viewed" state, scoped to repo + worktree + target (the diff's
+  // identity) and persisted.
+  const viewedKey = repo
+    ? `diffect-viewed:${repo}:${worktree ?? ""}:${target}`
+    : null;
+  useEffect(() => {
+    if (!viewedKey) return;
+    try {
+      const raw = getStored(viewedKey);
+      setViewed(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+    } catch {
+      setViewed(new Set());
+    }
+  }, [viewedKey]);
+
+  const toggleViewed = useCallback(
+    (path: string) => {
+      setViewed((prev) => {
+        const next = new Set(prev);
+        next.has(path) ? next.delete(path) : next.add(path);
+        if (viewedKey) setStored(viewedKey, JSON.stringify([...next]));
+        return next;
+      });
+    },
+    [viewedKey],
+  );
 
   const {
     collapsed: paneCollapsed,
@@ -169,6 +197,30 @@ export function App() {
     return () => observer.disconnect();
   }, [diff]);
 
+  // j/k move between files in the diff (GitHub-style), unless typing or in a modal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "j" && e.key !== "k") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable))
+        return;
+      if (document.querySelector(".modal-backdrop")) return;
+      const paths = diff?.files.map((f) => f.path) ?? [];
+      if (paths.length === 0) return;
+      e.preventDefault();
+      const cur = activeFile ? paths.indexOf(activeFile) : -1;
+      const idx =
+        e.key === "j"
+          ? Math.min(paths.length - 1, cur + 1)
+          : Math.max(0, cur - 1);
+      const path = paths[idx];
+      if (path) selectFile(path);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [diff, activeFile, selectFile]);
+
   // Live updates: subscribe to the daemon's SSE stream exactly once and route
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
   // selector changed would tear the EventSource down and drop events that fire
@@ -235,6 +287,8 @@ export function App() {
   );
   const multiRepo = workspace.repos.length > 1;
   const editors = workspace.editors ?? [];
+  const fileCount = diff?.files.length ?? 0;
+  const viewedCount = diff?.files.filter((f) => viewed.has(f.path)).length ?? 0;
 
   return (
     <div className="app">
@@ -249,6 +303,8 @@ export function App() {
         onTarget={setTarget}
         refs={refs}
         openCount={openCount}
+        viewedCount={viewedCount}
+        fileCount={fileCount}
         theme={theme}
         onToggleTheme={toggleTheme}
         paneCollapsed={paneCollapsed}
@@ -277,6 +333,8 @@ export function App() {
             diff={diff}
             threads={inlineThreads}
             editors={editors}
+            viewed={viewed}
+            onToggleViewed={toggleViewed}
             onChanged={refreshThreads}
           />
         </section>
