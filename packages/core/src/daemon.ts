@@ -14,6 +14,7 @@ import type {
   WorkspaceMutationRequest,
 } from "@diffect/shared";
 import { resolveWorkBase } from "./git/diff.js";
+import { listRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor } from "./reviews/anchors.js";
 import {
@@ -362,7 +363,7 @@ async function deleteThreadRoute(
   return true;
 }
 
-/** `GET /repos/:repo/diff`. */
+/** `GET /repos/:repo/diff` and `GET /repos/:repo/refs`. */
 async function repoRoutes(
   ctx: RouteContext,
   res: ServerResponse,
@@ -370,24 +371,53 @@ async function repoRoutes(
   method: string,
   path: string,
 ): Promise<boolean> {
+  if (method !== "GET") return false;
+  const worktree = url.searchParams.get("worktree");
+
   const diffMatch = /^\/repos\/(.+)\/diff$/.exec(path);
-  if (!(method === "GET" && diffMatch)) return false;
-  const repoName = decodeURIComponent(diffMatch[1]!);
+  if (diffMatch) {
+    const repoName = decodeURIComponent(diffMatch[1]!);
+    const treeRoot = resolveRepoTreeOr404(ctx, res, repoName, worktree);
+    if (!treeRoot) return true;
+    const target = normalizeTarget(url.searchParams.get("target"));
+    const diff = await computeTargetDiff(treeRoot, target);
+    sendJson(res, 200, { ...diff, repo: repoName, worktree });
+    return true;
+  }
+
+  const refsMatch = /^\/repos\/(.+)\/refs$/.exec(path);
+  if (refsMatch) {
+    const treeRoot = resolveRepoTreeOr404(
+      ctx,
+      res,
+      decodeURIComponent(refsMatch[1]!),
+      worktree,
+    );
+    if (!treeRoot) return true;
+    sendJson(res, 200, await listRefs(treeRoot));
+    return true;
+  }
+  return false;
+}
+
+/** Resolve repo+worktree to a tree root, sending a 404 and returning null on miss. */
+function resolveRepoTreeOr404(
+  ctx: RouteContext,
+  res: ServerResponse,
+  repoName: string,
+  worktree: string | null,
+): string | null {
   const repo = findRepo(ctx.ws, repoName);
   if (!repo) {
     sendJson(res, 404, { error: `unknown repo: ${repoName}` });
-    return true;
+    return null;
   }
-  const worktree = url.searchParams.get("worktree");
   const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
   if (!treeRoot) {
     sendJson(res, 404, { error: `unknown worktree: ${worktree}` });
-    return true;
+    return null;
   }
-  const target = normalizeTarget(url.searchParams.get("target"));
-  const diff = await computeTargetDiff(treeRoot, target);
-  sendJson(res, 200, { ...diff, repo: repo.name, worktree });
-  return true;
+  return treeRoot;
 }
 
 /** `POST /open` editor handoff. */

@@ -92,6 +92,13 @@ export interface WorktreeSummary {
   root: string;
 }
 
+/** Branches, tags, and recent commits for the compare picker (GET /repos/:repo/refs). */
+export interface RefList {
+  branches: string[];
+  tags: string[];
+  commits: { sha: string; subject: string }[];
+}
+
 export interface RepoSummary {
   /** URL-safe repo id, stable across worktrees. */
   name: string;

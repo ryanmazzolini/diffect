@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DAEMON_EVENTS } from "@diffect/shared";
-import type { RepoDiff, Thread, ThreadStatus, WorkspaceInfo } from "@diffect/shared";
+import type {
+  RefList,
+  RepoDiff,
+  Thread,
+  ThreadStatus,
+  WorkspaceInfo,
+} from "@diffect/shared";
 import { api } from "./api.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { usePaneLayout } from "./usePaneLayout.js";
@@ -17,6 +23,7 @@ export function App() {
   const [worktree, setWorktree] = useState<string | null>(null);
   const [target, setTarget] = useState("work");
   const [diff, setDiff] = useState<RepoDiff | null>(null);
+  const [refs, setRefs] = useState<RefList | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
@@ -77,6 +84,19 @@ export function App() {
     setWorktree(null);
   }, [repo]);
 
+  // Load the repo's refs (branches/tags/commits) for the compare picker.
+  useEffect(() => {
+    if (!repo) return;
+    let live = true;
+    api
+      .refs(repo, worktree)
+      .then((r) => live && setRefs(r))
+      .catch(() => live && setRefs(null));
+    return () => {
+      live = false;
+    };
+  }, [repo, worktree]);
+
   useEffect(() => {
     refreshDiff();
   }, [refreshDiff]);
@@ -130,6 +150,7 @@ export function App() {
         onWorktree={setWorktree}
         target={target}
         onTarget={setTarget}
+        refs={refs}
         openCount={openCount}
         theme={theme}
         onToggleTheme={toggleTheme}

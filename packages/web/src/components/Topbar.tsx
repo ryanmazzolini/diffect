@@ -1,7 +1,6 @@
-import type { WorkspaceInfo } from "@diffect/shared";
+import type { RefList, WorkspaceInfo } from "@diffect/shared";
 import type { Theme } from "../theme.js";
-
-const TARGETS = ["work", "staged", "unstaged"];
+import { TargetPicker } from "./TargetPicker.js";
 
 interface Props {
   workspace: WorkspaceInfo;
@@ -11,6 +10,7 @@ interface Props {
   onWorktree: (worktree: string | null) => void;
   target: string;
   onTarget: (target: string) => void;
+  refs: RefList | null;
   openCount: number;
   theme: Theme;
   onToggleTheme: () => void;
@@ -28,6 +28,7 @@ export function Topbar({
   onWorktree,
   target,
   onTarget,
+  refs,
   openCount,
   theme,
   onToggleTheme,
@@ -77,18 +78,7 @@ export function Topbar({
         </select>
       )}
 
-      <select
-        className="selector target-select"
-        value={target}
-        onChange={(e) => onTarget(e.target.value)}
-        title="Review target"
-      >
-        {TARGETS.map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
+      <TargetPicker target={target} onTarget={onTarget} refs={refs} />
 
       <span className="spacer" />
       <span className="inbox">{openCount} open</span>

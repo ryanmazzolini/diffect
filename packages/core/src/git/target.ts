@@ -53,8 +53,10 @@ export async function computeTargetDiff(
 
     case "ref": {
       // <ref> vs working tree, plus untracked (mirrors `work` but against an
-      // explicit ref instead of the merge-base).
-      const tracked = await gitDiff(repoRoot, [target.from!]);
+      // explicit ref instead of the merge-base). --end-of-options stops a
+      // user-supplied ref starting with "-" from being parsed as a git flag
+      // (argument injection, e.g. `--output=…`).
+      const tracked = await gitDiff(repoRoot, ["--end-of-options", target.from!]);
       const untracked = await syntheticUntrackedDiffs(repoRoot);
       return { target: target.spec, files: [...tracked, ...untracked] };
     }
@@ -63,7 +65,10 @@ export async function computeTargetDiff(
       // Pure commit range — no working tree, no untracked. Preserve the dot
       // count; three-dot is the symmetric (merge-base) comparison.
       const op = target.threeDot ? "..." : "..";
-      const files = await gitDiff(repoRoot, [`${target.from}${op}${target.to}`]);
+      const files = await gitDiff(repoRoot, [
+        "--end-of-options",
+        `${target.from}${op}${target.to}`,
+      ]);
       return { target: target.spec, files };
     }
   }

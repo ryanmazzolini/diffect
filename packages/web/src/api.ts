@@ -5,6 +5,7 @@ import type {
   DaemonEventType,
   DismissThreadRequest,
   OpenRequest,
+  RefList,
   RepoDiff,
   ResolveThreadRequest,
   Thread,
@@ -35,6 +36,15 @@ export const api = {
     return fetch(
       `/repos/${encodeURIComponent(repo)}/diff${qs ? `?${qs}` : ""}`,
     ).then((r) => json<RepoDiff>(r));
+  },
+
+  refs: (repo: string, worktree?: string | null) => {
+    const q = new URLSearchParams();
+    if (worktree) q.set("worktree", worktree);
+    const qs = q.toString();
+    return fetch(
+      `/repos/${encodeURIComponent(repo)}/refs${qs ? `?${qs}` : ""}`,
+    ).then((r) => json<RefList>(r));
   },
 
   threads: (opts: { status?: string; repo?: string; worktree?: string | null } = {}) => {
