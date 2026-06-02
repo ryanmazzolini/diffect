@@ -22,6 +22,10 @@ const dir = mkdtempSync(join(tmpdir(), "diffect-e2e-"));
 // writes the developer's real ~/.config/diffect.
 const xdg = mkdtempSync(join(tmpdir(), "diffect-e2e-xdg-"));
 process.env.XDG_CONFIG_HOME = xdg;
+// Isolate HOME too so /recommendations reads a fixture session store (seeded in
+// main) rather than the developer's real ~/.claude and ~/.pi.
+const fakeHome = mkdtempSync(join(tmpdir(), "diffect-e2e-home-"));
+process.env.HOME = fakeHome;
 
 async function main() {
   await git(dir, ["init", "-b", "main"]);
@@ -46,6 +50,12 @@ async function main() {
   writeFileSync(join(dir, "calc.js"), calc(" // TODO: overflow?"));
   writeFileSync(join(dir, "src", "util", "math.js"), math(" // TODO"));
 
+  // Seed a fake Claude session pointing at the fixture repo so the add-workspace
+  // dialog's "Recent projects" list is deterministic in e2e.
+  const projDir = join(fakeHome, ".claude", "projects", "-fixture");
+  mkdirSync(projDir, { recursive: true });
+  writeFileSync(join(projDir, "s.jsonl"), `${JSON.stringify({ cwd: dir })}\n`);
+
   const server = await createServer({ workspacePath: dir, webRoot });
   server.listen(port, "127.0.0.1", () => {
     process.stdout.write(`fixture diffectd listening on ${port} (ws=${dir})\n`);
@@ -55,6 +65,7 @@ async function main() {
     server.close(() => {
       rmSync(dir, { recursive: true, force: true });
       rmSync(xdg, { recursive: true, force: true });
+      rmSync(fakeHome, { recursive: true, force: true });
       process.exit(0);
     });
   };

@@ -6,7 +6,9 @@ import type {
   DaemonEventType,
   DismissThreadRequest,
   FileRange,
+  FsListing,
   OpenRequest,
+  RecommendedWorkspace,
   RefList,
   RepoDiff,
   ResolveThreadRequest,
@@ -39,6 +41,14 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path }),
     }).then((r) => json<WorkspaceEntry[]>(r)),
+
+  fsList: (path?: string) => {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+    return fetch(`/fs/list${qs}`).then((r) => json<FsListing>(r));
+  },
+
+  recommendations: () =>
+    fetch("/recommendations").then((r) => json<RecommendedWorkspace[]>(r)),
 
   uploadAttachment: (file: File) =>
     fetch("/attachments", {

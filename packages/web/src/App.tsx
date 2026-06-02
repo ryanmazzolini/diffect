@@ -17,6 +17,7 @@ import { DiffView } from "./components/DiffView.js";
 import { ThreadList } from "./components/ThreadList.js";
 import { Topbar } from "./components/Topbar.js";
 import { Sidebar } from "./components/Sidebar.js";
+import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 
 type StatusFilter = ThreadStatus | "all";
 const STATUS_FILTERS: StatusFilter[] = ["open", "resolved", "dismissed", "all"];
@@ -38,6 +39,7 @@ export function App() {
   );
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
   const diffPaneRef = useRef<HTMLElement>(null);
 
   const toggleTheme = () => {
@@ -55,12 +57,6 @@ export function App() {
   const loadWorkspaces = useCallback(() => {
     api.workspaces().then(setEntries).catch(() => setEntries([]));
   }, []);
-
-  const addWorkspace = () => {
-    const path = window.prompt("Workspace path to add:");
-    if (!path?.trim()) return;
-    api.addWorkspace(path.trim()).then(setEntries).catch((e) => setError(String(e)));
-  };
 
   const selectFile = (path: string) => {
     setActiveFile(path);
@@ -244,6 +240,9 @@ export function App() {
     <div className="app">
       {toast}
       {liveRegion}
+      {addOpen && (
+        <AddWorkspaceDialog onClose={() => setAddOpen(false)} onAdded={setEntries} />
+      )}
       <Topbar
         workspace={workspace}
         target={target}
@@ -267,7 +266,7 @@ export function App() {
             files={diff?.files ?? []}
             activeFile={activeFile}
             onSelectFile={selectFile}
-            onAddWorkspace={addWorkspace}
+            onAddWorkspace={() => setAddOpen(true)}
           />
         )}
         <main className="layout" style={{ gridTemplateColumns: paneColumns }}>

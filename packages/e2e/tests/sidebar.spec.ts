@@ -39,13 +39,3 @@ test("folders collapse/expand and the state persists per repo", async ({ page })
   await expect(page.locator(".tree-file", { hasText: "math.js" })).toBeVisible();
 });
 
-test("add-workspace prompts for a path", async ({ page }) => {
-  await page.goto("/");
-  let prompted = false;
-  page.on("dialog", (d) => {
-    prompted = true;
-    void d.dismiss();
-  });
-  await page.locator(".sidebar-add").click();
-  await expect.poll(() => prompted).toBe(true);
-});
