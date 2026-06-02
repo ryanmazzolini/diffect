@@ -1,3 +1,20 @@
+:root {
+  /* Theme-independent scales. Colours/elevation are themed below. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+  --z-sticky: 10;
+  --z-modal: 100;
+  --z-toast: 200;
+}
+
 :root,
 [data-theme="dark"] {
   --bg: #0d1117;
@@ -24,6 +41,13 @@
   --hl-type: #ffa657;
   --sel-bg: #388bfd40;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --overlay-backdrop: rgba(1, 4, 9, 0.6);
+  --diffstat-add: #3fb950;
+  --diffstat-del: #f85149;
+  --diffstat-neutral: var(--border);
 }
 
 [data-theme="light"] {
@@ -50,6 +74,13 @@
   --hl-func: #8250df;
   --hl-type: #953800;
   --sel-bg: #0969da26;
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.12);
+  --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.15);
+  --shadow-lg: 0 12px 32px rgba(31, 35, 40, 0.2);
+  --overlay-backdrop: rgba(31, 35, 40, 0.4);
+  --diffstat-add: #2da44e;
+  --diffstat-del: #cf222e;
+  --diffstat-neutral: var(--border);
 }
 
 * {
@@ -62,6 +93,35 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
+}
+
+/* Visible keyboard focus on every interactive control. Custom-styled buttons
+ * (gutter cells, sidebar items, filters) previously had no :focus styling at
+ * all, leaving keyboard users with no focus indicator. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Shared icon button: square, transparent, inherits text colour. Replaces the
+ * ad-hoc unicode-glyph buttons in the topbar/sidebar. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  line-height: 0;
+}
+.icon-btn:hover {
+  color: var(--text);
+  /* --border reads as a subtle chip on the elevated topbar/sidebar surfaces,
+   * where --bg would be near-invisible (white-on-white in light theme). */
+  background: var(--border);
 }
 
 .app {
@@ -144,17 +204,6 @@ body {
   color: var(--muted);
   font-size: 13px;
 }
-.theme-toggle,
-.pane-toggle {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 3px 8px;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
 .pane-resizer {
   cursor: col-resize;
   background: var(--border);
@@ -199,15 +248,6 @@ body {
 }
 .sidebar-head:first-child {
   margin-top: 0;
-}
-.sidebar-add {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  cursor: pointer;
-  line-height: 1;
-  padding: 0 6px;
 }
 .ws-path {
   font-family: var(--mono);
@@ -255,15 +295,6 @@ body {
 }
 .file-item {
   font-family: var(--mono);
-}
-.hamburger {
-  background: transparent;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 2px 6px;
 }
 .diff-pane {
   overflow: auto;
@@ -339,6 +370,9 @@ body {
   padding: 2px 8px;
 }
 .unfold-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   background: transparent;
   border: none;
   color: var(--accent);
@@ -442,18 +476,22 @@ body {
   position: absolute;
   left: -2px;
   top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 18px;
   height: 18px;
   border-radius: 4px;
   border: none;
   background: var(--accent);
   color: var(--on-accent);
-  font-weight: 700;
   cursor: pointer;
   opacity: 0;
-  line-height: 1;
+  line-height: 0;
 }
-.line:hover .comment-btn {
+/* Reveal on hover or keyboard focus (was hover-only, an invisible tab stop). */
+.line:hover .comment-btn,
+.comment-btn:focus-visible {
   opacity: 1;
 }
 

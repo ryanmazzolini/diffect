@@ -1,4 +1,5 @@
 import type { RepoSummary, WorkspaceEntry } from "@diffect/shared";
+import { Icon } from "../icons.js";
 
 interface Props {
   entries: WorkspaceEntry[];
@@ -35,11 +36,12 @@ export function Sidebar({
         <span>Workspaces</span>
         <button
           type="button"
-          className="sidebar-add"
+          className="icon-btn sidebar-add"
           title="Add a workspace"
+          aria-label="Add a workspace"
           onClick={onAddWorkspace}
         >
-          +
+          <Icon name="plus" size={14} />
         </button>
       </div>
       {entries.map((ws) => (

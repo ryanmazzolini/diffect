@@ -1,5 +1,6 @@
 import type { RefList, WorkspaceInfo } from "@diffect/shared";
 import type { Theme } from "../theme.js";
+import { Icon } from "../icons.js";
 import { TargetPicker } from "./TargetPicker.js";
 
 interface Props {
@@ -34,12 +35,12 @@ export function Topbar({
     <header className="topbar">
       <button
         type="button"
-        className="hamburger"
+        className="icon-btn hamburger"
         onClick={onToggleSidebar}
         title="Toggle sidebar"
         aria-label="Toggle sidebar"
       >
-        ☰
+        <Icon name="three-bars" />
       </button>
       <span className="brand">Diffect</span>
       <span className="workspace-path" title={workspace.root}>
@@ -52,21 +53,21 @@ export function Topbar({
       <span className="inbox">{openCount} open</span>
       <button
         type="button"
-        className="theme-toggle"
+        className="icon-btn theme-toggle"
         onClick={onToggleTheme}
         title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
         aria-label="Toggle color theme"
       >
-        {theme === "dark" ? "☀" : "☾"}
+        <Icon name={theme === "dark" ? "sun" : "moon"} />
       </button>
       <button
         type="button"
-        className="pane-toggle"
+        className="icon-btn pane-toggle"
         onClick={onTogglePane}
         title={paneCollapsed ? "Show threads panel" : "Hide threads panel"}
         aria-label="Toggle threads panel"
       >
-        {paneCollapsed ? "⟨" : "⟩"}
+        <Icon name={paneCollapsed ? "sidebar-expand" : "sidebar-collapse"} />
       </button>
     </header>
   );

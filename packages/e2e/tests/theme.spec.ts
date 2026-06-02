@@ -6,10 +6,11 @@ test("toggles light/dark and persists across reload", async ({ page }) => {
   const html = page.locator("html");
   await expect(html).toHaveAttribute("data-theme", "dark"); // default
 
-  await expect(page.locator(".theme-toggle")).toHaveText("☀");
+  // In dark mode the toggle offers the sun (switch to light); in light, the moon.
+  await expect(page.locator('.theme-toggle [data-icon="sun"]')).toBeVisible();
   await page.locator(".theme-toggle").click();
   await expect(html).toHaveAttribute("data-theme", "light");
-  await expect(page.locator(".theme-toggle")).toHaveText("☾");
+  await expect(page.locator('.theme-toggle [data-icon="moon"]')).toBeVisible();
 
   await page.reload();
   await expect(html).toHaveAttribute("data-theme", "light"); // persisted

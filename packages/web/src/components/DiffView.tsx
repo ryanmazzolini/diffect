@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Thread } from "@diffect/shared";
 import { api } from "../api.js";
+import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { CommentForm } from "./CommentForm.js";
 import { ThreadConversation } from "./ThreadConversation.js";
@@ -136,7 +137,8 @@ function FileDiff({
                     className="unfold-btn"
                     onClick={() => unfold(hi, gap.from, gap.to)}
                   >
-                    ⋯ expand {gap.to - gap.from + 1} lines
+                    <Icon name="fold-down" size={12} /> expand{" "}
+                    {gap.to - gap.from + 1} lines
                   </button>
                 </td>
               </tr>
@@ -298,9 +300,10 @@ function LineRow({
             <button
               className="comment-btn"
               title="Comment on this line or selection"
+              aria-label="Comment on this line or selection"
               onClick={onComment}
             >
-              +
+              <Icon name="plus" size={12} />
             </button>
           )}
         </td>
