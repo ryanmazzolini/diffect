@@ -28,8 +28,9 @@ test("dismissed thread collapses in the diff, then can be deleted", async ({
   // It now shows as a collapsed marker rather than the full conversation.
   await expect(page.locator(".thread-collapsed.status-dismissed")).toBeVisible();
 
-  // Expand and delete it.
+  // Expand and delete it (Delete now asks for confirmation).
   await page.locator(".thread-collapsed").click();
+  page.once("dialog", (d) => d.accept());
   await page
     .locator(".inline-thread", { hasText: "nit: spacing here" })
     .first()

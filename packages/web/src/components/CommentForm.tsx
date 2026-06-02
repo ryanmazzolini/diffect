@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Severity, Side } from "@diffect/shared";
 import { api } from "../api.js";
+import { useDraft } from "../useDraft.js";
 
 const SEVERITIES: Severity[] = ["must-fix", "suggestion", "nit", "question"];
 
@@ -26,7 +27,12 @@ export function CommentForm({
   onCancel,
   onCreated,
 }: Props) {
-  const [body, setBody] = useState("");
+  // Persist the in-progress comment per location so it survives a re-render or
+  // an SSE-driven diff reload and an accidental cancel.
+  const draftKey = `draft:${repo}:${worktree ?? ""}:${side}:${file}:${line}:${
+    endLine ?? line
+  }`;
+  const [body, setBody, clearDraft] = useDraft(draftKey);
   const [severity, setSeverity] = useState<Severity | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +52,7 @@ export function CommentForm({
         severity: severity || null,
         body: body.trim(),
       });
+      clearDraft();
       onCreated();
     } catch (e) {
       setError(String(e));

@@ -15,3 +15,11 @@ export function setStored(key: string, value: string): void {
     /* persistence is best-effort */
   }
 }
+
+export function removeStored(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* persistence is best-effort */
+  }
+}

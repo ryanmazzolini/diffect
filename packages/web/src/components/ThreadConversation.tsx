@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
+import { useDraft } from "../useDraft.js";
 
 /**
  * One thread's conversation plus its reply/resolve/dismiss controls. Shared by
@@ -16,7 +17,7 @@ export function ThreadConversation({
   onChanged: () => void;
 }) {
   const [replying, setReplying] = useState(false);
-  const [reply, setReply] = useState("");
+  const [reply, setReply, clearReply] = useDraft(`draft-reply:${thread.id}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +37,7 @@ export function ThreadConversation({
   const submitReply = async () => {
     if (!reply.trim()) return;
     await run(() => api.reply(thread.id, { body: reply.trim() }));
-    setReply("");
+    clearReply();
     setReplying(false);
   };
 
@@ -113,10 +114,18 @@ export function ThreadConversation({
           )}
           {thread.status !== "open" && (
             <button
-              className="ghost"
+              className="ghost danger"
               disabled={busy}
               title="Delete this thread permanently"
-              onClick={() => run(() => api.delete(thread.id))}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Delete this thread permanently? This cannot be undone.",
+                  )
+                ) {
+                  run(() => api.delete(thread.id));
+                }
+              }}
             >
               Delete
             </button>

@@ -9,6 +9,7 @@ import type {
   WorkspaceInfo,
 } from "@diffect/shared";
 import { api } from "./api.js";
+import { Icon } from "./icons.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { getStored, setStored } from "./storage.js";
 import { usePaneLayout } from "./usePaneLayout.js";
@@ -36,6 +37,7 @@ export function App() {
     () => getStored("diffect-sidebar-collapsed") === "1",
   );
   const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState("");
   const diffPaneRef = useRef<HTMLElement>(null);
 
   const toggleTheme = () => {
@@ -81,7 +83,10 @@ export function App() {
     const seq = ++threadSeq.current;
     try {
       const next = await api.threads();
-      if (seq === threadSeq.current) setThreads(next);
+      if (seq === threadSeq.current) {
+        setThreads(next);
+        setError(null); // a later success heals a stale error toast
+      }
     } catch (e) {
       if (seq === threadSeq.current) setError(String(e));
     }
@@ -92,7 +97,10 @@ export function App() {
     const seq = ++diffSeq.current;
     try {
       const next = await api.diff(repo, { worktree, target });
-      if (seq === diffSeq.current) setDiff(next);
+      if (seq === diffSeq.current) {
+        setDiff(next);
+        setError(null);
+      }
     } catch (e) {
       if (seq === diffSeq.current) setError(String(e));
     }
@@ -103,6 +111,7 @@ export function App() {
       .workspace()
       .then((ws) => {
         setWorkspace(ws);
+        setError(null);
         // Keep the current repo only if it still exists (a removed workspace must
         // not strand a dangling selection that 404s the diff); else pick the first.
         setRepo((prev) =>
@@ -173,25 +182,48 @@ export function App() {
   useEffect(() => {
     return api.subscribe((type) => {
       const r = refreshers.current;
-      if (type === DAEMON_EVENTS.threadChanged) r.refreshThreads();
-      else if (type === DAEMON_EVENTS.diffChanged) r.refreshDiff();
-      else if (type === DAEMON_EVENTS.workspaceChanged) {
+      if (type === DAEMON_EVENTS.threadChanged) {
+        r.refreshThreads();
+        setLive("Review threads updated");
+      } else if (type === DAEMON_EVENTS.diffChanged) {
+        r.refreshDiff();
+        setLive("Diff updated");
+      } else if (type === DAEMON_EVENTS.workspaceChanged) {
         r.refreshWorkspace();
         r.loadWorkspaces();
+        setLive("Workspaces updated");
       }
     });
   }, []);
 
-  if (error) {
-    return (
-      <div className="app">
-        <div className="error">Failed to load: {error}</div>
-      </div>
-    );
-  }
+  // A failed fetch no longer replaces the whole app; it shows a dismissible
+  // banner so the current view stays usable and recoverable.
+  const toast = error ? (
+    <div className="toast error-toast" role="alert">
+      <Icon name="alert" size={14} />
+      <span className="toast-msg">{error}</span>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Dismiss error"
+        onClick={() => setError(null)}
+      >
+        <Icon name="x" size={14} />
+      </button>
+    </div>
+  ) : null;
+  // Polite live region so screen readers hear SSE-driven changes.
+  const liveRegion = (
+    <div aria-live="polite" className="sr-only">
+      {live}
+    </div>
+  );
+
   if (!workspace || !repo) {
     return (
       <div className="app">
+        {toast}
+        {liveRegion}
         <div className="loading">Loading workspace…</div>
       </div>
     );
@@ -210,6 +242,8 @@ export function App() {
 
   return (
     <div className="app">
+      {toast}
+      {liveRegion}
       <Topbar
         workspace={workspace}
         target={target}
