@@ -4,10 +4,6 @@ import { TargetPicker } from "./TargetPicker.js";
 
 interface Props {
   workspace: WorkspaceInfo;
-  repo: string;
-  onRepo: (repo: string) => void;
-  worktree: string | null;
-  onWorktree: (worktree: string | null) => void;
   target: string;
   onTarget: (target: string) => void;
   refs: RefList | null;
@@ -16,16 +12,14 @@ interface Props {
   onToggleTheme: () => void;
   paneCollapsed: boolean;
   onTogglePane: () => void;
+  onToggleSidebar: () => void;
 }
 
-/** The application header: workspace path, repo/worktree/target selectors, and
- * the open-count + theme/pane controls. */
+/** Application header: sidebar toggle, brand/path, the review-target picker, and
+ * the open-count + theme/pane controls. Repo/worktree selection lives in the
+ * sidebar. */
 export function Topbar({
   workspace,
-  repo,
-  onRepo,
-  worktree,
-  onWorktree,
   target,
   onTarget,
   refs,
@@ -34,49 +28,23 @@ export function Topbar({
   onToggleTheme,
   paneCollapsed,
   onTogglePane,
+  onToggleSidebar,
 }: Props) {
-  const currentRepo = workspace.repos.find((r) => r.name === repo) ?? null;
-  const multiRepo = workspace.repos.length > 1;
-  const worktrees = currentRepo?.worktrees ?? [];
-  const multiWorktree = worktrees.length > 1;
-
   return (
     <header className="topbar">
+      <button
+        type="button"
+        className="hamburger"
+        onClick={onToggleSidebar}
+        title="Toggle sidebar"
+        aria-label="Toggle sidebar"
+      >
+        ☰
+      </button>
       <span className="brand">Diffect</span>
       <span className="workspace-path" title={workspace.root}>
         {workspace.root}
       </span>
-
-      {multiRepo && (
-        <select
-          className="selector"
-          value={repo}
-          onChange={(e) => onRepo(e.target.value)}
-          title="Repository"
-        >
-          {workspace.repos.map((r) => (
-            <option key={r.name} value={r.name}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {multiWorktree && (
-        <select
-          className="selector"
-          value={worktree ?? ""}
-          onChange={(e) => onWorktree(e.target.value || null)}
-          title="Worktree (A/B)"
-        >
-          <option value="">all worktrees</option>
-          {worktrees.map((w) => (
-            <option key={w.name} value={w.name}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-      )}
 
       <TargetPicker target={target} onTarget={onTarget} refs={refs} />
 

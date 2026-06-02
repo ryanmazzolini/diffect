@@ -10,6 +10,7 @@ import type {
   RepoDiff,
   ResolveThreadRequest,
   Thread,
+  WorkspaceEntry,
   WorkspaceInfo,
 } from "@diffect/shared";
 
@@ -28,6 +29,15 @@ async function json<T>(res: Response): Promise<T> {
 
 export const api = {
   workspace: () => fetch("/workspace").then((r) => json<WorkspaceInfo>(r)),
+
+  workspaces: () => fetch("/workspaces").then((r) => json<WorkspaceEntry[]>(r)),
+
+  addWorkspace: (path: string) =>
+    fetch("/workspaces", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).then((r) => json<WorkspaceEntry[]>(r)),
 
   diff: (repo: string, opts: { worktree?: string | null; target?: string } = {}) => {
     const q = new URLSearchParams();

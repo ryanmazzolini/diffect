@@ -115,7 +115,7 @@ function FileDiff({
   };
 
   return (
-    <div className="file">
+    <div className="file" id={`file-${file.path}`}>
       <div className="file-header">
         <span className={`status status-${file.status}`}>{file.status}</span>
         <span className="file-path">{file.path}</span>

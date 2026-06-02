@@ -5,14 +5,17 @@ import type {
   RepoDiff,
   Thread,
   ThreadStatus,
+  WorkspaceEntry,
   WorkspaceInfo,
 } from "@diffect/shared";
 import { api } from "./api.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
+import { getStored, setStored } from "./storage.js";
 import { usePaneLayout } from "./usePaneLayout.js";
 import { DiffView } from "./components/DiffView.js";
 import { ThreadList } from "./components/ThreadList.js";
 import { Topbar } from "./components/Topbar.js";
+import { Sidebar } from "./components/Sidebar.js";
 
 type StatusFilter = ThreadStatus | "all";
 const STATUS_FILTERS: StatusFilter[] = ["open", "resolved", "dismissed", "all"];
@@ -27,12 +30,38 @@ export function App() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => getStored("diffect-sidebar-collapsed") === "1",
+  );
   const [error, setError] = useState<string | null>(null);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
     setThemeState(next);
+  };
+
+  const toggleSidebar = () =>
+    setSidebarCollapsed((c) => {
+      setStored("diffect-sidebar-collapsed", c ? "0" : "1");
+      return !c;
+    });
+
+  const loadWorkspaces = useCallback(() => {
+    api.workspaces().then(setEntries).catch(() => setEntries([]));
+  }, []);
+
+  const addWorkspace = () => {
+    const path = window.prompt("Workspace path to add:");
+    if (!path?.trim()) return;
+    api.addWorkspace(path.trim()).then(setEntries).catch((e) => setError(String(e)));
+  };
+
+  const selectFile = (path: string) => {
+    setActiveFile(path);
+    document.getElementById(`file-${path}`)?.scrollIntoView({ block: "start" });
   };
 
   const {
@@ -68,16 +97,27 @@ export function App() {
     }
   }, [repo, worktree, target]);
 
-  useEffect(() => {
+  const refreshWorkspace = useCallback(() => {
     api
       .workspace()
       .then((ws) => {
         setWorkspace(ws);
-        setRepo((prev) => prev ?? ws.repos[0]?.name ?? null);
+        // Keep the current repo only if it still exists (a removed workspace must
+        // not strand a dangling selection that 404s the diff); else pick the first.
+        setRepo((prev) =>
+          prev && ws.repos.some((r) => r.name === prev)
+            ? prev
+            : (ws.repos[0]?.name ?? null),
+        );
       })
       .catch((e) => setError(String(e)));
+  }, []);
+
+  useEffect(() => {
+    refreshWorkspace();
+    loadWorkspaces();
     refreshThreads();
-  }, [refreshThreads]);
+  }, [refreshWorkspace, loadWorkspaces, refreshThreads]);
 
   // Reset the worktree selection when switching repos.
   useEffect(() => {
@@ -105,12 +145,17 @@ export function App() {
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
   // selector changed would tear the EventSource down and drop events that fire
   // during the reconnect gap.
-  const refreshers = useRef({ refreshThreads, refreshDiff });
-  refreshers.current = { refreshThreads, refreshDiff };
+  const refreshers = useRef({ refreshThreads, refreshDiff, refreshWorkspace, loadWorkspaces });
+  refreshers.current = { refreshThreads, refreshDiff, refreshWorkspace, loadWorkspaces };
   useEffect(() => {
     return api.subscribe((type) => {
-      if (type === DAEMON_EVENTS.threadChanged) refreshers.current.refreshThreads();
-      else if (type === DAEMON_EVENTS.diffChanged) refreshers.current.refreshDiff();
+      const r = refreshers.current;
+      if (type === DAEMON_EVENTS.threadChanged) r.refreshThreads();
+      else if (type === DAEMON_EVENTS.diffChanged) r.refreshDiff();
+      else if (type === DAEMON_EVENTS.workspaceChanged) {
+        r.refreshWorkspace();
+        r.loadWorkspaces();
+      }
     });
   }, []);
 
@@ -139,15 +184,12 @@ export function App() {
   );
   const multiRepo = workspace.repos.length > 1;
   const editors = workspace.editors ?? [];
+  const files = diff?.files.map((f) => f.path) ?? [];
 
   return (
     <div className="app">
       <Topbar
         workspace={workspace}
-        repo={repo}
-        onRepo={setRepo}
-        worktree={worktree}
-        onWorktree={setWorktree}
         target={target}
         onTarget={setTarget}
         refs={refs}
@@ -156,8 +198,23 @@ export function App() {
         onToggleTheme={toggleTheme}
         paneCollapsed={paneCollapsed}
         onTogglePane={toggleCollapsed}
+        onToggleSidebar={toggleSidebar}
       />
-      <main className="layout" style={{ gridTemplateColumns: paneColumns }}>
+      <div className="workbench">
+        {!sidebarCollapsed && (
+          <Sidebar
+            entries={entries}
+            repo={repo}
+            worktree={worktree}
+            onSelectRepo={setRepo}
+            onSelectWorktree={setWorktree}
+            files={files}
+            activeFile={activeFile}
+            onSelectFile={selectFile}
+            onAddWorkspace={addWorkspace}
+          />
+        )}
+        <main className="layout" style={{ gridTemplateColumns: paneColumns }}>
         <section className="diff-pane">
           <DiffView
             repo={repo}
@@ -196,7 +253,8 @@ export function App() {
           />
         </aside>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
