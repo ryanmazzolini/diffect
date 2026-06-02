@@ -73,11 +73,14 @@ function FileDiff({
   // Open the comment form for the active selection if this line is in it, else
   // just this line.
   const openComment = (lineNo: number) => {
-    setForm(
+    const range =
       selRange && lineNo >= selRange.lo && lineNo <= selRange.hi
         ? { start: selRange.lo, end: selRange.hi }
-        : { start: lineNo, end: lineNo },
-    );
+        : { start: lineNo, end: lineNo };
+    setForm(range);
+    // Keep the highlight in sync with what the form will comment on, so opening
+    // a single-line form outside an old selection doesn't leave a stale range lit.
+    setSel({ anchor: range.start, head: range.end });
   };
 
   const closeForm = () => {
