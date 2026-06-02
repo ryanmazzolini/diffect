@@ -11,14 +11,22 @@ the browser UI, the CLI, and agents are equal peers over the same files.
 
 ## What it does
 
-Review one or more git repos across one or more workspaces at once (add them from
-the sidebar; worktrees included). Pick any target — `work`, `staged`, `unstaged`,
+Review one or more git repos across one or more workspaces at once — add them from
+the sidebar dialog, which suggests recent projects from your Claude Code / pi
+sessions and includes an in-app folder browser (worktrees included). A collapsible
+file tree shows per-file diffstats; pick any target — `work`, `staged`, `unstaged`,
 a ref, or a GitHub-style base↔compare range. The diff is syntax-highlighted, with
-light/dark themes, a resizable thread pane, and unfoldable context. Comment on a
-line or a selected range; comments re-anchor as the code changes and are flagged
-*stale* when their range disappears — never silently dropped. Resolve, dismiss, or
-delete threads. The browser updates live over SSE and can open a `file:line` in
-your editor. The same threads are available to an agent through the event log.
+light/dark themes (following your OS by default), sticky file headers, unfoldable
+context, and a resizable thread pane.
+
+Comment on a line, a click-or-keyboard-selected range, or **any file in the repo**
+(not just the changed ones, via a picker — it surfaces as an out-of-diff block).
+The composer is GitHub-style markdown with write/preview and image attachments;
+comments re-anchor as the code changes and are flagged *stale* when their range
+disappears — never silently dropped. Resolve, dismiss, or delete threads; mark
+files viewed; navigate with `j`/`k`. The browser updates live over SSE and can open
+a `file:line` in your editor. The same threads are available to an agent through
+the event log.
 
 Not yet built: AI review passes, GitHub sync, and auth for remote access.
 
