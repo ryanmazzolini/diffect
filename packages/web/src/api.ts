@@ -4,6 +4,7 @@ import type {
   CreateThreadRequest,
   DaemonEventType,
   DismissThreadRequest,
+  FileRange,
   OpenRequest,
   RefList,
   RepoDiff,
@@ -36,6 +37,22 @@ export const api = {
     return fetch(
       `/repos/${encodeURIComponent(repo)}/diff${qs ? `?${qs}` : ""}`,
     ).then((r) => json<RepoDiff>(r));
+  },
+
+  file: (
+    repo: string,
+    opts: { path: string; side: string; from: number; to: number; worktree?: string | null },
+  ) => {
+    const q = new URLSearchParams({
+      path: opts.path,
+      side: opts.side,
+      from: String(opts.from),
+      to: String(opts.to),
+    });
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    return fetch(`/repos/${encodeURIComponent(repo)}/file?${q}`).then((r) =>
+      json<FileRange>(r),
+    );
   },
 
   refs: (repo: string, worktree?: string | null) => {

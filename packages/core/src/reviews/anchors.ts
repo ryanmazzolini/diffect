@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
 import type { AnchorState, Side, Thread, ThreadAnchor } from "@diffect/shared";
 import { git } from "../git/exec.js";
+import { containedPath } from "../path-safe.js";
 
 /** Lines of surrounding context captured on each side of the anchored range. */
 const CONTEXT_RADIUS = 3;
@@ -219,8 +219,12 @@ export async function readSideLines(
       return null; // path absent at base
     }
   }
+  // Guard against path traversal: `file` may be user-supplied (a comment's path
+  // or the unfold endpoint's ?path=), so confine the read to the repo.
+  const abs = containedPath(repoRoot, file);
+  if (!abs) return null;
   try {
-    const content = await readFile(join(repoRoot, file), "utf8");
+    const content = await readFile(abs, "utf8");
     if (content.includes("\0")) return null;
     return toLines(content);
   } catch {

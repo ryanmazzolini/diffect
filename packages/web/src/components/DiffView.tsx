@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { DiffFile, DiffLine, RepoDiff, Thread } from "@diffect/shared";
+import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Thread } from "@diffect/shared";
+import { api } from "../api.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { CommentForm } from "./CommentForm.js";
 import { ThreadConversation } from "./ThreadConversation.js";
@@ -88,15 +89,68 @@ function FileDiff({
     setSel(null);
   };
 
+  // Context lines unfolded above a hunk (new-side), keyed by hunk index.
+  const [expanded, setExpanded] = useState<Record<number, DiffLine[]>>({});
+  const unfold = async (hi: number, from: number, to: number) => {
+    try {
+      const r = await api.file(repo, {
+        path: file.path,
+        side: "new",
+        from,
+        to,
+        worktree,
+      });
+      setExpanded((prev) => ({
+        ...prev,
+        [hi]: r.lines.map((text, i) => ({
+          type: "context" as const,
+          old: null,
+          new: r.from + i,
+          text,
+        })),
+      }));
+    } catch {
+      /* leave the gap collapsed on failure */
+    }
+  };
+
   return (
     <div className="file">
       <div className="file-header">
         <span className={`status status-${file.status}`}>{file.status}</span>
         <span className="file-path">{file.path}</span>
       </div>
-      {file.hunks.map((hunk, hi) => (
+      {file.hunks.map((hunk, hi) => {
+        const gap = gapAbove(file.hunks, hi);
+        const exp = expanded[hi];
+        return (
         <table className="hunk" key={hi}>
           <tbody>
+            {gap && !exp && (
+              <tr className="unfold-row">
+                <td className="ln" />
+                <td className="ln" />
+                <td className="code">
+                  <button
+                    type="button"
+                    className="unfold-btn"
+                    onClick={() => unfold(hi, gap.from, gap.to)}
+                  >
+                    ⋯ expand {gap.to - gap.from + 1} lines
+                  </button>
+                </td>
+              </tr>
+            )}
+            {exp?.map((line, li) => (
+              <tr className="line line-context" key={`x${li}`}>
+                <td className="ln" />
+                <td className="ln">{line.new}</td>
+                <td className="code">
+                  <span className="sigil"> </span>
+                  <span className="text">{highlightLine(line.text, lang)}</span>
+                </td>
+              </tr>
+            ))}
             <tr className="hunk-header">
               <td className="ln" />
               <td className="ln" />
@@ -144,9 +198,22 @@ function FileDiff({
             })}
           </tbody>
         </table>
-      ))}
+        );
+      })}
     </div>
   );
+}
+
+/** The collapsed new-side line span above hunk `hi`, or null if none. */
+function gapAbove(
+  hunks: DiffHunk[],
+  hi: number,
+): { from: number; to: number } | null {
+  const prev = hunks[hi - 1];
+  const prevEnd = prev ? prev.newStart + prev.newLines - 1 : 0;
+  const from = prevEnd + 1;
+  const to = hunks[hi]!.newStart - 1;
+  return to >= from ? { from, to } : null;
 }
 
 /**

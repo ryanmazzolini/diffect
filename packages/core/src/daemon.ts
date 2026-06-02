@@ -16,7 +16,7 @@ import type {
 import { resolveWorkBase } from "./git/diff.js";
 import { listRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
-import { buildAnchor } from "./reviews/anchors.js";
+import { buildAnchor, readSideLines } from "./reviews/anchors.js";
 import {
   addComment,
   createThread,
@@ -173,6 +173,7 @@ async function handle(
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
+  if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
 
   // --- Static web assets --------------------------------------------------
@@ -398,6 +399,44 @@ async function repoRoutes(
     return true;
   }
   return false;
+}
+
+/** `GET /repos/:repo/file?path=&side=&from=&to=` — lines for unfolding context. */
+async function fileRoute(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  const m = /^\/repos\/(.+)\/file$/.exec(path);
+  if (!(method === "GET" && m)) return false;
+  const q = url.searchParams;
+  const treeRoot = resolveRepoTreeOr404(
+    ctx,
+    res,
+    decodeURIComponent(m[1]!),
+    q.get("worktree"),
+  );
+  if (!treeRoot) return true;
+  const file = q.get("path");
+  const side = q.get("side") === "old" ? "old" : "new";
+  const from = Number(q.get("from"));
+  const to = Number(q.get("to"));
+  if (!file || !Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
+    sendJson(res, 400, { error: "path, from, and to (from<=to, from>=1) required" });
+    return true;
+  }
+  const base = side === "old" ? await resolveWorkBase(treeRoot) : null;
+  const all = await readSideLines(treeRoot, file, side, base);
+  if (!all) {
+    sendJson(res, 404, { error: "file not found or binary" });
+    return true;
+  }
+  // Clamp the span so a huge `to` can't return an enormous payload.
+  const lines = all.slice(from - 1, Math.min(to, from - 1 + 2000));
+  sendJson(res, 200, { from, lines });
+  return true;
 }
 
 /** Resolve repo+worktree to a tree root, sending a 404 and returning null on miss. */

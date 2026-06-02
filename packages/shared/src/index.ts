@@ -99,6 +99,13 @@ export interface RefList {
   commits: { sha: string; subject: string }[];
 }
 
+/** A slice of a file's lines, for unfolding collapsed diff context (GET /repos/:repo/file). */
+export interface FileRange {
+  /** 1-based line number of the first returned line. */
+  from: number;
+  lines: string[];
+}
+
 export interface RepoSummary {
   /** URL-safe repo id, stable across worktrees. */
   name: string;

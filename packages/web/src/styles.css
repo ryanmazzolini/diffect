@@ -244,6 +244,18 @@ body {
   color: var(--muted);
   padding: 2px 8px;
 }
+.unfold-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 0;
+}
+.unfold-btn:hover {
+  text-decoration: underline;
+}
 .line td {
   padding: 0 8px;
   vertical-align: top;

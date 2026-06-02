@@ -27,17 +27,18 @@ async function main() {
   await git(dir, ["init", "-b", "main"]);
   await git(dir, ["config", "user.email", "e2e@example.com"]);
   await git(dir, ["config", "user.name", "E2E"]);
-  writeFileSync(
-    join(dir, "calc.js"),
-    "export function add(a, b) {\n  return a + b\n}\n\nexport function mul(a, b) {\n  return a * b\n}\n",
+  // A head of constants so the changed function sits deep in the file — this
+  // leaves a collapsed gap above the hunk for the unfold (expand-context) test.
+  const head = Array.from({ length: 25 }, (_, i) => `export const k${i} = ${i};`).join(
+    "\n",
   );
+  const calc = (todo) =>
+    `${head}\n\nexport function add(a, b) {\n  return a + b${todo}\n}\n\nexport function mul(a, b) {\n  return a * b\n}\n`;
+  writeFileSync(join(dir, "calc.js"), calc(""));
   await git(dir, ["add", "."]);
   await git(dir, ["commit", "-m", "base"]);
   // A work change so the default diff is non-empty.
-  writeFileSync(
-    join(dir, "calc.js"),
-    "export function add(a, b) {\n  return a + b // TODO: overflow?\n}\n\nexport function mul(a, b) {\n  return a * b\n}\n",
-  );
+  writeFileSync(join(dir, "calc.js"), calc(" // TODO: overflow?"));
 
   const server = await createServer({ workspacePath: dir, webRoot });
   server.listen(port, "127.0.0.1", () => {
