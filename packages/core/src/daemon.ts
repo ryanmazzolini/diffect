@@ -9,6 +9,8 @@ import type {
   DismissThreadRequest,
   OpenRequest,
   ResolveThreadRequest,
+  WorkspaceEntry,
+  WorkspaceMutationRequest,
 } from "@diffect/shared";
 import { resolveWorkBase } from "./git/diff.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
@@ -35,39 +37,85 @@ import {
 import {
   discoverWorkspace,
   findRepo,
+  mergeWorkspaces,
   resolveRepoRoot,
+  summarizeRepos,
   summarizeWorkspace,
+  type DiscoveredRepo,
   type Workspace,
 } from "./workspace.js";
+import {
+  addWorkspaceToRegistry,
+  readWorkspaceRegistry,
+  removeWorkspaceFromRegistry,
+} from "./store/registry.js";
 
 export interface DaemonOptions {
-  workspacePath: string;
+  /** Workspace to serve at boot, always included even if not yet registered. */
+  workspacePath?: string;
   /** Directory of built web assets to serve; omit to run API-only. */
   webRoot?: string;
+  /** Bind host; gates workspace-mutation routes to loopback. */
+  host?: string;
   /** Clock injection for deterministic tests. */
   now?: () => string;
 }
 
 interface RouteContext {
+  /** Per-path discovered workspaces (source of the /workspaces breakdown). */
+  workspaces: Workspace[];
+  /** Aggregate view (union of all repos, globally deduped) used by repo routes. */
   ws: Workspace;
+  /** Boot workspace, always re-included on rebuild even if not in the registry. */
+  seed: string | null;
+  host: string;
   now: () => string;
   webRoot?: string;
   events: EventHub;
   editors: string[];
 }
 
+/** Discover every registered workspace plus the boot seed; skip unreadable ones. */
+async function loadWorkspaces(seed: string | null): Promise<Workspace[]> {
+  const paths = await readWorkspaceRegistry();
+  if (seed && !paths.includes(seed)) paths.push(seed);
+  const discovered = await Promise.all(
+    paths.map((p) =>
+      discoverWorkspace(p).catch((err) => {
+        process.stderr.write(
+          `diffectd: skipping workspace ${p}: ${err?.message ?? err}\n`,
+        );
+        return null;
+      }),
+    ),
+  );
+  return discovered.filter((w): w is Workspace => w !== null);
+}
+
+/** Re-read the registry and rebuild the aggregate + watchers after a change. */
+async function rebuildWorkspaces(ctx: RouteContext): Promise<void> {
+  ctx.workspaces = await loadWorkspaces(ctx.seed);
+  ctx.ws = mergeWorkspaces(ctx.workspaces);
+  ctx.events.rebuild(ctx.ws);
+}
+
 /**
  * Build the diffectd HTTP server. The daemon is a thin wrapper over `git diff`
- * and the `.reviews/` event log — the file store remains the source of truth, so
- * the CLI and agents work the same whether or not this is running.
+ * and the central review event log — the file store remains the source of truth,
+ * so the CLI and agents work the same whether or not this is running.
  */
 export async function createServer(opts: DaemonOptions): Promise<Server> {
-  const ws = await discoverWorkspace(opts.workspacePath);
+  const seed = opts.workspacePath ? resolve(opts.workspacePath) : null;
+  const workspaces = await loadWorkspaces(seed);
+  const ws = mergeWorkspaces(workspaces);
   const events = new EventHub(ws);
   events.start();
   const editors = await detectEditors();
   const ctx: RouteContext = {
+    workspaces,
     ws,
+    seed,
+    host: opts.host ?? "127.0.0.1",
     now: opts.now ?? (() => new Date().toISOString()),
     webRoot: opts.webRoot,
     events,
@@ -122,6 +170,37 @@ async function handle(
     const threads = await loadAllThreads(ctx.ws);
     const open = threads.filter((t) => t.status === "open").length;
     return sendJson(res, 200, await summarizeWorkspace(ctx.ws, open, ctx.editors));
+  }
+
+  // --- Workspaces (multi-workspace management) ----------------------------
+  if (method === "GET" && path === "/workspaces") {
+    return sendJson(res, 200, await listWorkspaces(ctx));
+  }
+  if ((method === "POST" || method === "DELETE") && path === "/workspaces") {
+    if (!isLoopback(ctx.host)) {
+      // Adding/removing a workspace opens an arbitrary host path; only allow it
+      // when the daemon is bound to loopback, never over a shared network.
+      return sendJson(res, 403, {
+        error: "workspace management is only allowed on a loopback-bound daemon",
+      });
+    }
+    const body = await readJsonBody<WorkspaceMutationRequest>(req);
+    if (!body || typeof body.path !== "string" || !body.path.trim()) {
+      return sendJson(res, 400, { error: "path is required" });
+    }
+    if (method === "POST") {
+      // Validate it's a real workspace (has a git repo) before registering.
+      try {
+        await discoverWorkspace(resolve(body.path));
+      } catch (err) {
+        return sendJson(res, 400, { error: (err as Error).message });
+      }
+      await addWorkspaceToRegistry(body.path);
+    } else {
+      await removeWorkspaceFromRegistry(body.path);
+    }
+    await rebuildWorkspaces(ctx);
+    return sendJson(res, 200, await listWorkspaces(ctx));
   }
 
   if (method === "GET" && path === "/threads") {
@@ -260,6 +339,28 @@ async function withThread(
       throw err;
     }
   }
+}
+
+/** Group the aggregate repos back by their source workspace path. */
+async function listWorkspaces(ctx: RouteContext): Promise<WorkspaceEntry[]> {
+  const byPath = new Map<string, DiscoveredRepo[]>();
+  for (const repo of ctx.ws.repos) {
+    const key = repo.workspacePath ?? ctx.ws.root;
+    const list = byPath.get(key);
+    if (list) list.push(repo);
+    else byPath.set(key, [repo]);
+  }
+  return Promise.all(
+    [...byPath].map(async ([path, repos]) => ({
+      path,
+      repos: await summarizeRepos(repos),
+    })),
+  );
+}
+
+/** Loopback hosts may manage workspaces; a network-bound daemon may not. */
+function isLoopback(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {

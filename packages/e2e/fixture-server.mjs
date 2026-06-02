@@ -18,6 +18,10 @@ const git = (cwd, args) =>
   ex("git", args, { cwd, env: { ...process.env, GIT_PAGER: "cat", LC_ALL: "C" } });
 
 const dir = mkdtempSync(join(tmpdir(), "diffect-e2e-"));
+// Isolate the central review store + workspace registry so e2e never reads or
+// writes the developer's real ~/.config/diffect.
+const xdg = mkdtempSync(join(tmpdir(), "diffect-e2e-xdg-"));
+process.env.XDG_CONFIG_HOME = xdg;
 
 async function main() {
   await git(dir, ["init", "-b", "main"]);
@@ -43,6 +47,7 @@ async function main() {
   const shutdown = () => {
     server.close(() => {
       rmSync(dir, { recursive: true, force: true });
+      rmSync(xdg, { recursive: true, force: true });
       process.exit(0);
     });
   };

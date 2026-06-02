@@ -49,7 +49,11 @@ async function main(): Promise<void> {
     ),
   );
   const webRoot = locateWebRoot();
-  const server = await createServer({ workspacePath: args.workspace, webRoot });
+  const server = await createServer({
+    workspacePath: args.workspace,
+    webRoot,
+    host: args.host,
+  });
   server.listen(args.port, args.host, () => {
     const where = webRoot ? "browser + API" : "API only";
     process.stdout.write(

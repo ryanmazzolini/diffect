@@ -24,6 +24,9 @@ export interface DiscoveredRepo {
   commonDir: string;
   /** All checkouts of this repo, including the primary one. */
   worktrees: DiscoveredWorktree[];
+  /** The registered workspace path this repo was discovered under (set when
+   * repos from several workspaces are merged). */
+  workspacePath?: string;
 }
 
 export interface DiscoveredWorktree {
@@ -170,6 +173,20 @@ function dedupeNames(repos: DiscoveredRepo[]): DiscoveredRepo[] {
   return repos;
 }
 
+/**
+ * Merge several discovered workspaces into one aggregate view: the union of all
+ * their repos, re-deduplicated globally so names stay unique and URL-safe across
+ * workspaces. Each aggregate repo is tagged with its source `workspacePath`.
+ * Source repo objects are left untouched (clones are deduped) so per-workspace
+ * listings keep their own names.
+ */
+export function mergeWorkspaces(workspaces: Workspace[]): Workspace {
+  const tagged = workspaces.flatMap((w) =>
+    w.repos.map((r) => ({ ...r, workspacePath: w.root })),
+  );
+  return { root: workspaces[0]?.root ?? "", repos: dedupeNames(tagged) };
+}
+
 /** Look up one repo in the workspace by its name. */
 export function findRepo(ws: Workspace, name: string): DiscoveredRepo | undefined {
   return ws.repos.find((r) => r.name === name);
@@ -190,13 +207,12 @@ export function resolveRepoRoot(
   return r.worktrees.find((w) => w.name === worktree)?.root;
 }
 
-export async function summarizeWorkspace(
-  ws: Workspace,
-  openThreadCount: number,
-  editors: string[] = [],
-): Promise<WorkspaceInfo> {
-  const repos: RepoSummary[] = await Promise.all(
-    ws.repos.map(async (r) => ({
+/** Summarize a set of repos (base/default-branch/worktrees) for the API. */
+export async function summarizeRepos(
+  repos: DiscoveredRepo[],
+): Promise<RepoSummary[]> {
+  return Promise.all(
+    repos.map(async (r) => ({
       name: r.name,
       root: r.root,
       base: await resolveWorkBase(r.root),
@@ -204,5 +220,17 @@ export async function summarizeWorkspace(
       worktrees: r.worktrees.map((w) => ({ name: w.name, root: w.root })),
     })),
   );
-  return { root: ws.root, repos, openThreadCount, editors };
+}
+
+export async function summarizeWorkspace(
+  ws: Workspace,
+  openThreadCount: number,
+  editors: string[] = [],
+): Promise<WorkspaceInfo> {
+  return {
+    root: ws.root,
+    repos: await summarizeRepos(ws.repos),
+    openThreadCount,
+    editors,
+  };
 }

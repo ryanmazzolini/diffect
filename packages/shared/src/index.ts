@@ -13,6 +13,7 @@ export const THREAD_SCHEMA_VERSION = 1 as const;
 export const DAEMON_EVENTS = {
   diffChanged: "diff.changed",
   threadChanged: "thread.changed",
+  workspaceChanged: "workspace.changed",
 } as const;
 export type DaemonEventType = (typeof DAEMON_EVENTS)[keyof typeof DAEMON_EVENTS];
 
@@ -109,6 +110,18 @@ export interface WorkspaceInfo {
   openThreadCount: number;
   /** Editors detected on the host, for the open-in-editor handoff. */
   editors: string[];
+}
+
+/** One registered workspace path and the repos discovered under it. */
+export interface WorkspaceEntry {
+  /** Absolute path the workspace was registered at. */
+  path: string;
+  repos: RepoSummary[];
+}
+
+/** Body for POST/DELETE /workspaces. */
+export interface WorkspaceMutationRequest {
+  path: string;
 }
 
 export interface OpenRequest {

@@ -21,13 +21,28 @@ export class EventHub {
   private timers = new Map<DaemonEventType, NodeJS.Timeout>();
   private started = false;
 
-  constructor(private readonly ws: Workspace) {}
+  constructor(private ws: Workspace) {}
 
   /** Begin watching. Safe to call once; later calls are no-ops. */
   start(): void {
     if (this.started) return;
     this.started = true;
+    this.attachWatches();
+  }
 
+  /**
+   * Swap the watched workspace (e.g. after a workspace is added/removed) without
+   * dropping connected SSE clients: tear down the file watchers, re-attach for
+   * the new repo set, and notify clients that the workspace list changed.
+   */
+  rebuild(ws: Workspace): void {
+    this.detachWatches();
+    this.ws = ws;
+    if (this.started) this.attachWatches();
+    this.emit(DAEMON_EVENTS.workspaceChanged);
+  }
+
+  private attachWatches(): void {
     // Review stores: one central log per repo now lives outside the worktree.
     // Any write there means threads changed. Create each dir first so the watch
     // attaches before the first comment (fs.watch needs an existing path).
@@ -51,6 +66,11 @@ export class EventHub {
         });
       }
     }
+  }
+
+  private detachWatches(): void {
+    for (const w of this.watchers) w.close();
+    this.watchers = [];
   }
 
   private addWatch(dir: string, onChange: (filename: string | null) => void): void {
@@ -105,8 +125,7 @@ export class EventHub {
 
   /** Stop all watchers and timers. Does not close client connections. */
   close(): void {
-    for (const w of this.watchers) w.close();
-    this.watchers = [];
+    this.detachWatches();
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
   }

@@ -1,13 +1,8 @@
 import type { Thread } from "@diffect/shared";
 import { resolveWorkBase } from "../git/diff.js";
-import type { Workspace } from "../workspace.js";
+import type { DiscoveredRepo, Workspace } from "../workspace.js";
 import { loadThreads, readEvents } from "./event-log.js";
 import { refreshAnchors, type RepoLocation } from "./anchors.js";
-
-/** Map key for a (repo, worktree) pair; worktree null → primary. */
-function locKey(repo: string, worktree: string | null): string {
-  return `${repo}\u0000${worktree ?? ""}`;
-}
 
 /**
  * Load and concatenate threads from every repo's central store. The store is
@@ -38,26 +33,39 @@ export async function findRepoRootForThread(
   return undefined;
 }
 
+/** Per-worktree content locations for one repo (worktree name → root+base). */
+async function repoLocations(
+  repo: DiscoveredRepo,
+): Promise<Map<string, RepoLocation>> {
+  const locations = new Map<string, RepoLocation>();
+  for (const wt of repo.worktrees) {
+    const loc: RepoLocation = { root: wt.root, base: await resolveWorkBase(wt.root) };
+    if (wt.root === repo.root) locations.set("", loc); // primary (no worktree)
+    locations.set(wt.name, loc);
+  }
+  return locations;
+}
+
 /**
- * Load threads from the event log and re-anchor each against the current code,
- * so callers see up-to-date positions and stale flags. Each repo/worktree root
- * and its base are resolved once per load. Shared by the daemon and the CLI.
+ * Load threads and re-anchor each against the current code so callers see
+ * up-to-date positions and stale flags. Anchoring is done per repo against the
+ * repo it was loaded from — never via the thread's stored repo *name* — so a
+ * globally-deduped name shift across workspaces can't mislocate a thread.
  */
 export async function loadRefreshedThreads(ws: Workspace): Promise<Thread[]> {
-  const threads = await loadAllThreads(ws);
-  if (threads.length === 0) return threads;
-
-  const locations = new Map<string, RepoLocation>();
+  const out: Thread[] = [];
   for (const repo of ws.repos) {
-    for (const wt of repo.worktrees) {
-      const loc: RepoLocation = { root: wt.root, base: await resolveWorkBase(wt.root) };
-      // Threads created without a worktree resolve to the primary; threads with
-      // an explicit worktree resolve by name.
-      if (wt.root === repo.root) locations.set(locKey(repo.name, null), loc);
-      locations.set(locKey(repo.name, wt.name), loc);
-    }
+    const threads = await loadThreads(repo.root);
+    if (threads.length === 0) continue;
+    const locations = await repoLocations(repo);
+    const refreshed = await refreshAnchors(threads, (_repo, worktree) =>
+      locations.get(worktree ?? ""),
+    );
+    // Stamp the CURRENT aggregate name: a thread's stored repo name can go stale
+    // when cross-workspace dedup renames a colliding basename, which would break
+    // name-based filtering. The store key (repo.root) is the real identity.
+    for (const t of refreshed) t.repo = repo.name;
+    out.push(...refreshed);
   }
-  return refreshAnchors(threads, (repo, worktree) =>
-    locations.get(locKey(repo, worktree)),
-  );
+  return out;
 }
