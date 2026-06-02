@@ -259,6 +259,28 @@ body {
   opacity: 1;
 }
 
+/* Collapsed (resolved/dismissed) inline thread marker */
+.thread-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.thread-collapsed-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Inline thread + comment form */
 .inline-thread,
 .comment-form {

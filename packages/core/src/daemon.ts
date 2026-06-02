@@ -6,6 +6,7 @@ import { extname, join, resolve, sep } from "node:path";
 import type {
   AddCommentRequest,
   CreateThreadRequest,
+  DeleteThreadRequest,
   DismissThreadRequest,
   OpenRequest,
   ResolveThreadRequest,
@@ -18,6 +19,7 @@ import { buildAnchor } from "./reviews/anchors.js";
 import {
   addComment,
   createThread,
+  deleteThread,
   dismissThread,
   resolveThread,
   UnknownThreadError,
@@ -279,6 +281,21 @@ async function handle(
     return withThread(res, async () =>
       dismissThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
     );
+  }
+
+  const deleteMatch = /^\/threads\/([^/]+)\/delete$/.exec(path);
+  if (method === "POST" && deleteMatch) {
+    const id = decodeURIComponent(deleteMatch[1]!);
+    const body = (await readJsonBody<DeleteThreadRequest>(req)) ?? {};
+    try {
+      await deleteThread(await requireRepoRoot(ctx, id), id, body, ctx.now());
+      return sendJson(res, 200, { ok: true });
+    } catch (err) {
+      if (err instanceof UnknownThreadError) {
+        return sendJson(res, 404, { error: err.message });
+      }
+      throw err;
+    }
   }
 
   // --- Editor handoff -----------------------------------------------------

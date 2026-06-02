@@ -62,6 +62,13 @@ export const api = {
   dismiss: (id: string, req: DismissThreadRequest = {}) =>
     post(`/threads/${encodeURIComponent(id)}/dismiss`, req),
 
+  delete: (id: string) =>
+    fetch(`/threads/${encodeURIComponent(id)}/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    }).then((r) => json<{ ok: boolean }>(r)),
+
   open: (req: OpenRequest) =>
     fetch("/open", {
       method: "POST",

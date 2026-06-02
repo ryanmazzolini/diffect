@@ -230,12 +230,20 @@ export interface ThreadDismissedEvent extends BaseEvent {
   reason?: string | null;
 }
 
+/** A tombstone hiding a thread from all views; the log stays append-only. */
+export interface ThreadDeletedEvent extends BaseEvent {
+  type: "thread.deleted";
+  thread: string;
+  author: Author;
+}
+
 /** Discriminated union of all event-log records. */
 export type ThreadEvent =
   | ThreadCreatedEvent
   | CommentAddedEvent
   | ThreadResolvedEvent
-  | ThreadDismissedEvent;
+  | ThreadDismissedEvent
+  | ThreadDeletedEvent;
 
 export type ThreadEventType = ThreadEvent["type"];
 
@@ -245,6 +253,7 @@ export const THREAD_EVENT_TYPES: readonly ThreadEventType[] = [
   "comment.added",
   "thread.resolved",
   "thread.dismissed",
+  "thread.deleted",
 ];
 
 // --- API request payloads --------------------------------------------------
@@ -276,4 +285,8 @@ export interface ResolveThreadRequest {
 export interface DismissThreadRequest {
   author?: Author;
   reason?: string | null;
+}
+
+export interface DeleteThreadRequest {
+  author?: Author;
 }

@@ -105,6 +105,42 @@ function FileDiff({
   );
 }
 
+/**
+ * An inline thread in the diff. Open threads render in full; resolved/dismissed
+ * ones collapse to a one-line marker that expands on click, keeping the diff
+ * uncluttered while never hiding feedback outright.
+ */
+function InlineThread({
+  thread,
+  editors,
+  onChanged,
+}: {
+  thread: Thread;
+  editors: string[];
+  onChanged: () => void;
+}) {
+  const [expanded, setExpanded] = useState(thread.status === "open");
+  if (!expanded) {
+    const first = thread.comments[0]?.body.split("\n")[0] ?? "";
+    return (
+      <button
+        type="button"
+        className={`thread-collapsed status-${thread.status}`}
+        onClick={() => setExpanded(true)}
+        title="Show thread"
+      >
+        <span className={`status-badge status-${thread.status}`}>
+          {thread.status}
+        </span>
+        <span className="thread-collapsed-preview">{first}</span>
+      </button>
+    );
+  }
+  return (
+    <ThreadConversation thread={thread} editors={editors} onChanged={onChanged} />
+  );
+}
+
 function LineRow({
   line,
   threads,
@@ -145,11 +181,12 @@ function LineRow({
         </td>
       </tr>
       {threads.map((t) => (
-        <tr className="inline-thread-row" key={t.id}>
+        // Re-key on status so a thread collapses the moment it's resolved/dismissed.
+        <tr className="inline-thread-row" key={`${t.id}:${t.status}`}>
           <td className="ln" />
           <td className="ln" />
           <td className="code">
-            <ThreadConversation thread={t} editors={editors} onChanged={onChanged} />
+            <InlineThread thread={t} editors={editors} onChanged={onChanged} />
           </td>
         </tr>
       ))}

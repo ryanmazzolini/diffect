@@ -6,6 +6,7 @@ import {
   type AddCommentRequest,
   type Author,
   type CreateThreadRequest,
+  type DeleteThreadRequest,
   type DismissThreadRequest,
   type ResolveThreadRequest,
   type Thread,
@@ -119,6 +120,29 @@ export async function dismissThread(
   };
   await appendEvent(repoRoot, event);
   return requireThread(replay([...events, event]), threadId);
+}
+
+/**
+ * Append a `thread.deleted` tombstone. The thread vanishes from every view on
+ * replay, but the log is never rewritten — deletion is just another event.
+ */
+export async function deleteThread(
+  repoRoot: string,
+  threadId: string,
+  req: DeleteThreadRequest,
+  now: string,
+): Promise<void> {
+  const events = await readEvents(repoRoot);
+  // Existence check only (404 if already gone/unknown). Restricting deletion to
+  // non-open threads is a UI affordance (like resolve/dismiss), not enforced here.
+  requireThread(replay(events), threadId);
+  await appendEvent(repoRoot, {
+    v: THREAD_SCHEMA_VERSION,
+    type: "thread.deleted",
+    ts: now,
+    thread: threadId,
+    author: req.author ?? { type: "user" },
+  });
 }
 
 async function appendEvent(
@@ -257,6 +281,10 @@ export function replay(events: ThreadEvent[]): Thread[] {
         t.status = "dismissed";
         appendStatusNote(t, e.author, e.reason, e.ts);
         break;
+      case "thread.deleted":
+        // Tombstone: drop the thread entirely so it never surfaces again.
+        byId.delete(e.thread);
+        continue;
     }
     // updatedAt tracks the latest event time, never moving backward.
     if (e.ts > t.updatedAt) t.updatedAt = e.ts;

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   addComment,
   createThread,
+  deleteThread,
   dismissThread,
   loadThreads,
   replay,
@@ -114,6 +115,54 @@ describe("event log", () => {
     );
     expect(d.status).toBe("dismissed");
     expect(d.comments.at(-1)!.body).toBe("wontfix");
+  });
+
+  it("deletes a thread via tombstone so it vanishes from replay", async () => {
+    const t = await createThread(dir, { repo: "r", file: "a", line: 1, body: "x" }, T0);
+    await dismissThread(dir, t.id, { author: { type: "user" }, reason: "wontfix" }, T0);
+    await deleteThread(dir, t.id, { author: { type: "user" } }, T0);
+    expect(await loadThreads(dir)).toEqual([]);
+  });
+
+  it("replay drops a thread that has a thread.deleted tombstone", () => {
+    const base = {
+      v: THREAD_SCHEMA_VERSION,
+      ts: T0,
+      author: { type: "user" as const },
+    };
+    const created = {
+      ...base,
+      type: "thread.created" as const,
+      id: "th_d",
+      repo: "r",
+      worktree: null,
+      file: "a",
+      side: "new" as const,
+      line: 1,
+      endLine: null,
+      anchor: null,
+      severity: null,
+      body: "doomed",
+    };
+    const deleted = { ...base, type: "thread.deleted" as const, thread: "th_d" };
+    const late = {
+      ...base,
+      type: "comment.added" as const,
+      thread: "th_d",
+      commentId: "c_late",
+      body: "after the tombstone",
+    };
+    expect(replay([created, deleted])).toEqual([]);
+    // Merge reorder: a tombstone (and a trailing comment) before thread.created
+    // must NOT resurrect the thread — two-pass replay deletes it in pass 2.
+    expect(replay([deleted, created])).toEqual([]);
+    expect(replay([deleted, created, late])).toEqual([]);
+  });
+
+  it("rejects deleting an unknown thread", async () => {
+    await expect(
+      deleteThread(dir, "th_missing", { author: { type: "user" } }, T0),
+    ).rejects.toBeInstanceOf(UnknownThreadError);
   });
 
   it("rejects a mutation targeting an unknown thread", async () => {

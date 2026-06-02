@@ -109,6 +109,16 @@ export function ThreadConversation({
               </button>
             </>
           )}
+          {thread.status !== "open" && (
+            <button
+              className="ghost"
+              disabled={busy}
+              title="Delete this thread permanently"
+              onClick={() => run(() => api.delete(thread.id))}
+            >
+              Delete
+            </button>
+          )}
           {editors.length > 0 && thread.file && thread.line !== null && (
             <button
               className="ghost"
