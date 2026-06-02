@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Severity, Side } from "@diffect/shared";
 import { api } from "../api.js";
 import { useDraft } from "../useDraft.js";
+import { MarkdownEditor } from "./MarkdownEditor.js";
 
 const SEVERITIES: Severity[] = ["must-fix", "suggestion", "nit", "question"];
 
@@ -62,17 +63,15 @@ export function CommentForm({
 
   return (
     <div className="comment-form">
-      <textarea
+      <MarkdownEditor
         autoFocus
         placeholder={`Comment on ${file}:${line}${
           endLine && endLine !== line ? `-${endLine}` : ""
         }`}
         value={body}
-        onChange={(e) => setBody(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
-          if (e.key === "Escape") onCancel();
-        }}
+        onChange={setBody}
+        onSubmitKey={submit}
+        onCancelKey={onCancel}
       />
       <div className="comment-form-actions">
         <select

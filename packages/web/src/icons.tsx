@@ -112,7 +112,7 @@ const ICONS = {
   ],
 } satisfies Record<string, string[]>;
 
-type IconName = keyof typeof ICONS;
+export type IconName = keyof typeof ICONS;
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
   name: IconName;

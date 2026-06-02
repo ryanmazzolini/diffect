@@ -671,8 +671,108 @@ body {
 }
 .inline-thread .body {
   color: var(--text);
-  white-space: pre-wrap;
   word-break: break-word;
+  min-width: 0;
+}
+
+/* Markdown composer */
+.md-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.md-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.md-tablist {
+  display: flex;
+  gap: var(--space-1);
+}
+.md-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.md-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.md-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+.md-tool {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 22px;
+  height: 22px;
+}
+.md-preview {
+  min-height: 56px;
+  padding: var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+.md-preview .muted {
+  color: var(--muted);
+}
+
+/* Rendered markdown (comment bodies + preview) */
+.markdown > *:first-child {
+  margin-top: 0;
+}
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+.markdown p {
+  margin: 0 0 var(--space-2);
+}
+.markdown ul,
+.markdown ol {
+  margin: 0 0 var(--space-2);
+  padding-left: 20px;
+}
+.markdown code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--hunk-bg);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+.markdown pre {
+  background: var(--hunk-bg);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+.markdown blockquote {
+  margin: 0 0 var(--space-2);
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown a {
+  color: var(--accent);
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 1.05em;
+  margin: var(--space-2) 0 var(--space-1);
 }
 .comment-form textarea {
   width: 100%;

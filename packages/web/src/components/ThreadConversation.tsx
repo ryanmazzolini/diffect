@@ -2,6 +2,8 @@ import { useState } from "react";
 import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { useDraft } from "../useDraft.js";
+import { Markdown } from "./Markdown.js";
+import { MarkdownEditor } from "./MarkdownEditor.js";
 
 /**
  * One thread's conversation plus its reply/resolve/dismiss controls. Shared by
@@ -64,21 +66,21 @@ export function ThreadConversation({
           <span className="author">
             {c.author.type === "agent" ? c.author.name ?? "agent" : "you"}
           </span>
-          <span className="body">{c.body}</span>
+          <div className="body">
+            <Markdown>{c.body}</Markdown>
+          </div>
         </div>
       ))}
 
       {replying ? (
         <div className="reply-form">
-          <textarea
+          <MarkdownEditor
             autoFocus
             value={reply}
             placeholder="Reply…"
-            onChange={(e) => setReply(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitReply();
-              if (e.key === "Escape") setReplying(false);
-            }}
+            onChange={setReply}
+            onSubmitKey={submitReply}
+            onCancelKey={() => setReplying(false)}
           />
           <div className="thread-actions">
             <button className="ghost" onClick={() => setReplying(false)} disabled={busy}>
