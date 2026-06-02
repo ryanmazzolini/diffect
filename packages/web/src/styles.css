@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme="dark"] {
   --bg: #0d1117;
   --bg-elev: #161b22;
   --border: #30363d;
@@ -13,7 +14,30 @@
   --suggestion: #d29922;
   --nit: #8b949e;
   --question: #a371f7;
+  --success: #3fb950;
+  --hunk-bg: #1c2333;
+  --on-accent: #ffffff;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elev: #f6f8fa;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #656d76;
+  --add-bg: #e6ffec;
+  --add-line: #2ea04326;
+  --del-bg: #ffebe9;
+  --del-line: #f8514926;
+  --accent: #0969da;
+  --must-fix: #cf222e;
+  --suggestion: #9a6700;
+  --nit: #656d76;
+  --question: #8250df;
+  --success: #1a7f37;
+  --hunk-bg: #eaeef2;
+  --on-accent: #ffffff;
 }
 
 * {
@@ -57,7 +81,7 @@ body {
 }
 .target-chip {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   border-radius: 999px;
   padding: 2px 10px;
   font-size: 12px;
@@ -89,6 +113,16 @@ body {
 .inbox {
   color: var(--muted);
   font-size: 13px;
+}
+.theme-toggle {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .layout {
@@ -150,7 +184,7 @@ body {
 }
 .status-added,
 .status-untracked {
-  color: #3fb950;
+  color: var(--success);
 }
 .status-deleted {
   color: var(--must-fix);
@@ -166,7 +200,7 @@ body {
   font-size: 12.5px;
 }
 .hunk-header td {
-  background: #1c2333;
+  background: var(--hunk-bg);
   color: var(--muted);
   padding: 2px 8px;
 }
@@ -215,7 +249,7 @@ body {
   border-radius: 4px;
   border: none;
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   font-weight: 700;
   cursor: pointer;
   opacity: 0;
@@ -286,7 +320,7 @@ button.ghost {
 }
 button.primary {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 button.ghost {
@@ -346,7 +380,7 @@ button:disabled {
   border: 1px solid var(--border);
 }
 .status-open {
-  color: #3fb950;
+  color: var(--success);
 }
 .status-resolved {
   color: var(--muted);
@@ -393,7 +427,7 @@ button:disabled {
 }
 .filter.active {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 

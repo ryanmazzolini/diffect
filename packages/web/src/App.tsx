@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type { RepoDiff, Thread, ThreadStatus, WorkspaceInfo } from "@diffect/shared";
 import { api } from "./api.js";
+import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { DiffView } from "./components/DiffView.js";
 import { ThreadList } from "./components/ThreadList.js";
 
@@ -17,7 +18,14 @@ export function App() {
   const [diff, setDiff] = useState<RepoDiff | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
+  const [theme, setThemeState] = useState<Theme>(getStoredTheme);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleTheme = () => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    setThemeState(next);
+  };
 
   const currentRepo = workspace?.repos.find((r) => r.name === repo) ?? null;
 
@@ -162,6 +170,15 @@ export function App() {
 
         <span className="spacer" />
         <span className="inbox">{openCount} open</span>
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={toggleTheme}
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          aria-label="Toggle color theme"
+        >
+          {theme === "dark" ? "☀" : "☾"}
+        </button>
       </header>
       <main className="layout">
         <section className="diff-pane">
