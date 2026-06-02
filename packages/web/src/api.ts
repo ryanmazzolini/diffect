@@ -1,6 +1,7 @@
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
   AddCommentRequest,
+  AttachmentResponse,
   CreateThreadRequest,
   DaemonEventType,
   DismissThreadRequest,
@@ -38,6 +39,17 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path }),
     }).then((r) => json<WorkspaceEntry[]>(r)),
+
+  uploadAttachment: (file: File) =>
+    fetch("/attachments", {
+      method: "POST",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+        // Percent-encode so a non-ASCII filename is a valid header value.
+        "x-filename": encodeURIComponent(file.name),
+      },
+      body: file,
+    }).then((r) => json<AttachmentResponse>(r)),
 
   diff: (repo: string, opts: { worktree?: string | null; target?: string } = {}) => {
     const q = new URLSearchParams();

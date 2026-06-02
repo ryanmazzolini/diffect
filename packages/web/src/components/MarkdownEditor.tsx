@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { api } from "../api.js";
 import { Icon, type IconName } from "../icons.js";
 import {
   insertLink,
@@ -76,6 +77,38 @@ export function MarkdownEditor({
     onChange(r.value);
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const insertAtCaret = (text: string) => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const { selectionStart: s, selectionEnd: e, value: cur } = ta;
+    pendingSel.current = [s + text.length, s + text.length];
+    onChange(cur.slice(0, s) + text + cur.slice(e));
+  };
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError(null);
+    for (const file of Array.from(files)) {
+      try {
+        const { url, name } = await api.uploadAttachment(file);
+        // Strip markdown-link metacharacters from the (user-controlled) filename
+        // so it can't break out of the [label](url) construct.
+        const label = name.replace(/[[\]()\r\n]/g, " ").trim() || "attachment";
+        // Images embed inline (![]); other files become plain links.
+        const bang = file.type.startsWith("image/") ? "!" : "";
+        insertAtCaret(`${bang}[${label}](${url})\n`);
+      } catch (err) {
+        setUploadError(String(err));
+      }
+    }
+    setUploading(false);
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") return onCancelKey?.();
     if (!(e.metaKey || e.ctrlKey)) return;
@@ -128,9 +161,29 @@ export function MarkdownEditor({
                 {t.icon ? <Icon name={t.icon} size={14} /> : t.text}
               </button>
             ))}
+            <button
+              type="button"
+              className="md-tool icon-btn"
+              title="Attach a file"
+              aria-label="Attach a file"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Icon name="paperclip" size={14} />
+            </button>
           </div>
         )}
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          void uploadFiles(e.target.files);
+          e.target.value = ""; // let the same file be re-selected later
+        }}
+      />
       {tab === "write" ? (
         <textarea
           ref={taRef}
@@ -139,12 +192,27 @@ export function MarkdownEditor({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={(e) => {
+            if (e.clipboardData.files.length > 0) {
+              e.preventDefault();
+              void uploadFiles(e.clipboardData.files);
+            }
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            if (e.dataTransfer.files.length > 0) {
+              e.preventDefault();
+              void uploadFiles(e.dataTransfer.files);
+            }
+          }}
         />
       ) : (
         <div className="md-preview">
           {value.trim() ? <Markdown>{value}</Markdown> : <span className="muted">Nothing to preview</span>}
         </div>
       )}
+      {uploading && <div className="md-uploading">Uploading…</div>}
+      {uploadError && <div className="error">{uploadError}</div>}
     </div>
   );
 }

@@ -52,6 +52,12 @@ import {
   readWorkspaceRegistry,
   removeWorkspaceFromRegistry,
 } from "./store/registry.js";
+import {
+  attachmentMime,
+  attachmentPath,
+  isValidAttachmentId,
+  storeAttachment,
+} from "./store/attachments.js";
 
 export interface DaemonOptions {
   /** Workspace to serve at boot, always included even if not yet registered. */
@@ -175,6 +181,7 @@ async function handle(
   if (await repoRoutes(ctx, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
+  if (await attachmentRoutes(ctx, req, res, method, path)) return;
 
   // --- Static web assets --------------------------------------------------
   if (method === "GET" && ctx.webRoot) {
@@ -490,6 +497,105 @@ async function editorRoute(
 }
 
 /**
+ * `POST /attachments` (upload, loopback-only) and `GET /attachments/:id` (serve).
+ * The body is raw file bytes with the mime in Content-Type and an optional
+ * X-Filename header; the response gives back a content-addressed URL to embed.
+ */
+async function attachmentRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (method === "POST" && path === "/attachments") {
+    return uploadAttachmentRoute(ctx, req, res);
+  }
+  const m = /^\/attachments\/(.+)$/.exec(path);
+  if (method === "GET" && m) {
+    return serveAttachmentRoute(res, decodeURIComponent(m[1]!));
+  }
+  return false;
+}
+
+async function uploadAttachmentRoute(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<boolean> {
+  if (!isLoopback(ctx.host)) {
+    // Uploading writes host files; only over loopback, never a shared network.
+    sendJson(res, 403, { error: "uploads are only allowed on a loopback-bound daemon" });
+    return true;
+  }
+  let bytes: Buffer;
+  try {
+    bytes = await readRawBody(req, MAX_ATTACHMENT_BYTES);
+  } catch (err) {
+    if (!(err instanceof BodyTooLargeError)) throw err;
+    sendJson(res, 413, { error: "attachment too large" });
+    return true;
+  }
+  if (bytes.length === 0) {
+    sendJson(res, 400, { error: "empty attachment" });
+    return true;
+  }
+  const mime = (req.headers["content-type"] ?? "").split(";")[0]!.trim();
+  const filename = decodeHeader(header(req.headers["x-filename"]));
+  const { id } = await storeAttachment(bytes, mime, filename);
+  sendJson(res, 200, { url: `/attachments/${id}`, name: filename ?? id });
+  return true;
+}
+
+async function serveAttachmentRoute(
+  res: ServerResponse,
+  id: string,
+): Promise<boolean> {
+  if (!isValidAttachmentId(id)) {
+    // Reject anything but `<sha>.<ext>` — closes path traversal on the id.
+    sendJson(res, 400, { error: "bad attachment id" });
+    return true;
+  }
+  const info = await stat(attachmentPath(id)).catch(() => null);
+  if (!info) {
+    sendJson(res, 404, { error: "not found" });
+    return true;
+  }
+  const mime = attachmentMime(id);
+  // Real raster images may render inline (so <img> embeds work); everything else
+  // — including SVG, which can carry script — downloads instead of rendering on a
+  // direct hit. <img> requests ignore Content-Disposition, so embeds still work.
+  const inline = mime.startsWith("image/") && mime !== "image/svg+xml";
+  res.writeHead(200, {
+    "content-type": mime,
+    "content-length": info.size,
+    "content-disposition": inline ? "inline" : "attachment",
+    // Defang any uploaded active content (e.g. scripted SVG) on direct hits.
+    "content-security-policy": "default-src 'none'; sandbox",
+    "x-content-type-options": "nosniff",
+  });
+  createReadStream(attachmentPath(id)).pipe(res);
+  return true;
+}
+
+/** The client percent-encodes the filename so non-ASCII survives the header. */
+function decodeHeader(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value; // keep raw if it isn't valid percent-encoding
+  }
+}
+
+/** First value of a possibly-array header, trimmed; undefined if absent/empty. */
+function header(value: string | string[] | undefined): string | undefined {
+  const v = Array.isArray(value) ? value[0] : value;
+  const trimmed = v?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/**
  * Resolve the central store (repo root) that owns a thread id, scanning every
  * repo in the workspace. Throws UnknownThreadError (→ 404 via withThread) when
  * no repo claims it, so mutations carrying only an id route to the right log.
@@ -580,12 +686,16 @@ const MAX_BODY_BYTES = 1024 * 1024;
 
 class BodyTooLargeError extends Error {}
 
-async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
+/** Buffer the request body up to `maxBytes`, throwing past the cap. */
+async function readRawBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       // Stop reading but leave the socket intact so the 413 response can flush;
       // pausing avoids buffering the rest of an oversize upload.
       req.pause();
@@ -593,7 +703,11 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
     }
     chunks.push(chunk as Buffer);
   }
-  const raw = Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
+  const raw = (await readRawBody(req, MAX_BODY_BYTES)).toString("utf8");
   if (!raw.trim()) return null;
   try {
     return JSON.parse(raw) as T;
@@ -601,6 +715,9 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
     return null;
   }
 }
+
+/** Attachments can be images, so allow a larger body than JSON comments. */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",

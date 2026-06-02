@@ -31,6 +31,21 @@ test("the bold toolbar button wraps the selection", async ({ page }) => {
   await expect(textarea).toHaveValue("**guard**");
 });
 
+test("attaching a file inserts a markdown image link", async ({ page }) => {
+  await page.goto("/");
+  const form = await openCommentForm(page);
+
+  await form.locator('input[type="file"]').setInputFiles({
+    name: "pic.png",
+    mimeType: "image/png",
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]),
+  });
+
+  await expect(form.locator("textarea")).toHaveValue(
+    /!\[pic\.png\]\(\/attachments\/[a-f0-9]{64}\.png\)/,
+  );
+});
+
 test("a comment renders as markdown once posted", async ({ page }) => {
   await page.goto("/");
   const form = await openCommentForm(page);

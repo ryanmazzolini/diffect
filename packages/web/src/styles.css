@@ -726,6 +726,10 @@ body {
 .md-preview .muted {
   color: var(--muted);
 }
+.md-uploading {
+  font-size: 11px;
+  color: var(--muted);
+}
 
 /* Rendered markdown (comment bodies + preview) */
 .markdown > *:first-child {

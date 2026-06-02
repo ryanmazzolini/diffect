@@ -109,6 +109,13 @@ export interface FileRange {
   lines: string[];
 }
 
+export interface AttachmentResponse {
+  /** Daemon-served URL to embed in a comment (e.g. `/attachments/<sha>.png`). */
+  url: string;
+  /** Original filename (for the markdown alt text), if the client sent one. */
+  name: string;
+}
+
 export interface RepoSummary {
   /** URL-safe repo id, stable across worktrees. */
   name: string;
