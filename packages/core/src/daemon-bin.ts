@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { createServer } from "./daemon.js";
+import { addWorkspaceToRegistry } from "./store/registry.js";
 
 interface CliArgs {
   workspace: string;
@@ -40,6 +41,13 @@ function locateWebRoot(): string | undefined {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // Remember this workspace so it persists across restarts (non-fatal, but warn
+  // so a "where are my workspaces?" debug session has a breadcrumb).
+  await addWorkspaceToRegistry(args.workspace).catch((err) =>
+    process.stderr.write(
+      `diffectd: could not persist workspace: ${err?.message ?? err}\n`,
+    ),
+  );
   const webRoot = locateWebRoot();
   const server = await createServer({ workspacePath: args.workspace, webRoot });
   server.listen(args.port, args.host, () => {
