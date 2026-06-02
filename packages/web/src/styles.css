@@ -17,6 +17,11 @@
   --success: #3fb950;
   --hunk-bg: #1c2333;
   --on-accent: #ffffff;
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-number: #79c0ff;
+  --hl-func: #d2a8ff;
+  --hl-type: #ffa657;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -38,6 +43,11 @@
   --success: #1a7f37;
   --hunk-bg: #eaeef2;
   --on-accent: #ffffff;
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-func: #8250df;
+  --hl-type: #953800;
 }
 
 * {
@@ -223,6 +233,10 @@ body {
   word-break: break-word;
   position: relative;
 }
+/* Keep blank lines from collapsing now that highlightLine returns "" for them. */
+.code .text:empty::after {
+  content: "\00a0";
+}
 .line-add {
   background: var(--add-bg);
 }
@@ -239,6 +253,43 @@ body {
   display: inline-block;
   width: 1ch;
   color: var(--muted);
+}
+
+/* Syntax highlighting (highlight.js token classes), themed via vars. */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-tag {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.hljs-number {
+  color: var(--hl-number);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--hl-func);
+}
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-attr {
+  color: var(--hl-type);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--muted);
+  font-style: italic;
 }
 .comment-btn {
   position: absolute;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { DiffFile, DiffLine, RepoDiff, Thread } from "@diffect/shared";
+import { highlightLine, langForPath } from "../highlight.js";
 import { CommentForm } from "./CommentForm.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
@@ -51,6 +52,7 @@ function FileDiff({
 }) {
   // Which new-side line currently has its comment form open.
   const [commenting, setCommenting] = useState<number | null>(null);
+  const lang = langForPath(file.path); // resolved once per file
 
   return (
     <div className="file">
@@ -74,6 +76,7 @@ function FileDiff({
                 <LineRow
                   key={li}
                   line={line}
+                  lang={lang}
                   threads={lineThreads}
                   editors={editors}
                   onChanged={onChanged}
@@ -143,6 +146,7 @@ function InlineThread({
 
 function LineRow({
   line,
+  lang,
   threads,
   editors,
   onChanged,
@@ -151,6 +155,7 @@ function LineRow({
   commentForm,
 }: {
   line: DiffLine;
+  lang: string | null;
   threads: Thread[];
   editors: string[];
   onChanged: () => void;
@@ -168,7 +173,7 @@ function LineRow({
           <span className="sigil">
             {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
           </span>
-          <span className="text">{line.text || " "}</span>
+          <span className="text">{highlightLine(line.text, lang)}</span>
           {canComment && !isCommenting && (
             <button
               className="comment-btn"
