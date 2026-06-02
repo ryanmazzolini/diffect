@@ -36,6 +36,7 @@ export function App() {
     () => getStored("diffect-sidebar-collapsed") === "1",
   );
   const [error, setError] = useState<string | null>(null);
+  const diffPaneRef = useRef<HTMLElement>(null);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -141,6 +142,28 @@ export function App() {
     refreshDiff();
   }, [refreshDiff]);
 
+  // Scroll-spy: highlight the file in the sidebar that's at the top of the diff
+  // pane as the user scrolls, so the tree tracks reading position.
+  useEffect(() => {
+    const root = diffPaneRef.current;
+    if (!root || !diff) return;
+    const headers = diff.files
+      .map((f) => document.getElementById(`file-${f.path}`))
+      .filter((el): el is HTMLElement => el !== null);
+    if (headers.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const top = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (top) setActiveFile(top.target.id.replace(/^file-/, ""));
+      },
+      { root, rootMargin: "0px 0px -70% 0px", threshold: 0 },
+    );
+    headers.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [diff]);
+
   // Live updates: subscribe to the daemon's SSE stream exactly once and route
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
   // selector changed would tear the EventSource down and drop events that fire
@@ -184,7 +207,6 @@ export function App() {
   );
   const multiRepo = workspace.repos.length > 1;
   const editors = workspace.editors ?? [];
-  const files = diff?.files.map((f) => f.path) ?? [];
 
   return (
     <div className="app">
@@ -208,14 +230,14 @@ export function App() {
             worktree={worktree}
             onSelectRepo={setRepo}
             onSelectWorktree={setWorktree}
-            files={files}
+            files={diff?.files ?? []}
             activeFile={activeFile}
             onSelectFile={selectFile}
             onAddWorkspace={addWorkspace}
           />
         )}
         <main className="layout" style={{ gridTemplateColumns: paneColumns }}>
-        <section className="diff-pane">
+        <section className="diff-pane" ref={diffPaneRef}>
           <DiffView
             repo={repo}
             worktree={worktree}

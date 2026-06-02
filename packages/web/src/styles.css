@@ -259,8 +259,7 @@ body {
   white-space: nowrap;
 }
 .repo-item,
-.wt-item,
-.file-item {
+.wt-item {
   display: block;
   width: 100%;
   text-align: left;
@@ -275,26 +274,64 @@ body {
   white-space: nowrap;
 }
 .repo-item:hover,
-.wt-item:hover,
-.file-item:hover {
+.wt-item:hover {
   background: var(--bg);
 }
 .repo-item.active,
-.wt-item.active,
-.file-item.active {
+.wt-item.active {
   background: var(--accent);
   color: var(--on-accent);
 }
 .worktree-list {
   padding-left: 12px;
 }
-.wt-item,
-.file-item {
+.wt-item {
   font-size: 12px;
   color: var(--muted);
 }
-.file-item {
+
+/* Changed-file tree */
+.tree-dir,
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 3px 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+.tree-dir {
+  color: var(--muted);
+}
+.tree-dir:hover,
+.tree-file:hover {
+  background: var(--bg);
+}
+/* Subtle active state (was a heavy full-bleed accent fill). */
+.tree-file.active {
+  background: var(--sel-bg);
+  border-left-color: var(--accent);
+}
+.tree-name {
   font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-icon {
+  flex-shrink: 0;
+}
+/* Push the per-file diffstat block to the right edge of the row. */
+.tree-file .diffstat {
+  margin-left: auto;
+  padding-left: var(--space-2);
 }
 .diff-pane {
   overflow: auto;

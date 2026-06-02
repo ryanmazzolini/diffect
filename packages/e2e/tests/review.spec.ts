@@ -10,7 +10,7 @@ test("loads the workspace and shows the work diff", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".brand")).toHaveText("Diffect");
   // The fixture has a modified calc.js in the default work target.
-  await expect(page.locator(".file-path")).toContainText("calc.js");
+  await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
   await expect(page.locator(".line-add").first()).toBeVisible();
 });
 
@@ -62,11 +62,11 @@ test("resolves a thread and the open count drops", async ({ page }) => {
 
 test("switches review target without errors", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".file-path")).toContainText("calc.js");
+  await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
   // The fixture has no staged changes, so 'staged' shows the empty state.
   await page.locator("select.target-select").selectOption("staged");
   await expect(page.locator(".empty")).toContainText("No changes");
   // Back to work restores the diff.
   await page.locator("select.target-select").selectOption("work");
-  await expect(page.locator(".file-path")).toContainText("calc.js");
+  await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
 });
