@@ -11,6 +11,7 @@ import type {
   RecommendedWorkspace,
   RefList,
   RepoDiff,
+  RepoFileList,
   ResolveThreadRequest,
   Thread,
   WorkspaceEntry,
@@ -49,6 +50,13 @@ export const api = {
 
   recommendations: () =>
     fetch("/recommendations").then((r) => json<RecommendedWorkspace[]>(r)),
+
+  repoFiles: (repo: string, worktree?: string | null) => {
+    const qs = worktree ? `?worktree=${encodeURIComponent(worktree)}` : "";
+    return fetch(`/repos/${encodeURIComponent(repo)}/files${qs}`).then((r) =>
+      json<RepoFileList>(r),
+    );
+  },
 
   uploadAttachment: (file: File) =>
     fetch("/attachments", {

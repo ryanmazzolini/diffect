@@ -140,7 +140,7 @@ export function useLineSelection(maxLine: number): LineSelection {
         }
       },
     }),
-    [openComment],
+    [openComment, maxLine],
   );
 
   return { range, form, gutterProps, openComment, closeForm };

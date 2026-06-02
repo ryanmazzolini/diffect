@@ -1,4 +1,4 @@
-import type { RefList } from "@diffect/shared";
+import type { RefList, RepoFileList } from "@diffect/shared";
 import { gitTry } from "./exec.js";
 
 const lines = (s: string | null): string[] =>
@@ -33,4 +33,12 @@ export async function listRefs(repoRoot: string): Promise<RefList> {
     return { sha: l.slice(0, tab), subject: l.slice(tab + 1) };
   });
   return { branches, tags, commits };
+}
+
+/**
+ * Every tracked file in the working tree, for the cross-file comment picker.
+ * gitTry keeps a bare repo from erroring into a 500 — it just yields no files.
+ */
+export async function listTrackedFiles(repoRoot: string): Promise<RepoFileList> {
+  return { files: lines(await gitTry(repoRoot, ["ls-files"])) };
 }

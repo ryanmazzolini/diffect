@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { useLineSelection, type LineSelection } from "../useLineSelection.js";
 import { CommentForm } from "./CommentForm.js";
+import { CrossFileDialog } from "./CrossFileDialog.js";
 import { DiffStat } from "./DiffStat.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
@@ -18,32 +19,178 @@ interface Props {
 }
 
 export function DiffView({ repo, worktree, diff, threads, editors, onChanged }: Props) {
-  if (!diff) return <div className="loading">Loading diff…</div>;
-  if (diff.files.length === 0) {
-    return <div className="empty">No changes in this target.</div>;
+  const [crossFileOpen, setCrossFileOpen] = useState(false);
+  const dialog = crossFileOpen ? (
+    <CrossFileDialog
+      repo={repo}
+      worktree={worktree}
+      onClose={() => setCrossFileOpen(false)}
+      onCreated={onChanged}
+    />
+  ) : null;
+
+  if (!diff) {
+    return (
+      <>
+        {dialog}
+        <div className="loading">Loading diff…</div>
+      </>
+    );
   }
+
+  // Include rename old-paths so a thread on the pre-rename path of a file that's
+  // in the diff isn't mistaken for an out-of-diff comment.
+  const inDiff = new Set(
+    diff.files.flatMap((f) => (f.oldPath ? [f.path, f.oldPath] : [f.path])),
+  );
+  // Threads anchored to files outside the current diff render as collapsed
+  // out-of-diff blocks so cross-file comments stay visible in the main view.
+  const outOfDiff = groupByFile(
+    threads.filter((t) => t.file !== null && t.line !== null && !inDiff.has(t.file)),
+  );
   const totalAdd = diff.files.reduce((n, f) => n + f.additions, 0);
   const totalDel = diff.files.reduce((n, f) => n + f.deletions, 0);
+
   return (
     <div className="diff">
+      {dialog}
       <div className="diff-summary">
         <span className="diff-summary-files">
           {diff.files.length} {diff.files.length === 1 ? "file" : "files"} changed
         </span>
         <DiffStat additions={totalAdd} deletions={totalDel} />
+        <button
+          type="button"
+          className="ghost cf-open"
+          onClick={() => setCrossFileOpen(true)}
+        >
+          <Icon name="plus" size={12} /> Comment on another file
+        </button>
       </div>
-      {diff.files.map((file) => (
-        <FileDiff
-          key={file.path}
+      {diff.files.length === 0 ? (
+        <div className="empty">No changes in this target.</div>
+      ) : (
+        diff.files.map((file) => (
+          <FileDiff
+            key={file.path}
+            repo={repo}
+            worktree={worktree}
+            file={file}
+            threads={threads.filter((t) => t.file === file.path)}
+            editors={editors}
+            onChanged={onChanged}
+          />
+        ))
+      )}
+      {outOfDiff.map(([file, fileThreads]) => (
+        <OutOfDiffFile
+          key={file}
           repo={repo}
           worktree={worktree}
           file={file}
-          threads={threads.filter((t) => t.file === file.path)}
+          threads={fileThreads}
           editors={editors}
           onChanged={onChanged}
         />
       ))}
     </div>
+  );
+}
+
+/** Group threads by their file path, preserving encounter order. */
+function groupByFile(threads: Thread[]): [string, Thread[]][] {
+  const byFile = new Map<string, Thread[]>();
+  for (const t of threads) {
+    const arr = byFile.get(t.file!) ?? [];
+    arr.push(t);
+    byFile.set(t.file!, arr);
+  }
+  return [...byFile.entries()];
+}
+
+/** A synthetic file block for threads whose file isn't in the diff. */
+function OutOfDiffFile({
+  repo,
+  worktree,
+  file,
+  threads,
+  editors,
+  onChanged,
+}: {
+  repo: string;
+  worktree: string | null;
+  file: string;
+  threads: Thread[];
+  editors: string[];
+  onChanged: () => void;
+}) {
+  return (
+    <div className="file out-of-diff" id={`file-${file}`}>
+      <div className="file-header">
+        <span className="status status-context">context</span>
+        <span className="file-path">{file}</span>
+        <span className="out-of-diff-tag">not in this diff</span>
+      </div>
+      {threads.map((t) => (
+        <OutOfDiffThread
+          key={t.id}
+          repo={repo}
+          worktree={worktree}
+          file={file}
+          thread={t}
+          editors={editors}
+          onChanged={onChanged}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Fetches a few lines of context around an out-of-diff thread and renders it. */
+function OutOfDiffThread({
+  repo,
+  worktree,
+  file,
+  thread,
+  editors,
+  onChanged,
+}: {
+  repo: string;
+  worktree: string | null;
+  file: string;
+  thread: Thread;
+  editors: string[];
+  onChanged: () => void;
+}) {
+  const lang = langForPath(file);
+  const line = thread.line!;
+  const [ctx, setCtx] = useState<{ from: number; lines: string[] } | null>(null);
+  useEffect(() => {
+    api
+      .file(repo, { path: file, side: "new", from: Math.max(1, line - 2), to: line + 2, worktree })
+      .then((r) => setCtx({ from: r.from, lines: r.lines }))
+      .catch(() => setCtx(null));
+  }, [repo, worktree, file, line]);
+
+  return (
+    <table className="hunk">
+      <tbody>
+        {ctx?.lines.map((text, i) => (
+          <tr className="line line-context" key={i}>
+            <td className="ln">{ctx.from + i}</td>
+            <td className="code">
+              <span className="text">{highlightLine(text, lang)}</span>
+            </td>
+          </tr>
+        ))}
+        <tr className="inline-thread-row">
+          <td className="ln" />
+          <td className="code">
+            <InlineThread thread={thread} editors={editors} onChanged={onChanged} />
+          </td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 

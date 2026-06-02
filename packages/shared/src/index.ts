@@ -116,6 +116,11 @@ export interface AttachmentResponse {
   name: string;
 }
 
+export interface RepoFileList {
+  /** Repo-relative paths of every tracked file (for the cross-file picker). */
+  files: string[];
+}
+
 export interface FsEntry {
   name: string;
   path: string;

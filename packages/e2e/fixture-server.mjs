@@ -44,6 +44,9 @@ async function main() {
   const math = (todo) => `export const PI = 3.14\nexport function square(x) {\n  return x * x${todo}\n}\n`;
   mkdirSync(join(dir, "src", "util"), { recursive: true });
   writeFileSync(join(dir, "src", "util", "math.js"), math(""));
+  // A tracked file left unchanged in the work target, so it's available to the
+  // cross-file comment picker but absent from the diff.
+  writeFileSync(join(dir, "README.md"), "# Fixture\n\nLine one.\nLine two.\n");
   await git(dir, ["add", "."]);
   await git(dir, ["commit", "-m", "base"]);
   // Work changes so the default diff is non-empty.

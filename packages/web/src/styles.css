@@ -625,6 +625,88 @@ body {
 .status-renamed {
   color: var(--question);
 }
+.status-context {
+  color: var(--muted);
+}
+.out-of-diff-tag {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Entry point + cross-file dialog */
+.cf-open {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 12px;
+  padding: 3px 8px;
+}
+.cf-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.cf-files {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.cf-files .muted {
+  color: var(--muted);
+  font-size: 12px;
+  padding: var(--space-2);
+}
+.cf-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.cf-file:hover {
+  background: var(--bg);
+}
+.cf-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.cf-viewer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.cf-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cf-lines {
+  display: block;
+  max-height: 50vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
 
 .hunk {
   width: 100%;

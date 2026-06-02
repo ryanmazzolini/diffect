@@ -14,7 +14,7 @@ import type {
   WorkspaceMutationRequest,
 } from "@diffect/shared";
 import { resolveWorkBase } from "./git/diff.js";
-import { listRefs } from "./git/refs.js";
+import { listRefs, listTrackedFiles } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, readSideLines } from "./reviews/anchors.js";
 import {
@@ -405,6 +405,19 @@ async function repoRoutes(
     );
     if (!treeRoot) return true;
     sendJson(res, 200, await listRefs(treeRoot));
+    return true;
+  }
+
+  const filesMatch = /^\/repos\/(.+)\/files$/.exec(path);
+  if (filesMatch) {
+    const treeRoot = resolveRepoTreeOr404(
+      ctx,
+      res,
+      decodeURIComponent(filesMatch[1]!),
+      worktree,
+    );
+    if (!treeRoot) return true;
+    sendJson(res, 200, await listTrackedFiles(treeRoot));
     return true;
   }
   return false;
