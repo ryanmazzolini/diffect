@@ -52,6 +52,9 @@ export interface DiffFile {
   /** Previous path for renames. */
   oldPath?: string;
   status: FileStatus;
+  /** Added/removed line counts (the diffstat), tallied as the diff is parsed. */
+  additions: number;
+  deletions: number;
   hunks: DiffHunk[];
 }
 

@@ -168,6 +168,8 @@ async function syntheticAddedFile(
   return {
     path,
     status: "untracked",
+    additions: lines.length,
+    deletions: 0,
     hunks: lines.length ? [hunk] : [],
   };
 }
@@ -195,7 +197,13 @@ export function parseUnifiedDiff(raw: string): DiffFile[] {
   for (const line of lines) {
     if (line.startsWith("diff --git ")) {
       pushFile();
-      current = { path: "", status: "modified", hunks: [] };
+      current = {
+        path: "",
+        status: "modified",
+        additions: 0,
+        deletions: 0,
+        hunks: [],
+      };
       continue;
     }
     if (!current) continue;
@@ -263,8 +271,10 @@ export function parseUnifiedDiff(raw: string): DiffFile[] {
 
     if (line.startsWith("+")) {
       hunk.lines.push({ type: "add", old: null, new: newLine++, text: line.slice(1) });
+      current.additions++;
     } else if (line.startsWith("-")) {
       hunk.lines.push({ type: "del", old: oldLine++, new: null, text: line.slice(1) });
+      current.deletions++;
     } else if (line.startsWith(" ")) {
       hunk.lines.push({
         type: "context",

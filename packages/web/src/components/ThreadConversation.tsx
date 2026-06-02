@@ -43,7 +43,9 @@ export function ThreadConversation({
   return (
     <div className={`inline-thread status-${thread.status}`}>
       <div className="thread-meta">
-        {thread.severity && <span className="sev">{thread.severity}</span>}
+        {thread.severity && (
+          <span className={`sev sev-${thread.severity}`}>{thread.severity}</span>
+        )}
         <span className={`status-badge status-${thread.status}`}>
           {thread.status}
         </span>

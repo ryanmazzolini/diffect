@@ -4,6 +4,7 @@ import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { CommentForm } from "./CommentForm.js";
+import { DiffStat } from "./DiffStat.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
 interface Props {
@@ -20,8 +21,16 @@ export function DiffView({ repo, worktree, diff, threads, editors, onChanged }: 
   if (diff.files.length === 0) {
     return <div className="empty">No changes in this target.</div>;
   }
+  const totalAdd = diff.files.reduce((n, f) => n + f.additions, 0);
+  const totalDel = diff.files.reduce((n, f) => n + f.deletions, 0);
   return (
     <div className="diff">
+      <div className="diff-summary">
+        <span className="diff-summary-files">
+          {diff.files.length} {diff.files.length === 1 ? "file" : "files"} changed
+        </span>
+        <DiffStat additions={totalAdd} deletions={totalDel} />
+      </div>
       {diff.files.map((file) => (
         <FileDiff
           key={file.path}
@@ -120,6 +129,7 @@ function FileDiff({
       <div className="file-header">
         <span className={`status status-${file.status}`}>{file.status}</span>
         <span className="file-path">{file.path}</span>
+        <DiffStat additions={file.additions} deletions={file.deletions} />
       </div>
       {file.hunks.map((hunk, hi) => {
         const gap = gapAbove(file.hunks, hi);

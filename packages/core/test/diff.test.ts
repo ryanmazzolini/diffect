@@ -52,13 +52,15 @@ describe("computeWorkDiff (work target)", () => {
     expect(newText).toContain("TWO");
     expect(newText).toContain("THREE");
 
-    // Untracked file shows as an all-added synthetic diff.
+    // Untracked file shows as an all-added synthetic diff with a matching stat.
     expect(byPath["new.txt"]).toBeDefined();
     expect(byPath["new.txt"]!.status).toBe("untracked");
     expect(byPath["new.txt"]!.hunks[0]!.lines.map((l) => l.text)).toEqual([
       "fresh",
       "lines",
     ]);
+    expect(byPath["new.txt"]!.additions).toBe(2);
+    expect(byPath["new.txt"]!.deletions).toBe(0);
   });
 
   it("handles a repo with no commits (everything untracked)", async () => {
@@ -108,6 +110,24 @@ describe("parseUnifiedDiff", () => {
     const add = h.lines.find((l) => l.type === "add")!;
     expect(del).toMatchObject({ old: 2, new: null, text: "two" });
     expect(add).toMatchObject({ old: null, new: 2, text: "TWO" });
+  });
+
+  it("tallies additions and deletions per file", () => {
+    const [file] = parseUnifiedDiff(
+      [
+        "diff --git a/f.txt b/f.txt",
+        "--- a/f.txt",
+        "+++ b/f.txt",
+        "@@ -1,4 +1,3 @@",
+        " keep",
+        "-gone-1",
+        "-gone-2",
+        "+added",
+        " tail",
+      ].join("\n"),
+    );
+    expect(file!.additions).toBe(1);
+    expect(file!.deletions).toBe(2);
   });
 
   it("marks new and deleted files", () => {
