@@ -167,44 +167,90 @@ async function handle(
     return; // keep the connection open
   }
 
-  // --- API routes ---------------------------------------------------------
+  // Delegate to route groups; each returns true once it has sent a response.
+  if (await workspaceRoutes(ctx, req, res, method, path)) return;
+  if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
+  if (await threadItemRoutes(ctx, req, res, method, path)) return;
+  if (await repoRoutes(ctx, res, url, method, path)) return;
+  if (await editorRoute(ctx, req, res, method, path)) return;
+
+  // --- Static web assets --------------------------------------------------
+  if (method === "GET" && ctx.webRoot) {
+    return serveStatic(ctx.webRoot, path, res);
+  }
+
+  sendJson(res, 404, { error: "not found" });
+}
+
+/** `/workspace` summary + `/workspaces` list/add/remove. */
+async function workspaceRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
   if (method === "GET" && path === "/workspace") {
     const threads = await loadAllThreads(ctx.ws);
     const open = threads.filter((t) => t.status === "open").length;
-    return sendJson(res, 200, await summarizeWorkspace(ctx.ws, open, ctx.editors));
+    sendJson(res, 200, await summarizeWorkspace(ctx.ws, open, ctx.editors));
+    return true;
   }
-
-  // --- Workspaces (multi-workspace management) ----------------------------
   if (method === "GET" && path === "/workspaces") {
-    return sendJson(res, 200, await listWorkspaces(ctx));
+    sendJson(res, 200, await listWorkspaces(ctx));
+    return true;
   }
   if ((method === "POST" || method === "DELETE") && path === "/workspaces") {
-    if (!isLoopback(ctx.host)) {
-      // Adding/removing a workspace opens an arbitrary host path; only allow it
-      // when the daemon is bound to loopback, never over a shared network.
-      return sendJson(res, 403, {
-        error: "workspace management is only allowed on a loopback-bound daemon",
-      });
-    }
-    const body = await readJsonBody<WorkspaceMutationRequest>(req);
-    if (!body || typeof body.path !== "string" || !body.path.trim()) {
-      return sendJson(res, 400, { error: "path is required" });
-    }
-    if (method === "POST") {
-      // Validate it's a real workspace (has a git repo) before registering.
-      try {
-        await discoverWorkspace(resolve(body.path));
-      } catch (err) {
-        return sendJson(res, 400, { error: (err as Error).message });
-      }
-      await addWorkspaceToRegistry(body.path);
-    } else {
-      await removeWorkspaceFromRegistry(body.path);
-    }
-    await rebuildWorkspaces(ctx);
-    return sendJson(res, 200, await listWorkspaces(ctx));
+    return mutateWorkspaceRoute(ctx, req, res, method);
   }
+  return false;
+}
 
+async function mutateWorkspaceRoute(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+): Promise<boolean> {
+  if (!isLoopback(ctx.host)) {
+    // Adding/removing a workspace opens an arbitrary host path; only allow it
+    // when the daemon is bound to loopback, never over a shared network.
+    sendJson(res, 403, {
+      error: "workspace management is only allowed on a loopback-bound daemon",
+    });
+    return true;
+  }
+  const body = await readJsonBody<WorkspaceMutationRequest>(req);
+  if (!body || typeof body.path !== "string" || !body.path.trim()) {
+    sendJson(res, 400, { error: "path is required" });
+    return true;
+  }
+  if (method === "POST") {
+    // Validate it's a real workspace (has a git repo) before registering.
+    try {
+      await discoverWorkspace(resolve(body.path));
+    } catch (err) {
+      sendJson(res, 400, { error: (err as Error).message });
+      return true;
+    }
+    await addWorkspaceToRegistry(body.path);
+  } else {
+    await removeWorkspaceFromRegistry(body.path);
+  }
+  await rebuildWorkspaces(ctx);
+  sendJson(res, 200, await listWorkspaces(ctx));
+  return true;
+}
+
+/** `GET /threads` (filtered) and `POST /threads` (create). */
+async function threadCollectionRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
   if (method === "GET" && path === "/threads") {
     const status = url.searchParams.get("status");
     const repoFilter = url.searchParams.get("repo");
@@ -214,121 +260,164 @@ async function handle(
     if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
     if (worktreeFilter)
       threads = threads.filter((t) => t.worktree === worktreeFilter);
-    return sendJson(res, 200, threads);
+    sendJson(res, 200, threads);
+    return true;
   }
-
-  const diffMatch = /^\/repos\/(.+)\/diff$/.exec(path);
-  if (method === "GET" && diffMatch) {
-    const repoName = decodeURIComponent(diffMatch[1]!);
-    const repo = findRepo(ctx.ws, repoName);
-    if (!repo) return sendJson(res, 404, { error: `unknown repo: ${repoName}` });
-    const worktree = url.searchParams.get("worktree");
-    const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
-    if (!treeRoot) {
-      return sendJson(res, 404, { error: `unknown worktree: ${worktree}` });
-    }
-    const target = normalizeTarget(url.searchParams.get("target"));
-    const diff = await computeTargetDiff(treeRoot, target);
-    return sendJson(res, 200, { ...diff, repo: repo.name, worktree });
-  }
-
   if (method === "POST" && path === "/threads") {
-    const body = await readJsonBody<CreateThreadRequest>(req);
-    if (!body || typeof body.body !== "string" || !body.body.trim()) {
-      return sendJson(res, 400, { error: "body is required" });
-    }
-    const repo = body.repo ? findRepo(ctx.ws, body.repo) : undefined;
-    if (!repo) {
-      return sendJson(res, 400, { error: `unknown repo: ${body.repo}` });
-    }
-    const treeRoot = resolveRepoRoot(ctx.ws, repo.name, body.worktree ?? null);
-    if (!treeRoot) {
-      return sendJson(res, 400, { error: `unknown worktree: ${body.worktree}` });
-    }
-    const base = await resolveWorkBase(treeRoot);
-    const anchor = await buildAnchor(treeRoot, base, body);
-    // The store is keyed by the repo's PRIMARY root so all worktrees share one
-    // log (the worktree name lives on the thread); treeRoot is only for anchoring.
-    const thread = await createThread(repo.root, { ...body, anchor }, ctx.now());
-    return sendJson(res, 201, thread);
+    return createThreadRoute(ctx, req, res);
   }
+  return false;
+}
+
+async function createThreadRoute(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<boolean> {
+  const body = await readJsonBody<CreateThreadRequest>(req);
+  if (!body || typeof body.body !== "string" || !body.body.trim()) {
+    sendJson(res, 400, { error: "body is required" });
+    return true;
+  }
+  const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
+  if (!target) return true;
+  const { repo, treeRoot } = target;
+  const base = await resolveWorkBase(treeRoot);
+  const anchor = await buildAnchor(treeRoot, base, body);
+  // The store is keyed by the repo's PRIMARY root so all worktrees share one log
+  // (the worktree name lives on the thread); treeRoot is only for anchoring.
+  const thread = await createThread(repo.root, { ...body, anchor }, ctx.now());
+  sendJson(res, 201, thread);
+  return true;
+}
+
+/** `POST /threads/:id/{comments,resolve,dismiss,delete}`. */
+async function threadItemRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (method !== "POST") return false;
 
   const commentMatch = /^\/threads\/([^/]+)\/comments$/.exec(path);
-  if (method === "POST" && commentMatch) {
+  if (commentMatch) {
     const id = decodeURIComponent(commentMatch[1]!);
     const body = await readJsonBody<AddCommentRequest>(req);
     if (!body || typeof body.body !== "string" || !body.body.trim()) {
-      return sendJson(res, 400, { error: "body is required" });
+      sendJson(res, 400, { error: "body is required" });
+      return true;
     }
-    return withThread(res, async () =>
+    await withThread(res, async () =>
       addComment(await requireRepoRoot(ctx, id), id, body, ctx.now()),
     );
+    return true;
   }
 
   const resolveMatch = /^\/threads\/([^/]+)\/resolve$/.exec(path);
-  if (method === "POST" && resolveMatch) {
+  if (resolveMatch) {
     const id = decodeURIComponent(resolveMatch[1]!);
     const body = (await readJsonBody<ResolveThreadRequest>(req)) ?? {};
-    return withThread(res, async () =>
+    await withThread(res, async () =>
       resolveThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
     );
+    return true;
   }
 
   const dismissMatch = /^\/threads\/([^/]+)\/dismiss$/.exec(path);
-  if (method === "POST" && dismissMatch) {
+  if (dismissMatch) {
     const id = decodeURIComponent(dismissMatch[1]!);
     const body = (await readJsonBody<DismissThreadRequest>(req)) ?? {};
-    return withThread(res, async () =>
+    await withThread(res, async () =>
       dismissThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
     );
+    return true;
   }
 
   const deleteMatch = /^\/threads\/([^/]+)\/delete$/.exec(path);
-  if (method === "POST" && deleteMatch) {
-    const id = decodeURIComponent(deleteMatch[1]!);
-    const body = (await readJsonBody<DeleteThreadRequest>(req)) ?? {};
-    try {
-      await deleteThread(await requireRepoRoot(ctx, id), id, body, ctx.now());
-      return sendJson(res, 200, { ok: true });
-    } catch (err) {
-      if (err instanceof UnknownThreadError) {
-        return sendJson(res, 404, { error: err.message });
-      }
+  if (deleteMatch) {
+    return deleteThreadRoute(ctx, req, res, decodeURIComponent(deleteMatch[1]!));
+  }
+  return false;
+}
+
+async function deleteThreadRoute(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+): Promise<boolean> {
+  const body = (await readJsonBody<DeleteThreadRequest>(req)) ?? {};
+  try {
+    await deleteThread(await requireRepoRoot(ctx, id), id, body, ctx.now());
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    if (err instanceof UnknownThreadError) {
+      sendJson(res, 404, { error: err.message });
+    } else {
       throw err;
     }
   }
+  return true;
+}
 
-  // --- Editor handoff -----------------------------------------------------
-  if (method === "POST" && path === "/open") {
-    const body = await readJsonBody<OpenRequest>(req);
-    if (!body || !body.file || typeof body.line !== "number" || !body.editor) {
-      return sendJson(res, 400, { error: "file, line, and editor are required" });
-    }
-    const repo = body.repo ? findRepo(ctx.ws, body.repo) : undefined;
-    if (!repo) return sendJson(res, 400, { error: `unknown repo: ${body.repo}` });
-    const treeRoot = resolveRepoRoot(ctx.ws, repo.name, body.worktree ?? null);
-    if (!treeRoot) {
-      return sendJson(res, 400, { error: `unknown worktree: ${body.worktree}` });
-    }
-    try {
-      await openInEditor(treeRoot, body.file, body.line, body.editor);
-      return sendJson(res, 200, { ok: true });
-    } catch (err) {
-      // Bad input (unsupported editor, path escaping the repo) is a 400, not a
-      // server error.
-      if (err instanceof UnknownEditorError || err instanceof PathEscapeError) {
-        return sendJson(res, 400, { error: err.message });
-      }
+/** `GET /repos/:repo/diff`. */
+async function repoRoutes(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  const diffMatch = /^\/repos\/(.+)\/diff$/.exec(path);
+  if (!(method === "GET" && diffMatch)) return false;
+  const repoName = decodeURIComponent(diffMatch[1]!);
+  const repo = findRepo(ctx.ws, repoName);
+  if (!repo) {
+    sendJson(res, 404, { error: `unknown repo: ${repoName}` });
+    return true;
+  }
+  const worktree = url.searchParams.get("worktree");
+  const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
+  if (!treeRoot) {
+    sendJson(res, 404, { error: `unknown worktree: ${worktree}` });
+    return true;
+  }
+  const target = normalizeTarget(url.searchParams.get("target"));
+  const diff = await computeTargetDiff(treeRoot, target);
+  sendJson(res, 200, { ...diff, repo: repo.name, worktree });
+  return true;
+}
+
+/** `POST /open` editor handoff. */
+async function editorRoute(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (!(method === "POST" && path === "/open")) return false;
+  const body = await readJsonBody<OpenRequest>(req);
+  if (!body || !body.file || typeof body.line !== "number" || !body.editor) {
+    sendJson(res, 400, { error: "file, line, and editor are required" });
+    return true;
+  }
+  const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
+  if (!target) return true;
+  try {
+    await openInEditor(target.treeRoot, body.file, body.line, body.editor);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    // Bad input (unsupported editor, path escaping the repo) is a 400, not a 500.
+    if (err instanceof UnknownEditorError || err instanceof PathEscapeError) {
+      sendJson(res, 400, { error: err.message });
+    } else {
       throw err;
     }
   }
-
-  // --- Static web assets --------------------------------------------------
-  if (method === "GET" && ctx.webRoot) {
-    return serveStatic(ctx.webRoot, path, res);
-  }
-
-  sendJson(res, 404, { error: "not found" });
+  return true;
 }
 
 /**
@@ -340,6 +429,29 @@ async function requireRepoRoot(ctx: RouteContext, id: string): Promise<string> {
   const root = await findRepoRootForThread(ctx.ws, id);
   if (!root) throw new UnknownThreadError(id);
   return root;
+}
+
+/**
+ * Resolve a repo name + worktree to its repo and working-tree root, sending a 400
+ * and returning null on bad input. Shared by the create-thread and open routes.
+ */
+function resolveRepoTarget(
+  ctx: RouteContext,
+  res: ServerResponse,
+  repoName: string | undefined,
+  worktree: string | null,
+): { repo: DiscoveredRepo; treeRoot: string } | null {
+  const repo = repoName ? findRepo(ctx.ws, repoName) : undefined;
+  if (!repo) {
+    sendJson(res, 400, { error: `unknown repo: ${repoName}` });
+    return null;
+  }
+  const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
+  if (!treeRoot) {
+    sendJson(res, 400, { error: `unknown worktree: ${worktree}` });
+    return null;
+  }
+  return { repo, treeRoot };
 }
 
 /** Run a thread mutation, mapping a missing thread to 404. */
