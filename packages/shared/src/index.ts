@@ -116,6 +116,30 @@ export interface AttachmentResponse {
   name: string;
 }
 
+export interface FsEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+}
+
+export interface FsListing {
+  /** The (realpath-resolved) directory listed. */
+  path: string;
+  /** Parent directory, or null at the browse root (home). */
+  parent: string | null;
+  entries: FsEntry[];
+}
+
+export interface RecommendedWorkspace {
+  /** Absolute repo path to register as a workspace. */
+  path: string;
+  /** Basename, for display. */
+  name: string;
+  /** Epoch ms of the most recent agent session in this project. */
+  lastActiveAt: number;
+  source: "claude-code" | "pi";
+}
+
 export interface RepoSummary {
   /** URL-safe repo id, stable across worktrees. */
   name: string;

@@ -58,6 +58,7 @@ import {
   isValidAttachmentId,
   storeAttachment,
 } from "./store/attachments.js";
+import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
 
 export interface DaemonOptions {
   /** Workspace to serve at boot, always included even if not yet registered. */
@@ -182,6 +183,7 @@ async function handle(
   if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
   if (await attachmentRoutes(ctx, req, res, method, path)) return;
+  if (await discoveryRoutes(ctx, res, url, method, path)) return;
 
   // --- Static web assets --------------------------------------------------
   if (method === "GET" && ctx.webRoot) {
@@ -586,6 +588,37 @@ function decodeHeader(value: string | undefined): string | undefined {
   } catch {
     return value; // keep raw if it isn't valid percent-encoding
   }
+}
+
+/**
+ * `GET /fs/list?path=` (folder browser) and `GET /recommendations` (recent
+ * Claude/pi project roots). Both read host directories, so they're loopback-only.
+ */
+async function discoveryRoutes(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (!(method === "GET" && (path === "/fs/list" || path === "/recommendations"))) {
+    return false;
+  }
+  if (!isLoopback(ctx.host)) {
+    sendJson(res, 403, { error: "discovery is only allowed on a loopback-bound daemon" });
+    return true;
+  }
+  if (path === "/recommendations") {
+    sendJson(res, 200, await recommendations());
+    return true;
+  }
+  try {
+    sendJson(res, 200, await listDir(url.searchParams.get("path") ?? undefined));
+  } catch (err) {
+    if (err instanceof FsBrowseError) sendJson(res, 400, { error: err.message });
+    else throw err;
+  }
+  return true;
 }
 
 /** First value of a possibly-array header, trimmed; undefined if absent/empty. */
