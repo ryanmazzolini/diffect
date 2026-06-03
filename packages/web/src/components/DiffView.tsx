@@ -23,6 +23,9 @@ interface Props {
   threads: Thread[];
   editors: string[];
   viewed: Set<string>;
+  /** Side-by-side rendering when true, inline (unified) when false. */
+  split: boolean;
+  onToggleSplit: () => void;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }
@@ -37,6 +40,8 @@ export const DiffView = memo(function DiffView({
   threads,
   editors,
   viewed,
+  split,
+  onToggleSplit,
   onToggleViewed,
   onChanged,
 }: Props) {
@@ -94,6 +99,15 @@ export const DiffView = memo(function DiffView({
         >
           <Icon name="plus" size={12} /> Comment on another file
         </button>
+        <button
+          type="button"
+          className="ghost view-toggle"
+          aria-pressed={split}
+          title={split ? "Switch to unified view" : "Switch to split (side-by-side) view"}
+          onClick={onToggleSplit}
+        >
+          {split ? "Unified" : "Split"}
+        </button>
       </div>
       {files.length === 0 ? (
         <div className="empty">
@@ -110,6 +124,7 @@ export const DiffView = memo(function DiffView({
             threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
             editors={editors}
             viewed={viewed.has(file.path)}
+            split={split}
             onToggleViewed={onToggleViewed}
             onChanged={onChanged}
           />
@@ -284,6 +299,7 @@ const FileDiff = memo(function FileDiff({
   threads,
   editors,
   viewed,
+  split,
   onToggleViewed,
   onChanged,
 }: {
@@ -293,6 +309,7 @@ const FileDiff = memo(function FileDiff({
   threads: Thread[];
   editors: string[];
   viewed: boolean;
+  split: boolean;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }) {
@@ -363,6 +380,26 @@ const FileDiff = memo(function FileDiff({
     }
   };
 
+  // Centralized so the unified and split renderers create the form identically.
+  const renderForm = useCallback(
+    (side: Side, start: number, end: number) => (
+      <CommentForm
+        repo={repo}
+        worktree={worktree}
+        file={file.path}
+        side={side}
+        line={start}
+        endLine={end}
+        onCancel={closeForm}
+        onCreated={() => {
+          closeForm();
+          onChanged();
+        }}
+      />
+    ),
+    [repo, worktree, file.path, closeForm, onChanged],
+  );
+
   return (
     <div className={`file${viewed ? " viewed" : ""}`} id={`file-${file.path}`}>
       <div className="file-header">
@@ -381,100 +418,33 @@ const FileDiff = memo(function FileDiff({
       </div>
       {!viewed &&
         file.hunks.map((hunk, hi) => {
-        const gap = gapAbove(file.hunks, hi);
-        const exp = expanded[hi];
-        return (
-        <table className="hunk" key={hi}>
-          <tbody>
-            {gap && !exp && (
-              <tr className="unfold-row">
-                <td className="ln" />
-                <td className="ln" />
-                <td className="code">
-                  <button
-                    type="button"
-                    className="unfold-btn"
-                    onClick={() => unfold(hi, gap.from, gap.to)}
-                  >
-                    <Icon name="fold-down" size={12} /> expand{" "}
-                    {gap.to - gap.from + 1} lines
-                  </button>
-                </td>
-              </tr>
-            )}
-            {exp?.map((line, li) => (
-              <tr className="line line-context" key={`x${li}`}>
-                <td className="ln" />
-                <td className="ln">{line.new}</td>
-                <td className="code">
-                  <span className="sigil"> </span>
-                  <span className="text">{highlightLine(line.text, lang)}</span>
-                </td>
-              </tr>
-            ))}
-            <tr className="hunk-header">
-              <td className="ln" />
-              <td className="ln" />
-              <td className="code">{hunk.header}</td>
-            </tr>
-            {hunk.lines.map((line, li) => {
-              // Removed lines anchor on the old side; added/context on the new.
-              const commentSide: Side = line.type === "del" ? "old" : "new";
-              const commentLine =
-                commentSide === "old" ? line.old : line.new;
-              const lineThreads =
-                commentLine !== null
-                  ? (threadsByLine.get(`${commentSide}:${commentLine}`) ??
-                    EMPTY_THREADS)
-                  : EMPTY_THREADS;
-              const selected =
-                commentLine !== null &&
-                selRange !== null &&
-                selRange.side === commentSide &&
-                commentLine >= selRange.lo &&
-                commentLine <= selRange.hi;
-              return (
-                <LineRow
-                  key={li}
-                  line={line}
-                  lang={lang}
-                  threads={lineThreads}
-                  editors={editors}
-                  onChanged={onChanged}
-                  selected={selected}
-                  commentSide={commentSide}
-                  commentLine={commentLine}
-                  wordRanges={wordRangesByLine.get(line)}
-                  gutterProps={gutterProps}
-                  rowProps={rowProps}
-                  commentButtonProps={commentButtonProps}
-                  openComment={openComment}
-                  commentForm={
-                    form !== null &&
-                    form.side === commentSide &&
-                    commentLine === form.end ? (
-                      <CommentForm
-                        repo={repo}
-                        worktree={worktree}
-                        file={file.path}
-                        side={form.side}
-                        line={form.start}
-                        endLine={form.end}
-                        onCancel={closeForm}
-                        onCreated={() => {
-                          closeForm();
-                          onChanged();
-                        }}
-                      />
-                    ) : null
-                  }
-                />
-              );
-            })}
-          </tbody>
-        </table>
-        );
-      })}
+          const rows: HunkRowsProps = {
+            hunk,
+            hi,
+            gap: gapAbove(file.hunks, hi),
+            exp: expanded[hi],
+            unfold,
+            lang,
+            threadsByLine,
+            wordRangesByLine,
+            selRange,
+            form,
+            gutterProps,
+            rowProps,
+            commentButtonProps,
+            openComment,
+            editors,
+            onChanged,
+            renderForm,
+          };
+          return (
+            <table className={`hunk${split ? " hunk-split" : ""}`} key={hi}>
+              <tbody>
+                {split ? <SplitHunkRows {...rows} /> : <UnifiedHunkRows {...rows} />}
+              </tbody>
+            </table>
+          );
+        })}
     </div>
   );
 });
@@ -652,3 +622,398 @@ const LineRow = memo(function LineRow({
     </>
   );
 });
+
+// ── Shared hunk-row context, passed to both the unified and split renderers ──
+interface HunkRowsProps {
+  hunk: DiffHunk;
+  hi: number;
+  gap: { from: number; to: number } | null;
+  exp: DiffLine[] | undefined;
+  unfold: (hi: number, from: number, to: number) => void;
+  lang: string | null;
+  threadsByLine: Map<string, Thread[]>;
+  wordRangesByLine: Map<DiffLine, WordRange[]>;
+  selRange: LineSelection["range"];
+  form: LineSelection["form"];
+  gutterProps: LineSelection["gutterProps"];
+  rowProps: LineSelection["rowProps"];
+  commentButtonProps: LineSelection["commentButtonProps"];
+  openComment: (side: Side, lineNo: number) => void;
+  editors: string[];
+  onChanged: () => void;
+  renderForm: (side: Side, start: number, end: number) => React.ReactNode;
+}
+
+const sigilOf = (type: DiffLine["type"]) =>
+  type === "add" ? "+" : type === "del" ? "-" : " ";
+
+/** The "expand N lines" control above a hunk gap. */
+function UnfoldButton({
+  hi,
+  gap,
+  unfold,
+}: {
+  hi: number;
+  gap: { from: number; to: number };
+  unfold: (hi: number, from: number, to: number) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="unfold-btn"
+      onClick={() => unfold(hi, gap.from, gap.to)}
+    >
+      <Icon name="fold-down" size={12} /> expand {gap.to - gap.from + 1} lines
+    </button>
+  );
+}
+
+/** Sigil + highlighted text for a code cell's contents. */
+function CodeText({ text, lang }: { text: string; lang: string | null }) {
+  return (
+    <>
+      <span className="sigil"> </span>
+      <span className="text">{highlightLine(text, lang)}</span>
+    </>
+  );
+}
+
+/** Unified (inline) hunk body: the original 3-column rows. */
+function UnifiedHunkRows(p: HunkRowsProps) {
+  return (
+    <>
+      {p.gap && !p.exp && (
+        <tr className="unfold-row">
+          <td className="ln" />
+          <td className="ln" />
+          <td className="code">
+            <UnfoldButton hi={p.hi} gap={p.gap} unfold={p.unfold} />
+          </td>
+        </tr>
+      )}
+      {p.exp?.map((line, li) => (
+        <tr className="line line-context" key={`x${li}`}>
+          <td className="ln" />
+          <td className="ln">{line.new}</td>
+          <td className="code">
+            <CodeText text={line.text} lang={p.lang} />
+          </td>
+        </tr>
+      ))}
+      <tr className="hunk-header">
+        <td className="ln" />
+        <td className="ln" />
+        <td className="code">{p.hunk.header}</td>
+      </tr>
+      {p.hunk.lines.map((line, li) => {
+        const commentSide: Side = line.type === "del" ? "old" : "new";
+        const commentLine = commentSide === "old" ? line.old : line.new;
+        const threads =
+          commentLine !== null
+            ? (p.threadsByLine.get(`${commentSide}:${commentLine}`) ?? EMPTY_THREADS)
+            : EMPTY_THREADS;
+        const selected =
+          commentLine !== null &&
+          p.selRange !== null &&
+          p.selRange.side === commentSide &&
+          commentLine >= p.selRange.lo &&
+          commentLine <= p.selRange.hi;
+        const showForm =
+          p.form !== null && p.form.side === commentSide && commentLine === p.form.end;
+        return (
+          <LineRow
+            key={li}
+            line={line}
+            lang={p.lang}
+            threads={threads}
+            editors={p.editors}
+            onChanged={p.onChanged}
+            selected={selected}
+            commentSide={commentSide}
+            commentLine={commentLine}
+            wordRanges={p.wordRangesByLine.get(line)}
+            gutterProps={p.gutterProps}
+            rowProps={p.rowProps}
+            commentButtonProps={p.commentButtonProps}
+            openComment={p.openComment}
+            commentForm={
+              showForm ? p.renderForm(p.form!.side, p.form!.start, p.form!.end) : null
+            }
+          />
+        );
+      })}
+    </>
+  );
+}
+
+interface SplitRowData {
+  left: DiffLine | null;
+  right: DiffLine | null;
+}
+
+/** Aligned [old | new] rows: context on both sides, replacements zipped index by
+ *  index, unpaired add/del filling one side with a blank. */
+function alignRows(lines: DiffLine[]): SplitRowData[] {
+  const rows: SplitRowData[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (line.type === "context") {
+      rows.push({ left: line, right: line });
+      i++;
+    } else if (line.type === "del") {
+      const d = runEnd(lines, i, "del");
+      const a = runEnd(lines, d, "add");
+      const dels = lines.slice(i, d);
+      const adds = lines.slice(d, a);
+      const n = Math.max(dels.length, adds.length);
+      for (let k = 0; k < n; k++) rows.push({ left: dels[k] ?? null, right: adds[k] ?? null });
+      i = a;
+    } else {
+      const a = runEnd(lines, i, "add"); // a lone addition run
+      for (let k = i; k < a; k++) rows.push({ left: null, right: lines[k]! });
+      i = a;
+    }
+  }
+  return rows;
+}
+
+interface SideCtx {
+  threadsByLine: Map<string, Thread[]>;
+  wordRangesByLine: Map<DiffLine, WordRange[]>;
+  selRange: LineSelection["range"];
+  form: LineSelection["form"];
+  renderForm: (side: Side, start: number, end: number) => React.ReactNode;
+}
+interface SideResolved {
+  lineNo: number | null;
+  commentable: boolean;
+  ranges: WordRange[] | undefined;
+  selected: boolean;
+  threads: Thread[];
+  form: React.ReactNode;
+}
+
+/** Resolve one side of a split row into the stable primitives SplitRow renders. */
+function sideProps(line: DiffLine | null, side: Side, ctx: SideCtx): SideResolved {
+  const lineNo = !line ? null : side === "old" ? line.old : line.new;
+  const commentable = !!line && (side === "old" ? line.type === "del" : line.new !== null);
+  const inSel =
+    lineNo !== null &&
+    ctx.selRange !== null &&
+    ctx.selRange.side === side &&
+    lineNo >= ctx.selRange.lo &&
+    lineNo <= ctx.selRange.hi;
+  return {
+    lineNo,
+    commentable,
+    ranges: line ? ctx.wordRangesByLine.get(line) : undefined,
+    selected: commentable && inSel,
+    threads:
+      commentable && lineNo !== null
+        ? (ctx.threadsByLine.get(`${side}:${lineNo}`) ?? EMPTY_THREADS)
+        : EMPTY_THREADS,
+    form:
+      commentable && ctx.form?.side === side && ctx.form.end === lineNo
+        ? ctx.renderForm(side, ctx.form.start, ctx.form.end)
+        : null,
+  };
+}
+
+/** One side's gutter + code cells in split view (a blank pair when absent). */
+function SplitSide({
+  line,
+  side,
+  resolved,
+  suppressBtn,
+  lang,
+  gutterProps,
+  rowProps,
+  commentButtonProps,
+  openComment,
+}: {
+  line: DiffLine | null;
+  side: Side;
+  resolved: SideResolved;
+  suppressBtn: boolean;
+  lang: string | null;
+  gutterProps: LineSelection["gutterProps"];
+  rowProps: LineSelection["rowProps"];
+  commentButtonProps: LineSelection["commentButtonProps"];
+  openComment: (side: Side, lineNo: number) => void;
+}) {
+  if (!line) {
+    return (
+      <>
+        <td className="ln ln-filler" />
+        <td className="code code-filler" />
+      </>
+    );
+  }
+  const { lineNo, commentable, ranges, selected } = resolved;
+  const active = commentable && lineNo !== null;
+  return (
+    <>
+      <td
+        className={`ln line-${line.type}${active ? " ln-clickable" : ""}`}
+        title={active ? GUTTER_TITLE : undefined}
+        {...(active ? gutterProps(side, lineNo) : {})}
+      >
+        {lineNo ?? ""}
+      </td>
+      <td
+        className={`code line-${line.type}${selected ? " split-selected" : ""}`}
+        {...(active ? rowProps(side, lineNo) : {})}
+      >
+        <span className="sigil">{sigilOf(line.type)}</span>
+        <span className="text">
+          {ranges && ranges.length
+            ? highlightLineWithDiff(line.text, lang, ranges, "diff-word")
+            : highlightLine(line.text, lang)}
+        </span>
+        {active && !suppressBtn && (
+          <button
+            className="comment-btn"
+            title="Click to comment, or drag to select a range"
+            aria-label="Comment on this line or selection"
+            onClick={() => openComment(side, lineNo)}
+            {...commentButtonProps(side, lineNo)}
+          >
+            <Icon name="plus" size={12} />
+          </button>
+        )}
+      </td>
+    </>
+  );
+}
+
+// Not finely memoized (per-side data is recomputed each render); content-visibility
+// bounds the cost to on-screen files. The common unified path keeps LineRow's memo.
+function SplitRow({
+  left,
+  right,
+  leftData,
+  rightData,
+  lang,
+  gutterProps,
+  rowProps,
+  commentButtonProps,
+  openComment,
+  editors,
+  onChanged,
+}: {
+  left: DiffLine | null;
+  right: DiffLine | null;
+  leftData: SideResolved;
+  rightData: SideResolved;
+  lang: string | null;
+  gutterProps: LineSelection["gutterProps"];
+  rowProps: LineSelection["rowProps"];
+  commentButtonProps: LineSelection["commentButtonProps"];
+  openComment: (side: Side, lineNo: number) => void;
+  editors: string[];
+  onChanged: () => void;
+}) {
+  const sideArgs = { lang, gutterProps, rowProps, commentButtonProps, openComment };
+  return (
+    <>
+      <tr className="line split-line">
+        <SplitSide
+          line={left}
+          side="old"
+          resolved={leftData}
+          suppressBtn={leftData.form !== null}
+          {...sideArgs}
+        />
+        <SplitSide
+          line={right}
+          side="new"
+          resolved={rightData}
+          suppressBtn={rightData.form !== null}
+          {...sideArgs}
+        />
+      </tr>
+      {[...leftData.threads, ...rightData.threads].map((t) => (
+        <tr className="inline-thread-row" key={`${t.id}:${t.status}`}>
+          <td className="code" colSpan={4}>
+            <InlineThread thread={t} editors={editors} onChanged={onChanged} />
+          </td>
+        </tr>
+      ))}
+      {leftData.form && (
+        <tr className="comment-form-row">
+          <td className="code" colSpan={4}>
+            {leftData.form}
+          </td>
+        </tr>
+      )}
+      {rightData.form && (
+        <tr className="comment-form-row">
+          <td className="code" colSpan={4}>
+            {rightData.form}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Split (side-by-side) hunk body: 4-column [old gutter | old code | new …] rows. */
+function SplitHunkRows(p: HunkRowsProps) {
+  const ctx: SideCtx = {
+    threadsByLine: p.threadsByLine,
+    wordRangesByLine: p.wordRangesByLine,
+    selRange: p.selRange,
+    form: p.form,
+    renderForm: p.renderForm,
+  };
+  const rowArgs = {
+    lang: p.lang,
+    gutterProps: p.gutterProps,
+    rowProps: p.rowProps,
+    commentButtonProps: p.commentButtonProps,
+    openComment: p.openComment,
+    editors: p.editors,
+    onChanged: p.onChanged,
+  };
+  return (
+    <>
+      {p.gap && !p.exp && (
+        <tr className="unfold-row">
+          <td className="ln" />
+          <td className="code" colSpan={3}>
+            <UnfoldButton hi={p.hi} gap={p.gap} unfold={p.unfold} />
+          </td>
+        </tr>
+      )}
+      {p.exp?.map((line, li) => (
+        <tr className="line line-context" key={`x${li}`}>
+          <td className="ln ln-filler" />
+          <td className="code line-context">
+            <CodeText text={line.text} lang={p.lang} />
+          </td>
+          <td className="ln">{line.new}</td>
+          <td className="code line-context">
+            <CodeText text={line.text} lang={p.lang} />
+          </td>
+        </tr>
+      ))}
+      <tr className="hunk-header">
+        <td className="ln" />
+        <td className="code" colSpan={3}>
+          {p.hunk.header}
+        </td>
+      </tr>
+      {alignRows(p.hunk.lines).map((row, ri) => (
+        <SplitRow
+          key={ri}
+          left={row.left}
+          right={row.right}
+          leftData={sideProps(row.left, "old", ctx)}
+          rightData={sideProps(row.right, "new", ctx)}
+          {...rowArgs}
+        />
+      ))}
+    </>
+  );
+}

@@ -885,6 +885,27 @@ body.pane-resizing {
   background: var(--del-word);
   border-radius: 2px;
 }
+
+/* Split (side-by-side) view: two code columns separated by a divider, blank
+ * filler cells where a side has no line. */
+.hunk-split {
+  table-layout: fixed;
+}
+.hunk-split .code {
+  width: 50%;
+}
+.hunk-split .split-line td:nth-child(3),
+.hunk-split .line-context td:nth-child(3) {
+  border-left: 1px solid var(--border);
+}
+.ln-filler,
+.code-filler {
+  background: var(--bg-elev);
+  opacity: 0.5;
+}
+.split-selected {
+  background: var(--sel-bg);
+}
 .sigil {
   display: inline-block;
   width: 1ch;

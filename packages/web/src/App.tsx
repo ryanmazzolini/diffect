@@ -45,6 +45,17 @@ export function App() {
   );
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState("");
+  const [splitView, setSplitView] = useState(
+    () => getStored("diffect-split-view") === "1",
+  );
+  const toggleSplitView = useCallback(
+    () =>
+      setSplitView((s) => {
+        setStored("diffect-split-view", s ? "0" : "1");
+        return !s;
+      }),
+    [],
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [viewed, setViewed] = useState<Set<string>>(new Set());
   const diffPaneRef = useRef<HTMLElement>(null);
@@ -385,6 +396,8 @@ export function App() {
             threads={scopedThreads}
             editors={editors}
             viewed={viewed}
+            split={splitView}
+            onToggleSplit={toggleSplitView}
             onToggleViewed={toggleViewed}
             onChanged={refreshThreads}
           />

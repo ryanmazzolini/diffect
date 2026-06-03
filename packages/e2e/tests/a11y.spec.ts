@@ -28,3 +28,17 @@ for (const theme of ["dark", "light"] as const) {
     ).toEqual([]);
   });
 }
+
+test("no serious/critical a11y violations in split view", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Split" }).click();
+  await expect(page.locator("table.hunk-split").first()).toBeVisible();
+
+  const builder = () => new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]);
+  const shell = await builder().exclude(".diff").analyze();
+  const diff = await builder().include(".diff").disableRules(["color-contrast"]).analyze();
+  const blocking = [...shell.violations, ...diff.violations].filter(
+    (v) => v.impact === "serious" || v.impact === "critical",
+  );
+  expect(blocking, blocking.map((v) => `${v.id}: ${v.help}`).join("\n")).toEqual([]);
+});
