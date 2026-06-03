@@ -56,6 +56,18 @@ export function App() {
       }),
     [],
   );
+  // Line wrapping defaults on; "0" opts into no-wrap (horizontal scroll per file).
+  const [wrapLines, setWrapLines] = useState(
+    () => getStored("diffect-wrap-lines") !== "0",
+  );
+  const toggleWrapLines = useCallback(
+    () =>
+      setWrapLines((w) => {
+        setStored("diffect-wrap-lines", w ? "0" : "1");
+        return !w;
+      }),
+    [],
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [viewed, setViewed] = useState<Set<string>>(new Set());
   const diffPaneRef = useRef<HTMLElement>(null);
@@ -398,6 +410,8 @@ export function App() {
             viewed={viewed}
             split={splitView}
             onToggleSplit={toggleSplitView}
+            wrap={wrapLines}
+            onToggleWrap={toggleWrapLines}
             onToggleViewed={toggleViewed}
             onChanged={refreshThreads}
           />

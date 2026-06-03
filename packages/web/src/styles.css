@@ -906,6 +906,33 @@ body.pane-resizing {
 .split-selected {
   background: var(--sel-bg);
 }
+
+/* No-wrap mode: long lines keep their length and the file scrolls horizontally
+ * instead of wrapping. The scroll lives on `.file-body` (inside `.file`) because
+ * `.file`'s content-visibility clips paint — a `.diff-pane` scroll would never
+ * reveal the overflow. `overflow-y` computes to hidden but never clips: the body
+ * grows to its content's height, so only the x-axis actually scrolls. */
+.diff.nowrap .code {
+  white-space: pre;
+  word-break: normal;
+}
+.diff.nowrap .file-body {
+  overflow-x: auto;
+  overflow-y: clip;
+}
+/* Grow each hunk table to its widest line (min-width keeps short files filling
+ * the pane so row tints reach the right edge). Split drops fixed layout so both
+ * columns size to content while staying row-aligned in the one table. */
+.diff.nowrap .hunk {
+  width: max-content;
+  min-width: 100%;
+}
+.diff.nowrap .hunk-split {
+  table-layout: auto;
+}
+.diff.nowrap .hunk-split .code {
+  width: auto;
+}
 .sigil {
   display: inline-block;
   width: 1ch;

@@ -26,6 +26,9 @@ interface Props {
   /** Side-by-side rendering when true, inline (unified) when false. */
   split: boolean;
   onToggleSplit: () => void;
+  /** Wrap long lines when true; scroll horizontally per file when false. */
+  wrap: boolean;
+  onToggleWrap: () => void;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }
@@ -42,6 +45,8 @@ export const DiffView = memo(function DiffView({
   viewed,
   split,
   onToggleSplit,
+  wrap,
+  onToggleWrap,
   onToggleViewed,
   onChanged,
 }: Props) {
@@ -85,7 +90,7 @@ export const DiffView = memo(function DiffView({
   const totalDel = files.reduce((n, f) => n + f.deletions, 0);
 
   return (
-    <div className="diff">
+    <div className={`diff${wrap ? "" : " nowrap"}`}>
       {dialog}
       <div className="diff-summary">
         <span className="diff-summary-files">
@@ -107,6 +112,15 @@ export const DiffView = memo(function DiffView({
           onClick={onToggleSplit}
         >
           {split ? "Unified" : "Split"}
+        </button>
+        <button
+          type="button"
+          className="ghost wrap-toggle"
+          aria-pressed={!wrap}
+          title={wrap ? "Stop wrapping long lines (scroll horizontally)" : "Wrap long lines"}
+          onClick={onToggleWrap}
+        >
+          {wrap ? "No wrap" : "Wrap"}
         </button>
       </div>
       {files.length === 0 ? (
@@ -416,8 +430,12 @@ const FileDiff = memo(function FileDiff({
           Viewed
         </label>
       </div>
-      {!viewed &&
-        file.hunks.map((hunk, hi) => {
+      {/* All hunks share one scroll container so no-wrap mode scrolls a file's
+          hunks together (and within `.file`, whose content-visibility clips
+          paint — an outer pane scroll would never see the overflow). */}
+      {!viewed && (
+        <div className="file-body">
+        {file.hunks.map((hunk, hi) => {
           const rows: HunkRowsProps = {
             hunk,
             hi,
@@ -445,6 +463,8 @@ const FileDiff = memo(function FileDiff({
             </table>
           );
         })}
+        </div>
+      )}
     </div>
   );
 });
