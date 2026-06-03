@@ -13,7 +13,6 @@ import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { getStored, setStored } from "./storage.js";
-import { statusLabel } from "./labels.js";
 import { orderedDiffFiles } from "./fileTree.js";
 import { usePaneLayout } from "./usePaneLayout.js";
 import { useResizable } from "./useResizable.js";
@@ -24,7 +23,7 @@ import { Sidebar } from "./components/Sidebar.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 
 type StatusFilter = ThreadStatus | "all";
-const STATUS_FILTERS: StatusFilter[] = ["open", "resolved", "all"];
+const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 // Stable empty references so memoized children don't re-render on the null paths.
 const EMPTY_FILES: DiffFile[] = [];
 const EMPTY_EDITORS: string[] = [];
@@ -295,7 +294,7 @@ export function App() {
   const statusCounts = useMemo<Record<StatusFilter, number>>(
     () => ({
       open: scopedThreads.filter((t) => t.status === "open").length,
-      resolved: scopedThreads.filter((t) => t.status === "resolved").length,
+      closed: scopedThreads.filter((t) => t.status === "closed").length,
       all: scopedThreads.length,
     }),
     [scopedThreads],
@@ -406,7 +405,7 @@ export function App() {
                 className={`filter ${filter === f ? "active" : ""}`}
                 onClick={() => setFilter(f)}
               >
-                {statusLabel(f)}
+                {f}
                 <span className="filter-count">{statusCounts[f]}</span>
               </button>
             ))}

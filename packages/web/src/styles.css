@@ -936,7 +936,7 @@ body.pane-resizing {
   opacity: 1;
 }
 
-/* Collapsed (resolved/dismissed) inline thread marker */
+/* Collapsed (closed) inline thread marker */
 .thread-collapsed {
   display: flex;
   align-items: center;
@@ -1210,10 +1210,7 @@ button:disabled {
 .status-open {
   color: var(--success);
 }
-.status-resolved {
-  color: var(--muted);
-}
-.status-dismissed {
+.status-closed {
   color: var(--muted);
 }
 .thread-card-more {

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
-import { statusLabel } from "../labels.js";
 import { useDraft } from "../useDraft.js";
 import { Markdown } from "./Markdown.js";
 import { MarkdownEditor } from "./MarkdownEditor.js";
@@ -51,7 +50,7 @@ export function ThreadConversation({
           <span className={`sev sev-${thread.severity}`}>{thread.severity}</span>
         )}
         <span className={`status-badge status-${thread.status}`}>
-          {statusLabel(thread.status)}
+          {thread.status}
         </span>
         {thread.anchorState === "stale" && (
           <span

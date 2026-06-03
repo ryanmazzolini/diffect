@@ -63,7 +63,7 @@ test("resolves a thread and the open count drops", async ({ page }) => {
   // the inline view; switching the filter to "closed" surfaces it again.
   await page.locator(".filter", { hasText: "closed" }).click();
   await expect(
-    page.locator(".thread-card.status-resolved", { hasText: "please rename this" }),
+    page.locator(".thread-card.status-closed", { hasText: "please rename this" }),
   ).toBeVisible();
   // …and the open count dropped by one.
   await expect(openCount).toHaveText(String(before - 1));

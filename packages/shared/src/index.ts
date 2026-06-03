@@ -186,10 +186,10 @@ export interface OpenRequest {
 }
 
 export type Severity = "must-fix" | "suggestion" | "nit" | "question";
-// A thread is open or resolved. (Legacy logs may contain a `thread.dismissed`
-// event; replay folds it into "resolved" — see event-log.ts — so historical data
-// stays readable without a separate dismissed state.)
-export type ThreadStatus = "open" | "resolved";
+// A thread is open or closed. The store records *events* (thread.resolved,
+// and legacy thread.dismissed) — status is computed on replay, both folding to
+// "closed" — so this rename needs no migration.
+export type ThreadStatus = "open" | "closed";
 export type AnchorState = "active" | "stale";
 export type AuthorType = "user" | "agent";
 

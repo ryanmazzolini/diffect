@@ -253,13 +253,13 @@ export function replay(events: ThreadEvent[]): Thread[] {
         t.comments.push({ id: e.commentId, author: e.author, body: e.body, ts: e.ts });
         break;
       case "thread.resolved":
-        t.status = "resolved";
+        t.status = "closed";
         appendStatusNote(t, e.author, e.summary, e.ts);
         break;
       case "thread.dismissed":
-        // Legacy: dismissal merged into resolution. Fold to resolved, keeping the
+        // Legacy: dismissal merged into closing. Fold to closed, keeping the
         // recorded reason as the trailing note so old logs read sensibly.
-        t.status = "resolved";
+        t.status = "closed";
         appendStatusNote(t, e.author, e.reason, e.ts);
         break;
       case "thread.deleted":

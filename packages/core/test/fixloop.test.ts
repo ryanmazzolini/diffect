@@ -70,7 +70,7 @@ describe("human → agent fix loop", () => {
 
     // The CLI's view (file store) reflects the resolution with no daemon.
     const offline = await loadThreads(dir);
-    expect(offline[0]!.status).toBe("resolved");
+    expect(offline[0]!.status).toBe("closed");
 
     // 3. Restart the daemon — it replays the same log and shows resolved.
     srv = await start();
@@ -113,7 +113,7 @@ describe("human → agent fix loop", () => {
         body: JSON.stringify({ summary: "ok" }),
       })
     ).json();
-    expect(resolved.status).toBe("resolved");
+    expect(resolved.status).toBe("closed");
 
     const missing = await fetch(`${base}/threads/th_nope/resolve`, {
       method: "POST",

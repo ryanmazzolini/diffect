@@ -142,7 +142,11 @@ async function resolveTarget(flags: Flags): Promise<{
 
 async function cmdList(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set(["json"]));
-  const status = flags.options.get("status") as ThreadStatus | undefined;
+  // "resolved" stays accepted as a silent alias for the renamed "closed" status.
+  const rawStatus = flags.options.get("status");
+  const status = (rawStatus === "resolved" ? "closed" : rawStatus) as
+    | ThreadStatus
+    | undefined;
   const repoFilter = flags.options.get("repo");
   const worktreeFilter = flags.options.get("worktree");
   const root = await resolveWorkspaceRoot(process.cwd());
@@ -292,7 +296,7 @@ async function mutate(op: () => Promise<Thread>): Promise<void> {
 const USAGE = `diffect — local-first code review
 
 Usage:
-  diffect list    [--status open|resolved] [--repo R] [--worktree W] [--json]
+  diffect list    [--status open|closed] [--repo R] [--worktree W] [--json]
   diffect diff    [--repo R] [--worktree W] [--target work|staged|unstaged|<ref>|<a>..<b>] [--json]
   diffect comment [--repo R] [--worktree W] --file F --line N [--end-line M] [--side new|old]
                   [--severity must-fix|suggestion|nit|question] [--agent NAME] --body "…"

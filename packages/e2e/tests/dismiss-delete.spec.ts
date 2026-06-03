@@ -26,7 +26,7 @@ test("resolved thread collapses in the diff, then can be deleted", async ({
   await thread.getByRole("button", { name: "Close" }).click();
 
   // It now shows as a collapsed marker rather than the full conversation.
-  await expect(page.locator(".thread-collapsed.status-resolved")).toBeVisible();
+  await expect(page.locator(".thread-collapsed.status-closed")).toBeVisible();
 
   // Expand and delete it (Delete now asks for confirmation).
   await page.locator(".thread-collapsed").click();

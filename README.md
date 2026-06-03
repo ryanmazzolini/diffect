@@ -23,7 +23,7 @@ Comment on a line, a click-or-keyboard-selected range, or **any file in the repo
 (not just the changed ones, via a picker — it surfaces as an out-of-diff block).
 The composer is GitHub-style markdown with write/preview and image attachments;
 comments re-anchor as the code changes and are flagged *stale* when their range
-disappears — never silently dropped. Resolve, dismiss, or delete threads; mark
+disappears — never silently dropped. Close or delete threads; mark
 files viewed; navigate with `j`/`k`. The browser updates live over SSE and can open
 a `file:line` in your editor. The same threads are available to an agent through
 the event log.
@@ -63,8 +63,7 @@ cd /path/to/repo
 diffect list --status open                     # what needs attention
 diffect comment --file src/a.ts --line 42 --severity must-fix --body "…"
 diffect reply <id> --agent pi --body "fixed"   # author as an agent
-diffect resolve <id> --summary "…"
-diffect dismiss <id> --reason "…"
+diffect resolve <id> --summary "…"            # closes the thread
 ```
 
 The default target is `work` (committed-since-base + unstaged + untracked). Pick

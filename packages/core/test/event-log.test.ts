@@ -91,10 +91,10 @@ describe("event log", () => {
       { author: { type: "user" }, summary: "verified" },
       T0,
     );
-    expect(resolved.status).toBe("resolved");
+    expect(resolved.status).toBe("closed");
 
     const [loaded] = await loadThreads(dir);
-    expect(loaded!.status).toBe("resolved");
+    expect(loaded!.status).toBe("closed");
     // original + agent reply + resolution note (recorded as a trailing comment)
     expect(loaded!.comments.map((c) => c.body)).toEqual([
       "N+1 here",
@@ -104,8 +104,8 @@ describe("event log", () => {
     expect(loaded!.comments[1]!.author).toEqual({ type: "agent", name: "pi" });
   });
 
-  it("folds a legacy thread.dismissed event into resolved on replay", () => {
-    // Dismissal was merged into resolution; old logs must still load, with the
+  it("folds a legacy thread.dismissed event into closed on replay", () => {
+    // Dismissal was merged into closing; old logs must still load, with the
     // dismissal reason preserved as the trailing note.
     const base = { v: THREAD_SCHEMA_VERSION, ts: T0, author: { type: "user" as const } };
     const created = {
@@ -129,7 +129,7 @@ describe("event log", () => {
       reason: "wontfix",
     };
     const [t] = replay([created, dismissed]);
-    expect(t!.status).toBe("resolved");
+    expect(t!.status).toBe("closed");
     expect(t!.comments.at(-1)!.body).toBe("wontfix");
   });
 

@@ -261,7 +261,9 @@ async function threadCollectionRoutes(
   path: string,
 ): Promise<boolean> {
   if (method === "GET" && path === "/threads") {
-    const status = url.searchParams.get("status");
+    const rawStatus = url.searchParams.get("status");
+    // "resolved" stays accepted as a silent alias for the renamed "closed" status.
+    const status = rawStatus === "resolved" ? "closed" : rawStatus;
     const repoFilter = url.searchParams.get("repo");
     const worktreeFilter = url.searchParams.get("worktree");
     let threads = await loadRefreshedThreads(ctx.ws);

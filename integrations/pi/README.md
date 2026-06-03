@@ -28,13 +28,12 @@ review state and stable commands.
    diffect reply <thread-id> --agent pi --body "Batched the N+1 via a dataloader."
    ```
 
-4. **Resolve or dismiss**:
+4. **Resolve** (closes the thread):
    ```sh
    diffect resolve <thread-id> --agent pi --summary "Fixed in this change."
-   diffect dismiss <thread-id> --agent pi --reason "Not applicable: handled upstream."
    ```
-   Always pass a `--summary`/`--reason` — a status change with no explanation is
-   lost context. Diffect records it as a trailing comment on the thread.
+   Always pass a `--summary` — a status change with no explanation is lost
+   context. Diffect records it as a trailing comment on the thread.
 
 5. **Raise your own findings** as normal review threads (no separate "AI findings"
    store — they show up in the same inbox as human comments, distinguished only by
