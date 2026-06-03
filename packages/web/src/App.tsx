@@ -13,6 +13,7 @@ import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { getStored, setStored } from "./storage.js";
+import { statusLabel } from "./labels.js";
 import { orderedDiffFiles } from "./fileTree.js";
 import { usePaneLayout } from "./usePaneLayout.js";
 import { useResizable } from "./useResizable.js";
@@ -405,7 +406,7 @@ export function App() {
                 className={`filter ${filter === f ? "active" : ""}`}
                 onClick={() => setFilter(f)}
               >
-                {f}
+                {statusLabel(f)}
                 <span className="filter-count">{statusCounts[f]}</span>
               </button>
             ))}

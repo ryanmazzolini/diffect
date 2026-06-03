@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Side, Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
+import { statusLabel } from "../labels.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { useLineSelection, type LineSelection } from "../useLineSelection.js";
 import { CommentForm } from "./CommentForm.js";
@@ -464,7 +465,7 @@ function InlineThread({
         title="Show thread"
       >
         <span className={`status-badge status-${thread.status}`}>
-          {thread.status}
+          {statusLabel(thread.status)}
         </span>
         <span className="thread-collapsed-preview">{first}</span>
       </button>

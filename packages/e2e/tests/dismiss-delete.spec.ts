@@ -19,11 +19,11 @@ test("resolved thread collapses in the diff, then can be deleted", async ({
     .getByRole("button", { name: "Comment" })
     .click();
 
-  // Resolve it from the inline conversation.
+  // Close it from the inline conversation.
   const thread = page
     .locator(".inline-thread", { hasText: "nit: spacing here" })
     .first();
-  await thread.getByRole("button", { name: "Resolve" }).click();
+  await thread.getByRole("button", { name: "Close" }).click();
 
   // It now shows as a collapsed marker rather than the full conversation.
   await expect(page.locator(".thread-collapsed.status-resolved")).toBeVisible();

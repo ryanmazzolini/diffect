@@ -56,12 +56,12 @@ test("resolves a thread and the open count drops", async ({ page }) => {
   const before = Number(await openCount.innerText());
   expect(before).toBeGreaterThanOrEqual(1);
 
-  // Resolve via the inline conversation controls.
-  await thread.getByRole("button", { name: "Resolve" }).click();
+  // Close via the inline conversation controls.
+  await thread.getByRole("button", { name: "Close" }).click();
 
-  // The status filter still defaults to "open", so the resolved thread leaves
-  // the inline view; switching the filter to "resolved" surfaces it again.
-  await page.locator(".filter", { hasText: "resolved" }).click();
+  // The status filter still defaults to "open", so the closed thread leaves
+  // the inline view; switching the filter to "closed" surfaces it again.
+  await page.locator(".filter", { hasText: "closed" }).click();
   await expect(
     page.locator(".thread-card.status-resolved", { hasText: "please rename this" }),
   ).toBeVisible();
