@@ -24,8 +24,10 @@
   --muted: #8b949e;
   --add-bg: #122117;
   --add-line: #2ea04326;
+  --add-word: #2ea04366;
   --del-bg: #2d1214;
   --del-line: #f8514926;
+  --del-word: #f8514966;
   --accent: #2f81f7;
   --must-fix: #f85149;
   --suggestion: #d29922;
@@ -59,8 +61,10 @@
   --muted: #656d76;
   --add-bg: #e6ffec;
   --add-line: #2ea04326;
+  --add-word: #2da44e4d;
   --del-bg: #ffebe9;
   --del-line: #f8514926;
+  --del-word: #cf222e4d;
   --accent: #0969da;
   --must-fix: #cf222e;
   --suggestion: #9a6700;
@@ -870,6 +874,16 @@ body.pane-resizing {
 }
 .line-del .code {
   background: var(--del-line);
+}
+/* Intra-line (word-level) diff: tint just the changed spans, coloured by the
+ * row's add/del context so it reads on top of the line background. */
+.line-add .diff-word {
+  background: var(--add-word);
+  border-radius: 2px;
+}
+.line-del .diff-word {
+  background: var(--del-word);
+  border-radius: 2px;
 }
 .sigil {
   display: inline-block;

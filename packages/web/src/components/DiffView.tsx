@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Side, Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
-import { highlightLine, langForPath } from "../highlight.js";
+import { highlightLine, highlightLineWithDiff, langForPath } from "../highlight.js";
+import { wordDiff, type Range as WordRange } from "../wordDiff.js";
 import { useLineSelection, type LineSelection } from "../useLineSelection.js";
 import { CommentForm } from "./CommentForm.js";
 import { CrossFileDialog } from "./CrossFileDialog.js";
@@ -128,6 +129,53 @@ export const DiffView = memo(function DiffView({
     </div>
   );
 });
+
+/**
+ * Pair each replaced line (a run of deletions immediately followed by additions)
+ * with its counterpart and compute a word-level diff, returning the changed
+ * character ranges keyed by line. Only replacements get intra-line highlighting;
+ * pure adds/removes don't (there's nothing to compare against).
+ */
+function computeWordDiffs(hunks: DiffHunk[]): Map<DiffLine, WordRange[]> {
+  const map = new Map<DiffLine, WordRange[]>();
+  for (const hunk of hunks) addHunkWordDiffs(hunk.lines, map);
+  return map;
+}
+
+/** Index after the run of `type` lines starting at `start`. */
+function runEnd(lines: DiffLine[], start: number, type: DiffLine["type"]): number {
+  let k = start;
+  while (k < lines.length && lines[k]!.type === type) k++;
+  return k;
+}
+
+function addHunkWordDiffs(lines: DiffLine[], map: Map<DiffLine, WordRange[]>): void {
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i]!.type !== "del") {
+      i++;
+      continue;
+    }
+    const d = runEnd(lines, i, "del"); // end of the deletion run
+    const a = runEnd(lines, d, "add"); // end of the following addition run
+    pairLineWordDiffs(lines.slice(i, d), lines.slice(d, a), map);
+    i = a > i ? a : i + 1;
+  }
+}
+
+/** Pair removed line k with added line k and record each side's changed ranges. */
+function pairLineWordDiffs(
+  dels: DiffLine[],
+  adds: DiffLine[],
+  map: Map<DiffLine, WordRange[]>,
+): void {
+  const pairs = Math.min(dels.length, adds.length);
+  for (let k = 0; k < pairs; k++) {
+    const wd = wordDiff(dels[k]!.text, adds[k]!.text);
+    if (wd.del.length) map.set(dels[k]!, wd.del);
+    if (wd.add.length) map.set(adds[k]!, wd.add);
+  }
+}
 
 /** Bucket threads by file path (insertion order preserved); skips general threads. */
 function groupThreadsByFile(threads: Thread[]): Map<string, Thread[]> {
@@ -276,6 +324,9 @@ const FileDiff = memo(function FileDiff({
     }
     return m;
   }, [threads]);
+  // Word-level diff ranges per replaced line, memoized (stable refs) so the
+  // selection drag doesn't recompute or break LineRow memoization.
+  const wordRangesByLine = useMemo(() => computeWordDiffs(file.hunks), [file.hunks]);
   // Gutter selection (click / shift-click / drag / keyboard) over either side.
   const {
     range: selRange,
@@ -393,6 +444,7 @@ const FileDiff = memo(function FileDiff({
                   selected={selected}
                   commentSide={commentSide}
                   commentLine={commentLine}
+                  wordRanges={wordRangesByLine.get(line)}
                   gutterProps={gutterProps}
                   rowProps={rowProps}
                   commentButtonProps={commentButtonProps}
@@ -511,6 +563,7 @@ const LineRow = memo(function LineRow({
   selected,
   commentSide,
   commentLine,
+  wordRanges,
   gutterProps,
   rowProps,
   commentButtonProps,
@@ -527,6 +580,8 @@ const LineRow = memo(function LineRow({
   commentSide: Side;
   /** Line number on that side, or null when the row isn't commentable. */
   commentLine: number | null;
+  /** Changed char ranges for intra-line (word) diff, or undefined. */
+  wordRanges: WordRange[] | undefined;
   gutterProps: LineSelection["gutterProps"];
   rowProps: LineSelection["rowProps"];
   commentButtonProps: LineSelection["commentButtonProps"];
@@ -559,7 +614,11 @@ const LineRow = memo(function LineRow({
           <span className="sigil">
             {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
           </span>
-          <span className="text">{highlightLine(line.text, lang)}</span>
+          <span className="text">
+            {wordRanges
+              ? highlightLineWithDiff(line.text, lang, wordRanges, "diff-word")
+              : highlightLine(line.text, lang)}
+          </span>
           {canComment && !commentForm && (
             <button
               className="comment-btn"
