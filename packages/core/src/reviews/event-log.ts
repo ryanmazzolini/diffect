@@ -7,7 +7,6 @@ import {
   type Author,
   type CreateThreadRequest,
   type DeleteThreadRequest,
-  type DismissThreadRequest,
   type ResolveThreadRequest,
   type Thread,
   type ThreadCreatedEvent,
@@ -97,26 +96,6 @@ export async function resolveThread(
     thread: threadId,
     author: req.author ?? { type: "user" },
     summary: req.summary ?? null,
-  };
-  await appendEvent(repoRoot, event);
-  return requireThread(replay([...events, event]), threadId);
-}
-
-export async function dismissThread(
-  repoRoot: string,
-  threadId: string,
-  req: DismissThreadRequest,
-  now: string,
-): Promise<Thread> {
-  const events = await readEvents(repoRoot);
-  requireThread(replay(events), threadId);
-  const event: ThreadEvent = {
-    v: THREAD_SCHEMA_VERSION,
-    type: "thread.dismissed",
-    ts: now,
-    thread: threadId,
-    author: req.author ?? { type: "user" },
-    reason: req.reason ?? null,
   };
   await appendEvent(repoRoot, event);
   return requireThread(replay([...events, event]), threadId);
@@ -278,7 +257,9 @@ export function replay(events: ThreadEvent[]): Thread[] {
         appendStatusNote(t, e.author, e.summary, e.ts);
         break;
       case "thread.dismissed":
-        t.status = "dismissed";
+        // Legacy: dismissal merged into resolution. Fold to resolved, keeping the
+        // recorded reason as the trailing note so old logs read sensibly.
+        t.status = "resolved";
         appendStatusNote(t, e.author, e.reason, e.ts);
         break;
       case "thread.deleted":

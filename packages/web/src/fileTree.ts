@@ -49,6 +49,23 @@ export function buildFileTree(files: DiffFile[]): TreeNode[] {
   return finalize(root.children);
 }
 
+/**
+ * The changed files in tree display order (folders-first, alphabetical, chains
+ * collapsed) so the main diff list reads top-to-bottom exactly like the sidebar
+ * tree — scrolling the diff then walks the tree in order instead of jumping.
+ */
+export function orderedDiffFiles(files: DiffFile[]): DiffFile[] {
+  const out: DiffFile[] = [];
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.type === "file") out.push(n.file);
+      else walk(n.children);
+    }
+  };
+  walk(buildFileTree(files));
+  return out;
+}
+
 function finalize(nodes: TreeNode[]): TreeNode[] {
   return sortNodes(
     nodes.map((node) => {

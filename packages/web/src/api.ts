@@ -4,7 +4,6 @@ import type {
   AttachmentResponse,
   CreateThreadRequest,
   DaemonEventType,
-  DismissThreadRequest,
   FileRange,
   FsListing,
   OpenRequest,
@@ -125,9 +124,6 @@ export const api = {
 
   resolve: (id: string, req: ResolveThreadRequest = {}) =>
     post(`/threads/${encodeURIComponent(id)}/resolve`, req),
-
-  dismiss: (id: string, req: DismissThreadRequest = {}) =>
-    post(`/threads/${encodeURIComponent(id)}/dismiss`, req),
 
   delete: (id: string) =>
     fetch(`/threads/${encodeURIComponent(id)}/delete`, {

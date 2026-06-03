@@ -8,9 +8,6 @@ interface Props {
   target: string;
   onTarget: (target: string) => void;
   refs: RefList | null;
-  openCount: number;
-  viewedCount: number;
-  fileCount: number;
   theme: Theme;
   onToggleTheme: () => void;
   paneCollapsed: boolean;
@@ -19,16 +16,13 @@ interface Props {
 }
 
 /** Application header: sidebar toggle, brand/path, the review-target picker, and
- * the open-count + theme/pane controls. Repo/worktree selection lives in the
- * sidebar. */
+ * the theme/pane controls. Repo/worktree selection and review progress live in
+ * the sidebar; thread counts live on the thread-pane filter bar. */
 export function Topbar({
   workspace,
   target,
   onTarget,
   refs,
-  openCount,
-  viewedCount,
-  fileCount,
   theme,
   onToggleTheme,
   paneCollapsed,
@@ -54,12 +48,6 @@ export function Topbar({
       <TargetPicker target={target} onTarget={onTarget} refs={refs} />
 
       <span className="spacer" />
-      {fileCount > 0 && (
-        <span className="viewed-count">
-          {viewedCount}/{fileCount} viewed
-        </span>
-      )}
-      <span className="inbox">{openCount} open</span>
       <button
         type="button"
         className="icon-btn theme-toggle"

@@ -7,7 +7,6 @@ import type {
   AddCommentRequest,
   CreateThreadRequest,
   DeleteThreadRequest,
-  DismissThreadRequest,
   OpenRequest,
   ResolveThreadRequest,
   WorkspaceEntry,
@@ -21,7 +20,6 @@ import {
   addComment,
   createThread,
   deleteThread,
-  dismissThread,
   resolveThread,
   UnknownThreadError,
 } from "./reviews/event-log.js";
@@ -302,7 +300,7 @@ async function createThreadRoute(
   return true;
 }
 
-/** `POST /threads/:id/{comments,resolve,dismiss,delete}`. */
+/** `POST /threads/:id/{comments,resolve,delete}`. */
 async function threadItemRoutes(
   ctx: RouteContext,
   req: IncomingMessage,
@@ -332,16 +330,6 @@ async function threadItemRoutes(
     const body = (await readJsonBody<ResolveThreadRequest>(req)) ?? {};
     await withThread(res, async () =>
       resolveThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
-    );
-    return true;
-  }
-
-  const dismissMatch = /^\/threads\/([^/]+)\/dismiss$/.exec(path);
-  if (dismissMatch) {
-    const id = decodeURIComponent(dismissMatch[1]!);
-    const body = (await readJsonBody<DismissThreadRequest>(req)) ?? {};
-    await withThread(res, async () =>
-      dismissThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
     );
     return true;
   }

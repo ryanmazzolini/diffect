@@ -1,7 +1,10 @@
+import { memo } from "react";
 import type { Thread } from "@diffect/shared";
 import { ThreadConversation } from "./ThreadConversation.js";
 
-export function ThreadList({
+// Memoized: the thread pane shouldn't re-render when only the diff/sidebar or an
+// unrelated bit of app state changed — only when its own thread list does.
+export const ThreadList = memo(function ThreadList({
   threads,
   editors = [],
   showRepo = false,
@@ -42,4 +45,4 @@ export function ThreadList({
       ))}
     </div>
   );
-}
+});

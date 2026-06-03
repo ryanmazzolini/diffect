@@ -42,13 +42,21 @@ test("resolves a thread and the open count drops", async ({ page }) => {
   await page.locator(".comment-form textarea").fill("please rename this");
   await page.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
 
-  await expect(page.locator(".inbox")).toContainText("open");
-  const before = await page.locator(".inbox").innerText();
-
-  // Resolve via the inline conversation controls.
+  // Wait for the new thread to render inline — that means the store and the
+  // scoped counts have refreshed.
   const thread = page
     .locator(".inline-thread", { hasText: "please rename this" })
     .first();
+  await expect(thread).toBeVisible();
+
+  // The open filter shows a live count of open threads for this repo.
+  const openCount = page
+    .locator(".filter", { hasText: "open" })
+    .locator(".filter-count");
+  const before = Number(await openCount.innerText());
+  expect(before).toBeGreaterThanOrEqual(1);
+
+  // Resolve via the inline conversation controls.
   await thread.getByRole("button", { name: "Resolve" }).click();
 
   // The status filter still defaults to "open", so the resolved thread leaves
@@ -57,7 +65,8 @@ test("resolves a thread and the open count drops", async ({ page }) => {
   await expect(
     page.locator(".thread-card.status-resolved", { hasText: "please rename this" }),
   ).toBeVisible();
-  expect(before).toContain("open");
+  // …and the open count dropped by one.
+  await expect(openCount).toHaveText(String(before - 1));
 });
 
 test("switches review target without errors", async ({ page }) => {

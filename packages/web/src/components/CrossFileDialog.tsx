@@ -88,8 +88,9 @@ function CrossFileViewer({
 }) {
   const lang = langForPath(file);
   const [lines, setLines] = useState<string[] | null>(null);
+  // A full-file preview has only new-side lines, so selection is always "new".
   const { range, form, gutterProps, openComment, closeForm } = useLineSelection(
-    lines?.length ?? 1,
+    () => lines?.length ?? 1,
   );
 
   useEffect(() => {
@@ -124,14 +125,15 @@ function CrossFileViewer({
           <tbody>
             {lines.map((text, i) => {
               const lineNo = i + 1;
-              const selected = range !== null && lineNo >= range.lo && lineNo <= range.hi;
+              const selected =
+                range !== null && lineNo >= range.lo && lineNo <= range.hi;
               return (
                 <Fragment key={i}>
                   <tr className={`line line-context${selected ? " line-selected" : ""}`}>
                     <td
                       className="ln ln-clickable"
                       title="Click or drag to select; Enter to comment"
-                      {...gutterProps(lineNo)}
+                      {...gutterProps("new", lineNo)}
                     >
                       {lineNo}
                     </td>
@@ -141,7 +143,7 @@ function CrossFileViewer({
                         <button
                           className="comment-btn"
                           aria-label="Comment on this line or selection"
-                          onClick={() => openComment(lineNo)}
+                          onClick={() => openComment("new", lineNo)}
                         >
                           <Icon name="plus" size={12} />
                         </button>
@@ -156,7 +158,7 @@ function CrossFileViewer({
                           repo={repo}
                           worktree={worktree}
                           file={file}
-                          side="new"
+                          side={form.side}
                           line={form.start}
                           endLine={form.end}
                           onCancel={closeForm}

@@ -40,6 +40,7 @@
   --hl-func: #d2a8ff;
   --hl-type: #ffa657;
   --sel-bg: #388bfd40;
+  --nav-sel: #388bfd24;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -74,6 +75,7 @@
   --hl-func: #8250df;
   --hl-type: #953800;
   --sel-bg: #0969da26;
+  --nav-sel: #0969da1f;
   --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.12);
   --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.15);
   --shadow-lg: 0 12px 32px rgba(31, 35, 40, 0.2);
@@ -386,10 +388,51 @@ body {
 .spacer {
   flex: 1;
 }
-.inbox,
-.viewed-count {
+/* Sidebar review progress: a clickable bar + count that jumps to next unviewed. */
+.review-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
   color: var(--muted);
-  font-size: 13px;
+}
+.review-progress:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+}
+.review-progress:disabled {
+  cursor: default;
+}
+.review-progress-bar {
+  width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.review-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--success);
+  transition: width 0.15s ease;
+}
+.review-progress-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* Count badge on each thread-status filter button. */
+.filter-count {
+  margin-left: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.filter.active .filter-count {
+  color: inherit;
 }
 .pane-resizer {
   cursor: col-resize;
@@ -415,13 +458,24 @@ body {
 
 /* Left navigation sidebar */
 .sidebar {
-  width: 220px;
+  width: var(--sidebar-w, 220px);
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-elev);
   overflow: auto;
   padding: 10px 8px;
   font-size: 13px;
+}
+/* Drag handle between the sidebar and the diff/thread area. */
+.sidebar-resizer {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--border);
+  opacity: 0.4;
+}
+.sidebar-resizer:hover {
+  opacity: 1;
+  background: var(--accent);
 }
 .sidebar-head {
   display: flex;
@@ -466,12 +520,11 @@ body {
 }
 .repo-item.active,
 .wt-item.active {
-  /* Selection = tint background + an accent bar, keeping normal text colour so
-   * it meets contrast (accent-on-tint and white-on-accent both fail AA here). */
-  background: var(--sel-bg);
+  /* Soft rounded tint, no left accent bar (which read as harsh). Normal text
+   * colour keeps contrast — accent-on-tint and white-on-accent both fail AA. */
+  background: var(--nav-sel);
   color: var(--text);
   font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 .worktree-list {
   padding-left: 12px;
@@ -518,11 +571,6 @@ body {
 }
 .tree-icon {
   flex-shrink: 0;
-}
-/* Push the per-file diffstat block to the right edge of the row. */
-.tree-file .diffstat {
-  margin-left: auto;
-  padding-left: var(--space-2);
 }
 .diff-pane {
   overflow: auto;
@@ -601,6 +649,12 @@ body {
    * scrollport — `overflow: hidden` would make .file its own scroll container
    * and break sticky. */
   overflow: clip;
+  /* Off-screen files skip layout/paint entirely — the browser only renders the
+   * handful in view, so a large multi-file diff paints fast and resizes cheaply.
+   * `auto` lets the browser remember each file's real height after first render,
+   * keeping the scrollbar stable. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
 }
 .file-header {
   position: sticky;
@@ -791,6 +845,15 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   position: relative;
+}
+/* During a pane drag, suppress re-wrapping so width changes don't reflow every
+ * line each frame; lines transiently clip and wrapping is restored on release. */
+body.pane-resizing .code {
+  white-space: pre;
+  word-break: normal;
+}
+body.pane-resizing {
+  cursor: col-resize;
 }
 /* Keep blank lines from collapsing now that highlightLine returns "" for them. */
 .code .text:empty::after {
@@ -1176,16 +1239,18 @@ button:disabled {
 /* Status filter bar */
 .filter-bar {
   display: flex;
+  flex-wrap: wrap; /* narrow thread pane → filters wrap instead of overflowing */
   gap: 4px;
   margin-bottom: 12px;
 }
 .filter {
-  flex: 1;
+  flex: 1 1 64px; /* shrink and wrap when the pane is squished */
+  min-width: 0;
   background: var(--bg);
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 4px 0;
+  padding: 4px 4px;
   font-size: 12px;
   text-transform: capitalize;
   cursor: pointer;
@@ -1206,6 +1271,7 @@ button:disabled {
 }
 .thread-actions {
   display: flex;
+  flex-wrap: wrap; /* Reply/Resolve/Dismiss wrap rather than clip when squished */
   gap: 6px;
   margin-top: 4px;
 }

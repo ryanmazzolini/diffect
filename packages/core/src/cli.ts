@@ -4,7 +4,6 @@ import type { Author, Severity, Side, Thread, ThreadStatus } from "@diffect/shar
 import {
   addComment,
   createThread,
-  dismissThread,
   resolveThread,
   UnknownThreadError,
 } from "./reviews/event-log.js";
@@ -281,22 +280,6 @@ async function cmdResolve(argv: string[]): Promise<number> {
   return 0;
 }
 
-async function cmdDismiss(argv: string[]): Promise<number> {
-  const flags = parseFlags(argv, new Set());
-  const id = flags.positionals[0];
-  if (!id) fail('usage: diffect dismiss <thread-id> [--reason "…"]');
-  const repoRoot = await requireThreadRepoRoot(id);
-  await mutate(() =>
-    dismissThread(
-      repoRoot,
-      id,
-      { author: authorFrom(flags), reason: flags.options.get("reason") ?? null },
-      now(),
-    ),
-  );
-  return 0;
-}
-
 async function mutate(op: () => Promise<Thread>): Promise<void> {
   try {
     printThread(await op());
@@ -309,14 +292,13 @@ async function mutate(op: () => Promise<Thread>): Promise<void> {
 const USAGE = `diffect — local-first code review
 
 Usage:
-  diffect list    [--status open|resolved|dismissed] [--repo R] [--worktree W] [--json]
+  diffect list    [--status open|resolved] [--repo R] [--worktree W] [--json]
   diffect diff    [--repo R] [--worktree W] [--target work|staged|unstaged|<ref>|<a>..<b>] [--json]
   diffect comment [--repo R] [--worktree W] --file F --line N [--end-line M] [--side new|old]
                   [--severity must-fix|suggestion|nit|question] [--agent NAME] --body "…"
   diffect general [--repo R] [--worktree W] [--agent NAME] --body "…"
   diffect reply   <thread-id> [--agent NAME] --body "…"
   diffect resolve <thread-id> [--summary "…"] [--agent NAME]
-  diffect dismiss <thread-id> [--reason "…"]  [--agent NAME]
 
 The CLI reads and writes the central review store directly and works whether or
 not diffectd is running. Use --agent NAME to author a thread or reply as an agent. --repo
@@ -338,8 +320,6 @@ async function main(): Promise<number> {
       return cmdReply(rest);
     case "resolve":
       return cmdResolve(rest);
-    case "dismiss":
-      return cmdDismiss(rest);
     case undefined:
     case "help":
     case "--help":

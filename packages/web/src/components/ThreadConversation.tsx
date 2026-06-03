@@ -97,22 +97,13 @@ export function ThreadConversation({
             Reply
           </button>
           {thread.status === "open" && (
-            <>
-              <button
-                className="ghost"
-                disabled={busy}
-                onClick={() => run(() => api.resolve(thread.id))}
-              >
-                Resolve
-              </button>
-              <button
-                className="ghost"
-                disabled={busy}
-                onClick={() => run(() => api.dismiss(thread.id))}
-              >
-                Dismiss
-              </button>
-            </>
+            <button
+              className="ghost"
+              disabled={busy}
+              onClick={() => run(() => api.resolve(thread.id))}
+            >
+              Resolve
+            </button>
           )}
           {thread.status !== "open" && (
             <button

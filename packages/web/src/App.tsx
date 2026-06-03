@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
+  DiffFile,
   RefList,
   RepoDiff,
   Thread,
@@ -12,7 +13,9 @@ import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { getStored, setStored } from "./storage.js";
+import { orderedDiffFiles } from "./fileTree.js";
 import { usePaneLayout } from "./usePaneLayout.js";
+import { useResizable } from "./useResizable.js";
 import { DiffView } from "./components/DiffView.js";
 import { ThreadList } from "./components/ThreadList.js";
 import { Topbar } from "./components/Topbar.js";
@@ -20,7 +23,10 @@ import { Sidebar } from "./components/Sidebar.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 
 type StatusFilter = ThreadStatus | "all";
-const STATUS_FILTERS: StatusFilter[] = ["open", "resolved", "dismissed", "all"];
+const STATUS_FILTERS: StatusFilter[] = ["open", "resolved", "all"];
+// Stable empty references so memoized children don't re-render on the null paths.
+const EMPTY_FILES: DiffFile[] = [];
+const EMPTY_EDITORS: string[] = [];
 
 export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -42,6 +48,7 @@ export function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [viewed, setViewed] = useState<Set<string>>(new Set());
   const diffPaneRef = useRef<HTMLElement>(null);
+  const workbenchRef = useRef<HTMLDivElement>(null);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -96,7 +103,25 @@ export function App() {
     toggleCollapsed,
     startResize,
     columns: paneColumns,
-  } = usePaneLayout();
+    width: threadWidth,
+  } = usePaneLayout(workbenchRef);
+  // Left sidebar width — same imperative drag, written to --sidebar-w.
+  const { width: sidebarWidth, startResize: startSidebarResize } = useResizable(
+    workbenchRef,
+    {
+      storageKey: "diffect-sidebar-width",
+      cssVar: "--sidebar-w",
+      defaultWidth: 220,
+      min: 160,
+      max: 480,
+    },
+  );
+  // React owns the pane-width vars (initial render + reconcile after a drag
+  // commits); the drag itself overrides them imperatively for smoothness.
+  const paneVars = {
+    "--sidebar-w": `${sidebarWidth}px`,
+    "--thread-w": `${threadWidth}px`,
+  } as React.CSSProperties;
 
   // Monotonic tokens so a slow response can never overwrite a newer one — a
   // burst of SSE events or a selector change must always land last-issued-wins.
@@ -175,6 +200,11 @@ export function App() {
     refreshDiff();
   }, [refreshDiff]);
 
+  const sidebarFiles = useMemo(() => diff?.files ?? EMPTY_FILES, [diff]);
+  // Render the diff in the same order the sidebar tree shows, so the active-file
+  // highlight walks the tree top-to-bottom as you scroll instead of jumping.
+  const orderedFiles = useMemo(() => orderedDiffFiles(sidebarFiles), [sidebarFiles]);
+
   // Scroll-spy: highlight the file in the sidebar that's at the top of the diff
   // pane as the user scrolls, so the tree tracks reading position.
   useEffect(() => {
@@ -206,7 +236,7 @@ export function App() {
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable))
         return;
       if (document.querySelector(".modal-backdrop")) return;
-      const paths = diff?.files.map((f) => f.path) ?? [];
+      const paths = orderedFiles.map((f) => f.path);
       if (paths.length === 0) return;
       e.preventDefault();
       const cur = activeFile ? paths.indexOf(activeFile) : -1;
@@ -219,7 +249,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [diff, activeFile, selectFile]);
+  }, [orderedFiles, activeFile, selectFile]);
 
   // Live updates: subscribe to the daemon's SSE stream exactly once and route
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
@@ -243,6 +273,34 @@ export function App() {
       }
     });
   }, []);
+
+  // Derived view state, memoized so the heavy panels (diff/sidebar/threads) only
+  // re-render when their own inputs change — not on every scroll-spy active-file
+  // update, resize commit, or unrelated state change.
+  const scopedThreads = useMemo(
+    () =>
+      threads.filter(
+        (t) => t.repo === repo && (worktree === null || t.worktree === worktree),
+      ),
+    [threads, repo, worktree],
+  );
+  const byStatus = useMemo(
+    () =>
+      filter === "all"
+        ? scopedThreads
+        : scopedThreads.filter((t) => t.status === filter),
+    [scopedThreads, filter],
+  );
+  const statusCounts = useMemo<Record<StatusFilter, number>>(
+    () => ({
+      open: scopedThreads.filter((t) => t.status === "open").length,
+      resolved: scopedThreads.filter((t) => t.status === "resolved").length,
+      all: scopedThreads.length,
+    }),
+    [scopedThreads],
+  );
+  const editors = useMemo(() => workspace?.editors ?? EMPTY_EDITORS, [workspace]);
+  const openAdd = useCallback(() => setAddOpen(true), []);
 
   // A failed fetch no longer replaces the whole app; it shows a dismissible
   // banner so the current view stays usable and recoverable.
@@ -277,19 +335,6 @@ export function App() {
     );
   }
 
-  const openCount = threads.filter((t) => t.status === "open").length;
-  const byStatus =
-    filter === "all" ? threads : threads.filter((t) => t.status === filter);
-  // Inline diff threads are scoped to the repo/worktree being viewed; the inbox
-  // stays cross-repo so unresolved feedback elsewhere remains visible.
-  const inlineThreads = threads.filter(
-    (t) => t.repo === repo && (worktree === null || t.worktree === worktree),
-  );
-  const multiRepo = workspace.repos.length > 1;
-  const editors = workspace.editors ?? [];
-  const fileCount = diff?.files.length ?? 0;
-  const viewedCount = diff?.files.filter((f) => viewed.has(f.path)).length ?? 0;
-
   return (
     <div className="app">
       {toast}
@@ -302,28 +347,33 @@ export function App() {
         target={target}
         onTarget={setTarget}
         refs={refs}
-        openCount={openCount}
-        viewedCount={viewedCount}
-        fileCount={fileCount}
         theme={theme}
         onToggleTheme={toggleTheme}
         paneCollapsed={paneCollapsed}
         onTogglePane={toggleCollapsed}
         onToggleSidebar={toggleSidebar}
       />
-      <div className="workbench">
+      <div className="workbench" ref={workbenchRef} style={paneVars}>
         {!sidebarCollapsed && (
-          <Sidebar
-            entries={entries}
-            repo={repo}
-            worktree={worktree}
-            onSelectRepo={setRepo}
-            onSelectWorktree={setWorktree}
-            files={diff?.files ?? []}
-            activeFile={activeFile}
-            onSelectFile={selectFile}
-            onAddWorkspace={() => setAddOpen(true)}
-          />
+          <>
+            <Sidebar
+              entries={entries}
+              repo={repo}
+              worktree={worktree}
+              onSelectRepo={setRepo}
+              onSelectWorktree={setWorktree}
+              files={sidebarFiles}
+              viewed={viewed}
+              activeFile={activeFile}
+              onSelectFile={selectFile}
+              onAddWorkspace={openAdd}
+            />
+            <div
+              className="sidebar-resizer"
+              onMouseDown={startSidebarResize}
+              title="Drag to resize"
+            />
+          </>
         )}
         <main className="layout" style={{ gridTemplateColumns: paneColumns }}>
         <section className="diff-pane" ref={diffPaneRef}>
@@ -331,7 +381,8 @@ export function App() {
             repo={repo}
             worktree={worktree}
             diff={diff}
-            threads={inlineThreads}
+            files={orderedFiles}
+            threads={scopedThreads}
             editors={editors}
             viewed={viewed}
             onToggleViewed={toggleViewed}
@@ -355,13 +406,14 @@ export function App() {
                 onClick={() => setFilter(f)}
               >
                 {f}
+                <span className="filter-count">{statusCounts[f]}</span>
               </button>
             ))}
           </div>
           <ThreadList
             threads={byStatus}
             editors={editors}
-            showRepo={multiRepo}
+            showRepo={false}
             onChanged={refreshThreads}
           />
         </aside>

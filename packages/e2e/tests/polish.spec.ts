@@ -7,16 +7,18 @@ test("marking a file viewed collapses it and updates the count", async ({ page }
 
   await calc.getByRole("checkbox", { name: "Viewed" }).check();
   await expect(calc.locator("table.hunk")).toHaveCount(0); // body collapsed
-  await expect(page.locator(".viewed-count")).toContainText("1/2 viewed");
+  // Review progress (now in the sidebar) reflects the newly-viewed file.
+  await expect(page.locator(".review-progress-count")).toHaveText("1/2");
 });
 
 test("j/k move the active file", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".tree-file").first()).toBeVisible();
 
+  // Files are in tree order (folders first), so src/util/math.js precedes calc.js.
   // k clamps to the first file; j advances to the next.
   await page.keyboard.press("k");
-  await expect(page.locator(".tree-file.active")).toContainText("calc.js");
-  await page.keyboard.press("j");
   await expect(page.locator(".tree-file.active")).toContainText("math.js");
+  await page.keyboard.press("j");
+  await expect(page.locator(".tree-file.active")).toContainText("calc.js");
 });

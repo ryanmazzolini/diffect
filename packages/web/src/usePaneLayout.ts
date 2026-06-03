@@ -1,46 +1,42 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent, type RefObject } from "react";
 import { getStored, setStored } from "./storage.js";
-
-const MIN = 240;
-const MAX = 720;
+import { useResizable } from "./useResizable.js";
 
 /**
- * State for the resizable, collapsible thread pane: width + collapsed flag
- * (persisted), a mouse-drag resize handler, and the grid-template-columns string.
+ * State for the resizable, collapsible thread pane: a collapsed flag (persisted),
+ * an imperative drag handler (see useResizable — no per-frame re-render), and the
+ * grid-template-columns string, which reads the width from a CSS variable so the
+ * drag never touches React state until release.
  */
-export function usePaneLayout() {
-  const [width, setWidth] = useState<number>(() => {
-    const v = Number(getStored("diffect-pane-width"));
-    return Number.isFinite(v) && v >= MIN ? v : 340;
-  });
+export function usePaneLayout(container: RefObject<HTMLElement | null>): {
+  collapsed: boolean;
+  toggleCollapsed: () => void;
+  startResize: (e: MouseEvent) => void;
+  columns: string;
+  width: number;
+} {
   const [collapsed, setCollapsed] = useState<boolean>(
     () => getStored("diffect-pane-collapsed") === "1",
   );
-  useEffect(() => setStored("diffect-pane-width", String(width)), [width]);
   useEffect(
     () => setStored("diffect-pane-collapsed", collapsed ? "1" : "0"),
     [collapsed],
   );
 
-  // The pane is on the right, so dragging the handle left widens it.
-  const startResize = (e: MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = width;
-    const onMove = (ev: globalThis.MouseEvent) =>
-      setWidth(Math.min(MAX, Math.max(MIN, startW + (startX - ev.clientX))));
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
+  const { width, startResize } = useResizable(container, {
+    storageKey: "diffect-pane-width",
+    cssVar: "--thread-w",
+    defaultWidth: 340,
+    min: 240,
+    max: 720,
+    invert: true, // the pane is on the right, so dragging left widens it
+  });
 
   return {
     collapsed,
     toggleCollapsed: () => setCollapsed((c) => !c),
     startResize,
-    columns: collapsed ? "1fr" : `minmax(0, 1fr) 6px ${width}px`,
+    columns: collapsed ? "1fr" : "minmax(0, 1fr) 6px var(--thread-w, 340px)",
+    width,
   };
 }

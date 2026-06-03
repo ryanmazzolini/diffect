@@ -115,7 +115,7 @@ describe("human → agent fix loop", () => {
     ).json();
     expect(resolved.status).toBe("resolved");
 
-    const missing = await fetch(`${base}/threads/th_nope/dismiss`, {
+    const missing = await fetch(`${base}/threads/th_nope/resolve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",

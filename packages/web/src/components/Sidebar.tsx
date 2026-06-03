@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { DiffFile, FileStatus, RepoSummary, WorkspaceEntry } from "@diffect/shared";
 import { Icon } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
 import { buildFileTree, type TreeNode } from "../fileTree.js";
-import { DiffStat } from "./DiffStat.js";
 
 interface Props {
   entries: WorkspaceEntry[];
@@ -12,6 +11,7 @@ interface Props {
   onSelectRepo: (repo: string) => void;
   onSelectWorktree: (worktree: string | null) => void;
   files: DiffFile[];
+  viewed: Set<string>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onAddWorkspace: () => void;
@@ -22,14 +22,16 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
-/** Left navigation: workspaces → repos → worktrees, plus the changed-file tree. */
-export function Sidebar({
+/** Left navigation: workspaces → repos → worktrees, plus the changed-file tree.
+ * Memoized so a diff/thread change doesn't re-render the whole nav. */
+export const Sidebar = memo(function Sidebar({
   entries,
   repo,
   worktree,
   onSelectRepo,
   onSelectWorktree,
   files,
+  viewed,
   activeFile,
   onSelectFile,
   onAddWorkspace,
@@ -50,9 +52,13 @@ export function Sidebar({
       </div>
       {entries.map((ws) => (
         <div className="ws-group" key={ws.path}>
-          <div className="ws-path" title={ws.path}>
-            {basename(ws.path)}
-          </div>
+          {/* A single-repo workspace's folder name just duplicates the repo row,
+              so only label the group when it actually holds multiple repos. */}
+          {ws.repos.length > 1 && (
+            <div className="ws-path" title={ws.path}>
+              {basename(ws.path)}
+            </div>
+          )}
           {ws.repos.map((r) => (
             <RepoItem
               key={r.name}
@@ -68,7 +74,15 @@ export function Sidebar({
 
       {files.length > 0 && (
         <>
-          <div className="sidebar-head">Files</div>
+          <div className="sidebar-head">
+            <span>Files</span>
+            <ReviewProgress
+              files={files}
+              viewed={viewed}
+              activeFile={activeFile}
+              onSelectFile={onSelectFile}
+            />
+          </div>
           {/* key={repo} remounts the tree on repo switch so collapse state and
               the memoized tree re-initialize from the right repo. */}
           <FileTree
@@ -81,6 +95,54 @@ export function Sidebar({
         </>
       )}
     </nav>
+  );
+});
+
+/**
+ * Review progress for the changed files: a clickable bar that jumps to the next
+ * unviewed file (wrapping past the active one). It lives beside the file list so
+ * the count reads in context, not as a stray number in the header.
+ */
+function ReviewProgress({
+  files,
+  viewed,
+  activeFile,
+  onSelectFile,
+}: {
+  files: DiffFile[];
+  viewed: Set<string>;
+  activeFile: string | null;
+  onSelectFile: (path: string) => void;
+}) {
+  const total = files.length;
+  const done = files.reduce((n, f) => (viewed.has(f.path) ? n + 1 : n), 0);
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const allViewed = done >= total;
+
+  const jumpNextUnviewed = () => {
+    const start = activeFile ? files.findIndex((f) => f.path === activeFile) : -1;
+    for (let i = 1; i <= total; i++) {
+      const f = files[(start + i + total) % total]!;
+      if (!viewed.has(f.path)) return onSelectFile(f.path);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className="review-progress"
+      onClick={jumpNextUnviewed}
+      disabled={allViewed}
+      title={allViewed ? "All files viewed" : "Jump to the next unviewed file"}
+      aria-label={`${done} of ${total} files viewed${allViewed ? "" : ", jump to next unviewed"}`}
+    >
+      <span className="review-progress-bar" aria-hidden="true">
+        <span className="review-progress-fill" style={{ width: `${pct}%` }} />
+      </span>
+      <span className="review-progress-count">
+        {done}/{total}
+      </span>
+    </button>
   );
 }
 
@@ -109,6 +171,15 @@ function FileTree({
 }) {
   const tree = useMemo(() => buildFileTree(files), [files]);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(repo));
+  // Keep the scroll-spy-highlighted file visible without yanking the whole list:
+  // `nearest` only scrolls the sidebar the minimum needed.
+  const treeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!activeFile) return;
+    treeRef.current
+      ?.querySelector(".tree-file.active")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeFile]);
 
   const toggleDir = (path: string) =>
     setCollapsed((prev) => {
@@ -119,7 +190,7 @@ function FileTree({
     });
 
   return (
-    <div className="file-tree" role="tree">
+    <div className="file-tree" role="tree" ref={treeRef}>
       {tree.map((node) => (
         <TreeRow
           key={node.path}
@@ -171,11 +242,6 @@ function TreeRow({
           className={`tree-icon status-${node.file.status}`}
         />
         <span className="tree-name">{node.name}</span>
-        <DiffStat
-          additions={node.file.additions}
-          deletions={node.file.deletions}
-          countsHidden
-        />
       </button>
     );
   }

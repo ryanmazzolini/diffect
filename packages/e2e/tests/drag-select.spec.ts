@@ -36,6 +36,31 @@ test("drag across the gutter selects a range and auto-opens the form", async ({
   expect(selected).toBe("");
 });
 
+test("dragging from the + button selects a range and opens the form", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  // The + is the affordance users reach for; a press-drag from it must select a
+  // range just like the gutter (the originally-reported gap).
+  const plus0 = page.locator("button.comment-btn").first();
+  const plus3 = page.locator("button.comment-btn").nth(3);
+  const a = center((await plus0.boundingBox())!);
+  const b = center((await plus3.boundingBox())!);
+
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  await page.mouse.up();
+
+  expect(await page.locator("tr.line-selected").count()).toBeGreaterThan(1);
+  await expect(page.locator(".comment-form textarea")).toBeVisible();
+  await expect(page.locator(".comment-form textarea")).toHaveAttribute(
+    "placeholder",
+    /:\d+-\d+$/,
+  );
+});
+
 test("the gutter is keyboard-operable (Enter comments, Shift+Arrow extends)", async ({
   page,
 }) => {

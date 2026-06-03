@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Thread } from "@diffect/shared";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import type { DiffFile, DiffHunk, DiffLine, RepoDiff, Side, Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
@@ -9,10 +9,16 @@ import { CrossFileDialog } from "./CrossFileDialog.js";
 import { DiffStat } from "./DiffStat.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
+// Stable empty array so memoized rows for files/lines with no threads don't see a
+// fresh [] each render.
+const EMPTY_THREADS: Thread[] = [];
+
 interface Props {
   repo: string;
   worktree: string | null;
   diff: RepoDiff | null;
+  /** Files in display (tree) order — matches the sidebar so scrolling tracks it. */
+  files: DiffFile[];
   threads: Thread[];
   editors: string[];
   viewed: Set<string>;
@@ -20,10 +26,13 @@ interface Props {
   onChanged: () => void;
 }
 
-export function DiffView({
+// Memoized: re-renders only when the diff/threads/viewed-set actually change —
+// not on scroll-spy active-file updates, pane resizes, or filter changes.
+export const DiffView = memo(function DiffView({
   repo,
   worktree,
   diff,
+  files,
   threads,
   editors,
   viewed,
@@ -31,6 +40,9 @@ export function DiffView({
   onChanged,
 }: Props) {
   const [crossFileOpen, setCrossFileOpen] = useState(false);
+  // One pass to bucket threads by file, kept stable across renders so each
+  // FileDiff gets a referentially-stable array (memo can then skip unchanged files).
+  const threadsByFile = useMemo(() => groupThreadsByFile(threads), [threads]);
   const dialog = crossFileOpen ? (
     <CrossFileDialog
       repo={repo}
@@ -52,22 +64,26 @@ export function DiffView({
   // Include rename old-paths so a thread on the pre-rename path of a file that's
   // in the diff isn't mistaken for an out-of-diff comment.
   const inDiff = new Set(
-    diff.files.flatMap((f) => (f.oldPath ? [f.path, f.oldPath] : [f.path])),
+    files.flatMap((f) => (f.oldPath ? [f.path, f.oldPath] : [f.path])),
   );
   // Threads anchored to files outside the current diff render as collapsed
   // out-of-diff blocks so cross-file comments stay visible in the main view.
-  const outOfDiff = groupByFile(
-    threads.filter((t) => t.file !== null && t.line !== null && !inDiff.has(t.file)),
-  );
-  const totalAdd = diff.files.reduce((n, f) => n + f.additions, 0);
-  const totalDel = diff.files.reduce((n, f) => n + f.deletions, 0);
+  const outOfDiff = [...threadsByFile.entries()]
+    .filter(([file]) => !inDiff.has(file))
+    .map(
+      ([file, ts]) =>
+        [file, ts.filter((t) => t.line !== null)] as [string, Thread[]],
+    )
+    .filter(([, ts]) => ts.length > 0);
+  const totalAdd = files.reduce((n, f) => n + f.additions, 0);
+  const totalDel = files.reduce((n, f) => n + f.deletions, 0);
 
   return (
     <div className="diff">
       {dialog}
       <div className="diff-summary">
         <span className="diff-summary-files">
-          {diff.files.length} {diff.files.length === 1 ? "file" : "files"} changed
+          {files.length} {files.length === 1 ? "file" : "files"} changed
         </span>
         <DiffStat additions={totalAdd} deletions={totalDel} />
         <button
@@ -78,22 +94,22 @@ export function DiffView({
           <Icon name="plus" size={12} /> Comment on another file
         </button>
       </div>
-      {diff.files.length === 0 ? (
+      {files.length === 0 ? (
         <div className="empty">
           No changes in this target. Try a different compare target above, or
           comment on another file.
         </div>
       ) : (
-        diff.files.map((file) => (
+        files.map((file) => (
           <FileDiff
             key={file.path}
             repo={repo}
             worktree={worktree}
             file={file}
-            threads={threads.filter((t) => t.file === file.path)}
+            threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
             editors={editors}
             viewed={viewed.has(file.path)}
-            onToggleViewed={() => onToggleViewed(file.path)}
+            onToggleViewed={onToggleViewed}
             onChanged={onChanged}
           />
         ))
@@ -111,17 +127,18 @@ export function DiffView({
       ))}
     </div>
   );
-}
+});
 
-/** Group threads by their file path, preserving encounter order. */
-function groupByFile(threads: Thread[]): [string, Thread[]][] {
+/** Bucket threads by file path (insertion order preserved); skips general threads. */
+function groupThreadsByFile(threads: Thread[]): Map<string, Thread[]> {
   const byFile = new Map<string, Thread[]>();
   for (const t of threads) {
-    const arr = byFile.get(t.file!) ?? [];
-    arr.push(t);
-    byFile.set(t.file!, arr);
+    if (t.file === null) continue;
+    const arr = byFile.get(t.file);
+    if (arr) arr.push(t);
+    else byFile.set(t.file, [t]);
   }
-  return [...byFile.entries()];
+  return byFile;
 }
 
 /** A synthetic file block for threads whose file isn't in the diff. */
@@ -210,7 +227,9 @@ function OutOfDiffThread({
   );
 }
 
-function FileDiff({
+// Memoized so a selection drag or a thread change on one file doesn't re-render
+// every other file in a large diff.
+const FileDiff = memo(function FileDiff({
   repo,
   worktree,
   file,
@@ -226,18 +245,47 @@ function FileDiff({
   threads: Thread[];
   editors: string[];
   viewed: boolean;
-  onToggleViewed: () => void;
+  onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }) {
   const lang = langForPath(file.path); // resolved once per file
-  // Largest new-side line number, to clamp keyboard range extension.
-  const maxLine = file.hunks.reduce(
+  // Largest line number per side, to clamp keyboard range extension.
+  const maxNew = file.hunks.reduce(
     (m, h) => Math.max(m, h.newStart + h.newLines - 1),
     0,
   );
-  // Gutter selection (click / shift-click / drag / keyboard) over new-side lines.
-  const { range: selRange, form, gutterProps, openComment, closeForm } =
-    useLineSelection(maxLine);
+  const maxOld = file.hunks.reduce(
+    (m, h) => Math.max(m, h.oldStart + h.oldLines - 1),
+    0,
+  );
+  const maxLineForSide = useCallback(
+    (side: Side) => (side === "old" ? maxOld : maxNew),
+    [maxOld, maxNew],
+  );
+  // `${side}:${line}` → its threads, stable across renders so each LineRow's
+  // `threads` prop only changes when that line's threads do (keeps memo effective).
+  const threadsByLine = useMemo(() => {
+    const m = new Map<string, Thread[]>();
+    for (const t of threads) {
+      if (t.line !== null && t.side !== null) {
+        const key = `${t.side}:${t.line}`;
+        const arr = m.get(key);
+        if (arr) arr.push(t);
+        else m.set(key, [t]);
+      }
+    }
+    return m;
+  }, [threads]);
+  // Gutter selection (click / shift-click / drag / keyboard) over either side.
+  const {
+    range: selRange,
+    form,
+    gutterProps,
+    rowProps,
+    commentButtonProps,
+    openComment,
+    closeForm,
+  } = useLineSelection(maxLineForSide);
 
   // Context lines unfolded above a hunk (new-side), keyed by hunk index.
   const [expanded, setExpanded] = useState<Record<number, DiffLine[]>>({});
@@ -275,7 +323,7 @@ function FileDiff({
             type="checkbox"
             aria-label="Viewed"
             checked={viewed}
-            onChange={onToggleViewed}
+            onChange={() => onToggleViewed(file.path)}
           />
           Viewed
         </label>
@@ -319,14 +367,21 @@ function FileDiff({
               <td className="code">{hunk.header}</td>
             </tr>
             {hunk.lines.map((line, li) => {
-              const lineThreads = line.new
-                ? threads.filter((t) => t.side === "new" && t.line === line.new)
-                : [];
+              // Removed lines anchor on the old side; added/context on the new.
+              const commentSide: Side = line.type === "del" ? "old" : "new";
+              const commentLine =
+                commentSide === "old" ? line.old : line.new;
+              const lineThreads =
+                commentLine !== null
+                  ? (threadsByLine.get(`${commentSide}:${commentLine}`) ??
+                    EMPTY_THREADS)
+                  : EMPTY_THREADS;
               const selected =
-                line.new !== null &&
+                commentLine !== null &&
                 selRange !== null &&
-                line.new >= selRange.lo &&
-                line.new <= selRange.hi;
+                selRange.side === commentSide &&
+                commentLine >= selRange.lo &&
+                commentLine <= selRange.hi;
               return (
                 <LineRow
                   key={li}
@@ -336,15 +391,21 @@ function FileDiff({
                   editors={editors}
                   onChanged={onChanged}
                   selected={selected}
+                  commentSide={commentSide}
+                  commentLine={commentLine}
                   gutterProps={gutterProps}
-                  onComment={() => line.new && openComment(line.new)}
+                  rowProps={rowProps}
+                  commentButtonProps={commentButtonProps}
+                  openComment={openComment}
                   commentForm={
-                    form !== null && line.new === form.end ? (
+                    form !== null &&
+                    form.side === commentSide &&
+                    commentLine === form.end ? (
                       <CommentForm
                         repo={repo}
                         worktree={worktree}
                         file={file.path}
-                        side="new"
+                        side={form.side}
                         line={form.start}
                         endLine={form.end}
                         onCancel={closeForm}
@@ -364,7 +425,7 @@ function FileDiff({
       })}
     </div>
   );
-}
+});
 
 /** The collapsed new-side line span above hunk `hi`, or null if none. */
 function gapAbove(
@@ -414,15 +475,46 @@ function InlineThread({
   );
 }
 
-function LineRow({
+const GUTTER_TITLE = "Click, shift-click, or drag to select; Enter to comment";
+
+/** One line-number gutter cell, wired for selection only when it's commentable. */
+function GutterCell({
+  value,
+  side,
+  active,
+  gutterProps,
+}: {
+  value: number | null;
+  side: Side;
+  active: boolean;
+  gutterProps: LineSelection["gutterProps"];
+}) {
+  return (
+    <td
+      className={`ln${active ? " ln-clickable" : ""}`}
+      title={active ? GUTTER_TITLE : undefined}
+      {...(active && value !== null ? gutterProps(side, value) : {})}
+    >
+      {value ?? ""}
+    </td>
+  );
+}
+
+// Memoized so a selection drag (which re-renders the parent file on each move)
+// only re-renders the rows whose `selected`/form state actually changed.
+const LineRow = memo(function LineRow({
   line,
   lang,
   threads,
   editors,
   onChanged,
   selected,
+  commentSide,
+  commentLine,
   gutterProps,
-  onComment,
+  rowProps,
+  commentButtonProps,
+  openComment,
   commentForm,
 }: {
   line: DiffLine;
@@ -431,26 +523,38 @@ function LineRow({
   editors: string[];
   onChanged: () => void;
   selected: boolean;
+  /** Side this row's comments anchor to ("old" for removed lines). */
+  commentSide: Side;
+  /** Line number on that side, or null when the row isn't commentable. */
+  commentLine: number | null;
   gutterProps: LineSelection["gutterProps"];
-  onComment: () => void;
+  rowProps: LineSelection["rowProps"];
+  commentButtonProps: LineSelection["commentButtonProps"];
+  openComment: (side: Side, lineNo: number) => void;
   commentForm: React.ReactNode;
 }) {
-  const canComment = line.new !== null;
+  const canComment = commentLine !== null;
+  const oldClickable = canComment && commentSide === "old";
+  const newClickable = canComment && commentSide === "new";
+  const onComment = () => canComment && openComment(commentSide, commentLine!);
   return (
     <>
-      <tr className={`line line-${line.type}${selected ? " line-selected" : ""}`}>
-        <td className="ln">{line.old ?? ""}</td>
-        <td
-          className={`ln${canComment ? " ln-clickable" : ""}`}
-          title={
-            canComment
-              ? "Click, shift-click, or drag to select; Enter to comment"
-              : undefined
-          }
-          {...(canComment ? gutterProps(line.new!) : {})}
-        >
-          {line.new ?? ""}
-        </td>
+      <tr
+        className={`line line-${line.type}${selected ? " line-selected" : ""}`}
+        {...(canComment ? rowProps(commentSide, commentLine!) : {})}
+      >
+        <GutterCell
+          value={line.old}
+          side="old"
+          active={oldClickable}
+          gutterProps={gutterProps}
+        />
+        <GutterCell
+          value={line.new}
+          side="new"
+          active={newClickable}
+          gutterProps={gutterProps}
+        />
         <td className="code">
           <span className="sigil">
             {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
@@ -459,9 +563,10 @@ function LineRow({
           {canComment && !commentForm && (
             <button
               className="comment-btn"
-              title="Comment on this line or selection"
+              title="Click to comment, or drag to select a range"
               aria-label="Comment on this line or selection"
               onClick={onComment}
+              {...commentButtonProps(commentSide, commentLine!)}
             >
               <Icon name="plus" size={12} />
             </button>
@@ -487,4 +592,4 @@ function LineRow({
       )}
     </>
   );
-}
+});

@@ -1,24 +1,18 @@
 interface Props {
   additions: number;
   deletions: number;
-  /** Hide the numeric "+N −N" and show only the square block (e.g. tight tree rows). */
-  countsHidden?: boolean;
 }
 
 /**
  * GitHub-style diffstat: "+N −N" plus a five-square block whose green/red fill is
  * proportional to the add/del ratio. Purely presentational.
  */
-export function DiffStat({ additions, deletions, countsHidden = false }: Props) {
+export function DiffStat({ additions, deletions }: Props) {
   const blocks = diffBlocks(additions, deletions);
   return (
     <span className="diffstat">
-      {!countsHidden && (
-        <>
-          <span className="diffstat-add">+{additions}</span>
-          <span className="diffstat-del">&minus;{deletions}</span>
-        </>
-      )}
+      <span className="diffstat-add">+{additions}</span>
+      <span className="diffstat-del">&minus;{deletions}</span>
       <span
         className="diffstat-blocks"
         role="img"

@@ -186,7 +186,10 @@ export interface OpenRequest {
 }
 
 export type Severity = "must-fix" | "suggestion" | "nit" | "question";
-export type ThreadStatus = "open" | "resolved" | "dismissed";
+// A thread is open or resolved. (Legacy logs may contain a `thread.dismissed`
+// event; replay folds it into "resolved" — see event-log.ts — so historical data
+// stays readable without a separate dismissed state.)
+export type ThreadStatus = "open" | "resolved";
 export type AnchorState = "active" | "stale";
 export type AuthorType = "user" | "agent";
 
@@ -275,6 +278,10 @@ export interface ThreadResolvedEvent extends BaseEvent {
   summary?: string | null;
 }
 
+/**
+ * Legacy event: dismissal was merged into "resolved". No new code emits this,
+ * but replay still recognizes it (folding it to resolved) so old logs load.
+ */
 export interface ThreadDismissedEvent extends BaseEvent {
   type: "thread.dismissed";
   thread: string;
@@ -333,11 +340,6 @@ export interface AddCommentRequest {
 export interface ResolveThreadRequest {
   author?: Author;
   summary?: string | null;
-}
-
-export interface DismissThreadRequest {
-  author?: Author;
-  reason?: string | null;
 }
 
 export interface DeleteThreadRequest {

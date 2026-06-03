@@ -6,7 +6,6 @@ import {
   addComment,
   createThread,
   deleteThread,
-  dismissThread,
   loadThreads,
   replay,
   resolveThread,
@@ -105,21 +104,38 @@ describe("event log", () => {
     expect(loaded!.comments[1]!.author).toEqual({ type: "agent", name: "pi" });
   });
 
-  it("dismiss records a reason and sets status", async () => {
-    const t = await createThread(dir, { repo: "r", file: "a", line: 1, body: "x" }, T0);
-    const d = await dismissThread(
-      dir,
-      t.id,
-      { author: { type: "user" }, reason: "wontfix" },
-      T0,
-    );
-    expect(d.status).toBe("dismissed");
-    expect(d.comments.at(-1)!.body).toBe("wontfix");
+  it("folds a legacy thread.dismissed event into resolved on replay", () => {
+    // Dismissal was merged into resolution; old logs must still load, with the
+    // dismissal reason preserved as the trailing note.
+    const base = { v: THREAD_SCHEMA_VERSION, ts: T0, author: { type: "user" as const } };
+    const created = {
+      ...base,
+      type: "thread.created" as const,
+      id: "th_x",
+      repo: "r",
+      worktree: null,
+      file: "a",
+      side: "new" as const,
+      line: 1,
+      endLine: null,
+      anchor: null,
+      severity: null,
+      body: "x",
+    };
+    const dismissed = {
+      ...base,
+      type: "thread.dismissed" as const,
+      thread: "th_x",
+      reason: "wontfix",
+    };
+    const [t] = replay([created, dismissed]);
+    expect(t!.status).toBe("resolved");
+    expect(t!.comments.at(-1)!.body).toBe("wontfix");
   });
 
   it("deletes a thread via tombstone so it vanishes from replay", async () => {
     const t = await createThread(dir, { repo: "r", file: "a", line: 1, body: "x" }, T0);
-    await dismissThread(dir, t.id, { author: { type: "user" }, reason: "wontfix" }, T0);
+    await resolveThread(dir, t.id, { author: { type: "user" }, summary: "done" }, T0);
     await deleteThread(dir, t.id, { author: { type: "user" } }, T0);
     expect(await loadThreads(dir)).toEqual([]);
   });
