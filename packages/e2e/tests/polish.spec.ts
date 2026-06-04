@@ -3,10 +3,10 @@ import { test, expect } from "@playwright/test";
 test("marking a file viewed collapses it and updates the count", async ({ page }) => {
   await page.goto("/");
   const calc = page.locator(".file", { hasText: "calc.js" });
-  await expect(calc.locator("table.hunk").first()).toBeVisible();
+  await expect(calc.locator("[data-component='git-diff-view']").first()).toBeVisible();
 
   await calc.getByRole("checkbox", { name: "Viewed" }).check();
-  await expect(calc.locator("table.hunk")).toHaveCount(0); // body collapsed
+  await expect(calc.locator("[data-component='git-diff-view']")).toHaveCount(0); // body collapsed
   // Review progress (now in the sidebar) reflects the newly-viewed file.
   await expect(page.locator(".review-progress-count")).toHaveText("1/2");
 });

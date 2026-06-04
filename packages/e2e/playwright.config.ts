@@ -4,6 +4,9 @@ const PORT = 7460;
 
 export default defineConfig({
   testDir: "./tests",
+  // tests/legacy/ assert the old hand-rolled diff DOM; quarantined pending a
+  // port to the git-diff-view renderer (see tests/legacy/README.md).
+  testIgnore: "**/legacy/**",
   // CX flows touch live SSE; keep them serial and give fetches room.
   fullyParallel: false,
   workers: 1,

@@ -412,6 +412,7 @@ export function App() {
             onToggleSplit={toggleSplitView}
             wrap={wrapLines}
             onToggleWrap={toggleWrapLines}
+            theme={theme}
             onToggleViewed={toggleViewed}
             onChanged={refreshThreads}
           />
