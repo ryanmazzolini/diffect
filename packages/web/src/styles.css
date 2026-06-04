@@ -24,10 +24,8 @@
   --muted: #8b949e;
   --add-bg: #122117;
   --add-line: #2ea04326;
-  --add-word: #2ea04366;
   --del-bg: #2d1214;
   --del-line: #f8514926;
-  --del-word: #f8514966;
   --accent: #2f81f7;
   --must-fix: #f85149;
   --suggestion: #d29922;
@@ -61,10 +59,8 @@
   --muted: #656d76;
   --add-bg: #e6ffec;
   --add-line: #2ea04326;
-  --add-word: #2da44e4d;
   --del-bg: #ffebe9;
   --del-line: #f8514926;
-  --del-word: #cf222e4d;
   --accent: #0969da;
   --must-fix: #cf222e;
   --suggestion: #9a6700;
@@ -874,64 +870,6 @@ body.pane-resizing {
 }
 .line-del .code {
   background: var(--del-line);
-}
-/* Intra-line (word-level) diff: tint just the changed spans, coloured by the
- * row's add/del context so it reads on top of the line background. */
-.line-add .diff-word {
-  background: var(--add-word);
-  border-radius: 2px;
-}
-.line-del .diff-word {
-  background: var(--del-word);
-  border-radius: 2px;
-}
-
-/* Split (side-by-side) view: two code columns separated by a divider, blank
- * filler cells where a side has no line. */
-.hunk-split {
-  table-layout: fixed;
-}
-.hunk-split .code {
-  width: 50%;
-}
-.hunk-split .split-line td:nth-child(3),
-.hunk-split .line-context td:nth-child(3) {
-  border-left: 1px solid var(--border);
-}
-.ln-filler,
-.code-filler {
-  background: var(--bg-elev);
-  opacity: 0.5;
-}
-.split-selected {
-  background: var(--sel-bg);
-}
-
-/* No-wrap mode: long lines keep their length and the file scrolls horizontally
- * instead of wrapping. The scroll lives on `.file-body` (inside `.file`) because
- * `.file`'s content-visibility clips paint — a `.diff-pane` scroll would never
- * reveal the overflow. `overflow-y` computes to hidden but never clips: the body
- * grows to its content's height, so only the x-axis actually scrolls. */
-.diff.nowrap .code {
-  white-space: pre;
-  word-break: normal;
-}
-.diff.nowrap .file-body {
-  overflow-x: auto;
-  overflow-y: clip;
-}
-/* Grow each hunk table to its widest line (min-width keeps short files filling
- * the pane so row tints reach the right edge). Split drops fixed layout so both
- * columns size to content while staying row-aligned in the one table. */
-.diff.nowrap .hunk {
-  width: max-content;
-  min-width: 100%;
-}
-.diff.nowrap .hunk-split {
-  table-layout: auto;
-}
-.diff.nowrap .hunk-split .code {
-  width: auto;
 }
 .sigil {
   display: inline-block;
