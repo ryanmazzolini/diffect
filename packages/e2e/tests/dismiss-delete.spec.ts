@@ -10,9 +10,9 @@ test("resolved thread collapses in the diff, then can be deleted", async ({
   await page.goto("/");
 
   // Create a thread on the changed line.
-  const line = page.locator("tr.line-add", { hasText: "TODO" }).first();
-  await line.hover();
-  await line.locator("button.comment-btn").click();
+  const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
+  await row.hover();
+  await row.locator("button.diff-add-widget").first().click();
   await page.locator(".comment-form textarea").fill("nit: spacing here");
   await page
     .locator(".comment-form")

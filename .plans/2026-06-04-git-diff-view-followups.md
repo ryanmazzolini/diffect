@@ -34,9 +34,13 @@ is false and the "expand" affordance is hidden (graceful, not broken).
   `git show <base>:<path>`, new via working-tree read) and pass it through
   `packages/web/src/components/DiffView.tsx`.
 
-## TODO: port quarantined e2e specs
+## DONE: e2e specs reconciled with the new renderer
 
-`packages/e2e/tests/legacy/` holds ~12 specs asserting the old DOM (excluded via
-`testIgnore`). Port to the lib DOM and delete the folder. Porting notes are in
-`tests/legacy/README.md`. Core flows already re-covered in
-`tests/git-diff-view.spec.ts`.
+`tests/legacy/` removed. The four specs covering live, renderer-independent
+behavior (composer, dismiss-delete, resilient, review) were ported to the lib's
+add-widget and kept; the renderer-internal specs (drag-select, expand-context,
+highlight, range-comment, screenshot, split-view, word-diff, wrap-toggle) were
+deleted — they're now owned by the lib or re-covered in
+`tests/git-diff-view.spec.ts`. Caveat: the deleted `drag-select` spec also
+covered keyboard-operability of the gutter — that assertion returns with the
+keyboard-a11y work above.

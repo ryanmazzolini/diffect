@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 async function openCommentForm(page) {
-  const line = page.locator("tr.line-add", { hasText: "TODO" }).first();
-  await line.hover();
-  await line.locator("button.comment-btn").click();
+  const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
+  await row.hover();
+  await row.locator("button.diff-add-widget").first().click();
   return page.locator(".comment-form");
 }
 

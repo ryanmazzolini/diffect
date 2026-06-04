@@ -11,15 +11,15 @@ test("loads the workspace and shows the work diff", async ({ page }) => {
   await expect(page.locator(".brand")).toHaveText("Diffect");
   // The fixture has a modified calc.js in the default work target.
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
-  await expect(page.locator(".line-add").first()).toBeVisible();
+  await expect(page.locator("tbody.diff-table-body tr").first()).toBeVisible();
 });
 
 test("creates an inline comment and it appears in the inbox", async ({ page }) => {
   await page.goto("/");
   // Hover the changed line to reveal the comment affordance, then open the form.
-  const addedLine = page.locator("tr.line-add", { hasText: "TODO" }).first();
+  const addedLine = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
   await addedLine.hover();
-  await addedLine.locator("button.comment-btn").click();
+  await addedLine.locator("button.diff-add-widget").first().click();
 
   const form = page.locator(".comment-form");
   await expect(form).toBeVisible();
@@ -36,9 +36,9 @@ test("creates an inline comment and it appears in the inbox", async ({ page }) =
 test("resolves a thread and the open count drops", async ({ page }) => {
   await page.goto("/");
   // Create a thread first.
-  const line = page.locator("tr.line-add", { hasText: "TODO" }).first();
-  await line.hover();
-  await line.locator("button.comment-btn").click();
+  const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
+  await row.hover();
+  await row.locator("button.diff-add-widget").first().click();
   await page.locator(".comment-form textarea").fill("please rename this");
   await page.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
 
