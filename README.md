@@ -20,7 +20,8 @@ light/dark themes (following your OS by default), sticky file headers, unfoldabl
 context, and a resizable thread pane.
 
 Comment on a line, a click-or-keyboard-selected range, or **any file in the repo**
-(not just the changed ones, via a picker — it surfaces as an out-of-diff block).
+(not just the changed ones: switch the sidebar from Diff to All files and select
+an unchanged file for a full-file preview).
 The composer is GitHub-style markdown with write/preview and image attachments;
 comments re-anchor as the code changes and are flagged *stale* when their range
 disappears — never silently dropped. Close or delete threads; mark

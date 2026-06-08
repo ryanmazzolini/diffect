@@ -1,10 +1,19 @@
-import type { DiffFile } from "@diffect/shared";
+import type { DiffFile, FileStatus } from "@diffect/shared";
+
+export type TreeFileStatus = FileStatus | "unchanged";
+
+export interface FileTreeEntry {
+  path: string;
+  status: TreeFileStatus;
+  file?: DiffFile;
+}
 
 export interface TreeFile {
   type: "file";
   name: string;
   path: string;
-  file: DiffFile;
+  status: TreeFileStatus;
+  file?: DiffFile;
 }
 export interface TreeDir {
   type: "dir";
@@ -23,9 +32,15 @@ export type TreeNode = TreeFile | TreeDir;
  * file-tree convention.
  */
 export function buildFileTree(files: DiffFile[]): TreeNode[] {
+  return buildPathTree(
+    files.map((file) => ({ path: file.path, status: file.status, file })),
+  );
+}
+
+export function buildPathTree(entries: FileTreeEntry[]): TreeNode[] {
   const root: TreeDir = { type: "dir", name: "", path: "", children: [] };
-  for (const file of files) {
-    const parts = file.path.split("/");
+  for (const entry of entries) {
+    const parts = entry.path.split("/");
     let dir = root;
     for (let i = 0; i < parts.length - 1; i++) {
       const seg = parts[i]!;
@@ -42,8 +57,9 @@ export function buildFileTree(files: DiffFile[]): TreeNode[] {
     dir.children.push({
       type: "file",
       name: parts[parts.length - 1]!,
-      path: file.path,
-      file,
+      path: entry.path,
+      status: entry.status,
+      file: entry.file,
     });
   }
   return finalize(root.children);
@@ -58,8 +74,8 @@ export function orderedDiffFiles(files: DiffFile[]): DiffFile[] {
   const out: DiffFile[] = [];
   const walk = (nodes: TreeNode[]) => {
     for (const n of nodes) {
-      if (n.type === "file") out.push(n.file);
-      else walk(n.children);
+      if (n.type === "file" && n.file) out.push(n.file);
+      else if (n.type === "dir") walk(n.children);
     }
   };
   walk(buildFileTree(files));

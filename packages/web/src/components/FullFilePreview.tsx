@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { useLineSelection } from "../useLineSelection.js";
 import { CommentForm } from "./CommentForm.js";
-import { Modal } from "./Modal.js";
+import { ThreadConversation } from "./ThreadConversation.js";
 
 /** Matches the daemon's per-read line cap (fileRoute clamps to from-1+2000). */
 const MAX_LINES = 2000;
@@ -12,90 +13,32 @@ const MAX_LINES = 2000;
 interface Props {
   repo: string;
   worktree: string | null;
-  onClose: () => void;
-  onCreated: () => void;
+  file: string;
+  threads: Thread[];
+  editors: string[];
+  onBackToDiff: () => void;
+  onChanged: () => void;
 }
 
-/** Pick any tracked file (not just changed ones) and comment on a line/range. */
-export function CrossFileDialog({ repo, worktree, onClose, onCreated }: Props) {
-  const [files, setFiles] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .repoFiles(repo, worktree)
-      .then((r) => setFiles(r.files))
-      .catch(() => setFiles([]));
-  }, [repo, worktree]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (q ? files.filter((f) => f.toLowerCase().includes(q)) : files).slice(0, 200);
-  }, [files, query]);
-
-  return (
-    <Modal title="Comment on another file" onClose={onClose}>
-      {picked === null ? (
-        <div className="cf-picker">
-          <input
-            className="aw-input"
-            placeholder="Filter files…"
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <ul className="cf-files">
-            {filtered.length === 0 && <li className="muted">No files</li>}
-            {filtered.map((f) => (
-              <li key={f}>
-                <button type="button" className="cf-file" onClick={() => setPicked(f)}>
-                  <Icon name="file" size={14} />
-                  {f}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <CrossFileViewer
-          repo={repo}
-          worktree={worktree}
-          file={picked}
-          onBack={() => setPicked(null)}
-          onCreated={() => {
-            onCreated();
-            onClose();
-          }}
-        />
-      )}
-    </Modal>
-  );
-}
-
-function CrossFileViewer({
+/** Full-file preview for commenting on tracked files that are not in the diff. */
+export function FullFilePreview({
   repo,
   worktree,
   file,
-  onBack,
-  onCreated,
-}: {
-  repo: string;
-  worktree: string | null;
-  file: string;
-  onBack: () => void;
-  onCreated: () => void;
-}) {
+  threads,
+  editors,
+  onBackToDiff,
+  onChanged,
+}: Props) {
   const lang = langForPath(file);
   const [lines, setLines] = useState<string[] | null>(null);
-  // A full-file preview has only new-side lines, so selection is always "new".
   const { range, form, gutterProps, openComment, closeForm } = useLineSelection(
     () => lines?.length ?? 1,
   );
+  const threadsByLine = useMemo(() => groupThreadsByLine(threads), [threads]);
 
   useEffect(() => {
-    // The server caps a file read at MAX_LINES; request exactly that so a
-    // "first N lines" hint is accurate rather than guessing a larger number.
+    setLines(null);
     api
       .file(repo, { path: file, side: "new", from: 1, to: MAX_LINES, worktree })
       .then((r) => setLines(r.lines))
@@ -103,30 +46,32 @@ function CrossFileViewer({
   }, [repo, worktree, file]);
 
   return (
-    <div className="cf-viewer">
-      <div className="cf-viewer-head">
-        <button type="button" className="ghost aw-up" onClick={onBack}>
-          <Icon name="chevron-left" size={12} /> Files
+    <div className="file full-file-preview" id={`file-${file}`}>
+      <div className="file-header">
+        <span className="status status-context">context</span>
+        <span className="file-path" title={file}>{file}</span>
+        <span className="out-of-diff-tag">not in this diff</span>
+        <button type="button" className="ghost full-preview-back" onClick={onBackToDiff}>
+          <Icon name="chevron-left" size={12} /> Diff
         </button>
-        <span className="cf-path" title={file}>
-          {file}
-        </span>
       </div>
+
       {lines !== null && lines.length === 0 && (
-        <div className="muted">No previewable text content.</div>
+        <div className="muted full-preview-note">No previewable text content.</div>
       )}
       {lines !== null && lines.length >= MAX_LINES && (
-        <div className="muted">Showing the first {MAX_LINES} lines.</div>
+        <div className="muted full-preview-note">Showing the first {MAX_LINES} lines.</div>
       )}
       {lines === null ? (
         <div className="loading">Loading…</div>
       ) : (
-        <table className="hunk cf-lines">
+        <table className="hunk full-file-lines">
           <tbody>
             {lines.map((text, i) => {
               const lineNo = i + 1;
               const selected =
                 range !== null && lineNo >= range.lo && lineNo <= range.hi;
+              const lineThreads = threadsByLine.get(lineNo) ?? [];
               return (
                 <Fragment key={i}>
                   <tr className={`line line-context${selected ? " line-selected" : ""}`}>
@@ -150,6 +95,18 @@ function CrossFileViewer({
                       )}
                     </td>
                   </tr>
+                  {lineThreads.map((thread) => (
+                    <tr className="inline-thread-row" key={thread.id}>
+                      <td className="ln" />
+                      <td className="code">
+                        <ThreadConversation
+                          thread={thread}
+                          editors={editors}
+                          onChanged={onChanged}
+                        />
+                      </td>
+                    </tr>
+                  ))}
                   {form && lineNo === form.end && (
                     <tr>
                       <td className="ln" />
@@ -162,7 +119,10 @@ function CrossFileViewer({
                           line={form.start}
                           endLine={form.end}
                           onCancel={closeForm}
-                          onCreated={onCreated}
+                          onCreated={() => {
+                            closeForm();
+                            onChanged();
+                          }}
                         />
                       </td>
                     </tr>
@@ -175,4 +135,15 @@ function CrossFileViewer({
       )}
     </div>
   );
+}
+
+function groupThreadsByLine(threads: Thread[]): Map<number, Thread[]> {
+  const out = new Map<number, Thread[]>();
+  for (const t of threads) {
+    if (t.line === null) continue;
+    const arr = out.get(t.line);
+    if (arr) arr.push(t);
+    else out.set(t.line, [t]);
+  }
+  return out;
 }

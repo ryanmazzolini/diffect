@@ -35,11 +35,13 @@ export function App() {
   const [target, setTarget] = useState("work");
   const [diff, setDiff] = useState<RepoDiff | null>(null);
   const [refs, setRefs] = useState<RefList | null>(null);
+  const [allFiles, setAllFiles] = useState<string[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => getStored("diffect-sidebar-collapsed") === "1",
   );
@@ -89,10 +91,20 @@ export function App() {
     api.workspaces().then(setEntries).catch(() => setEntries([]));
   }, []);
 
-  const selectFile = useCallback((path: string) => {
-    setActiveFile(path);
-    document.getElementById(`file-${path}`)?.scrollIntoView({ block: "start" });
-  }, []);
+  const selectFile = useCallback(
+    (path: string) => {
+      const inDiff = diff?.files.some((f) => f.path === path || f.oldPath === path) ?? false;
+      setActiveFile(path);
+      if (inDiff) {
+        setPreviewFile(null);
+        document.getElementById(`file-${path}`)?.scrollIntoView({ block: "start" });
+      } else {
+        setPreviewFile(path);
+        diffPaneRef.current?.scrollTo({ top: 0 });
+      }
+    },
+    [diff],
+  );
 
   // Per-file "viewed" state, scoped to repo + worktree + target (the diff's
   // identity) and persisted.
@@ -206,6 +218,10 @@ export function App() {
     setWorktree(null);
   }, [repo]);
 
+  useEffect(() => {
+    setPreviewFile(null);
+  }, [repo, worktree, target]);
+
   // Load the repo's refs (branches/tags/commits) for the compare picker.
   useEffect(() => {
     if (!repo) return;
@@ -214,6 +230,19 @@ export function App() {
       .refs(repo, worktree)
       .then((r) => live && setRefs(r))
       .catch(() => live && setRefs(null));
+    return () => {
+      live = false;
+    };
+  }, [repo, worktree]);
+
+  // Load every tracked file for the sidebar's All files mode.
+  useEffect(() => {
+    if (!repo) return;
+    let live = true;
+    api
+      .repoFiles(repo, worktree)
+      .then((r) => live && setAllFiles(r.files))
+      .catch(() => live && setAllFiles([]));
     return () => {
       live = false;
     };
@@ -232,7 +261,7 @@ export function App() {
   // pane as the user scrolls, so the tree tracks reading position.
   useEffect(() => {
     const root = diffPaneRef.current;
-    if (!root || !diff) return;
+    if (!root || !diff || previewFile) return;
     const headers = diff.files
       .map((f) => document.getElementById(`file-${f.path}`))
       .filter((el): el is HTMLElement => el !== null);
@@ -248,7 +277,7 @@ export function App() {
     );
     headers.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [diff]);
+  }, [diff, previewFile]);
 
   // j/k move between files in the diff (GitHub-style), unless typing or in a modal.
   useEffect(() => {
@@ -388,9 +417,11 @@ export function App() {
               onSelectRepo={setRepo}
               onSelectWorktree={setWorktree}
               files={sidebarFiles}
+              allFiles={allFiles}
               viewed={viewed}
               activeFile={activeFile}
               onSelectFile={selectFile}
+              onShowDiff={() => setPreviewFile(null)}
               onAddWorkspace={openAdd}
             />
             <div
@@ -416,6 +447,8 @@ export function App() {
             onToggleWrap={toggleWrapLines}
             theme={theme}
             onToggleViewed={toggleViewed}
+            previewFile={previewFile}
+            onBackToDiff={() => setPreviewFile(null)}
             onChanged={refreshThreads}
           />
         </section>

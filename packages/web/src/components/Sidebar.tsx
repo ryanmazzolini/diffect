@@ -1,8 +1,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { DiffFile, FileStatus, RepoSummary, WorkspaceEntry } from "@diffect/shared";
-import { Icon } from "../icons.js";
+import type { DiffFile, RepoSummary, WorkspaceEntry } from "@diffect/shared";
+import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
-import { buildFileTree, type TreeNode } from "../fileTree.js";
+import {
+  buildPathTree,
+  type FileTreeEntry,
+  type TreeFileStatus,
+  type TreeNode,
+} from "../fileTree.js";
 
 interface Props {
   entries: WorkspaceEntry[];
@@ -11,15 +16,30 @@ interface Props {
   onSelectRepo: (repo: string) => void;
   onSelectWorktree: (worktree: string | null) => void;
   files: DiffFile[];
+  allFiles: string[];
   viewed: Set<string>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
+  onShowDiff: () => void;
   onAddWorkspace: () => void;
 }
 
 function basename(p: string): string {
   const parts = p.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? p;
+}
+
+function diffFileEntries(files: DiffFile[]): FileTreeEntry[] {
+  return files.map((file) => ({ path: file.path, status: file.status, file }));
+}
+
+function allFileEntries(paths: string[], changed: DiffFile[]): FileTreeEntry[] {
+  const byPath = new Map<string, FileTreeEntry>();
+  for (const path of paths) byPath.set(path, { path, status: "unchanged" });
+  for (const file of changed) {
+    byPath.set(file.path, { path: file.path, status: file.status, file });
+  }
+  return [...byPath.values()];
 }
 
 /** Left navigation: workspaces → repos → worktrees, plus the changed-file tree.
@@ -31,11 +51,20 @@ export const Sidebar = memo(function Sidebar({
   onSelectRepo,
   onSelectWorktree,
   files,
+  allFiles,
   viewed,
   activeFile,
   onSelectFile,
+  onShowDiff,
   onAddWorkspace,
 }: Props) {
+  const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
+  const treeEntries = useMemo(
+    () => (fileMode === "all" ? allFileEntries(allFiles, files) : diffFileEntries(files)),
+    [allFiles, fileMode, files],
+  );
+  const showFiles = files.length > 0 || allFiles.length > 0;
+
   return (
     <nav className="sidebar">
       <div className="sidebar-head">
@@ -72,23 +101,46 @@ export const Sidebar = memo(function Sidebar({
         </div>
       ))}
 
-      {files.length > 0 && (
+      {showFiles && (
         <>
           <div className="sidebar-head">
             <span>Files</span>
-            <ReviewProgress
-              files={files}
-              viewed={viewed}
-              activeFile={activeFile}
-              onSelectFile={onSelectFile}
-            />
+            {fileMode === "diff" && (
+              <ReviewProgress
+                files={files}
+                viewed={viewed}
+                activeFile={activeFile}
+                onSelectFile={onSelectFile}
+              />
+            )}
           </div>
-          {/* key={repo} remounts the tree on repo switch so collapse state and
-              the memoized tree re-initialize from the right repo. */}
+          <div className="file-mode-toggle" role="group" aria-label="File list mode">
+            <button
+              type="button"
+              className={`file-mode ${fileMode === "diff" ? "active" : ""}`}
+              aria-pressed={fileMode === "diff"}
+              onClick={() => {
+                setFileMode("diff");
+                onShowDiff();
+              }}
+            >
+              Diff
+            </button>
+            <button
+              type="button"
+              className={`file-mode ${fileMode === "all" ? "active" : ""}`}
+              aria-pressed={fileMode === "all"}
+              onClick={() => setFileMode("all")}
+            >
+              All files
+            </button>
+          </div>
+          {/* key remounts the tree on repo/mode switch so collapse state and
+              the memoized tree re-initialize for the right file set. */}
           <FileTree
-            key={repo}
+            key={`${repo}:${fileMode}`}
             repo={repo}
-            files={files}
+            entries={treeEntries}
             activeFile={activeFile}
             onSelectFile={onSelectFile}
           />
@@ -160,16 +212,16 @@ function loadCollapsed(repo: string): Set<string> {
 /** Collapsible changed-file tree, expansion state persisted per repo. */
 function FileTree({
   repo,
-  files,
+  entries,
   activeFile,
   onSelectFile,
 }: {
   repo: string;
-  files: DiffFile[];
+  entries: FileTreeEntry[];
   activeFile: string | null;
   onSelectFile: (path: string) => void;
 }) {
-  const tree = useMemo(() => buildFileTree(files), [files]);
+  const tree = useMemo(() => buildPathTree(entries), [entries]);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(repo));
   // Keep the scroll-spy-highlighted file visible without yanking the whole list:
   // `nearest` only scrolls the sidebar the minimum needed.
@@ -237,9 +289,9 @@ function TreeRow({
         onClick={() => onSelectFile(node.path)}
       >
         <Icon
-          name={statusIcon(node.file.status)}
+          name={statusIcon(node.status)}
           size={12}
-          className={`tree-icon status-${node.file.status}`}
+          className={`tree-icon status-${node.status}`}
         />
         <span className="tree-name">{node.name}</span>
       </button>
@@ -277,7 +329,7 @@ function TreeRow({
   );
 }
 
-function statusIcon(status: FileStatus) {
+function statusIcon(status: TreeFileStatus): IconName {
   switch (status) {
     case "added":
     case "untracked":
@@ -286,8 +338,12 @@ function statusIcon(status: FileStatus) {
       return "diff-removed" as const;
     case "renamed":
       return "diff-renamed" as const;
+    case "modified":
+      return "diff-modified";
+    case "unchanged":
+      return "file";
     default:
-      return "diff-modified" as const;
+      return "diff-modified";
   }
 }
 

@@ -9,10 +9,9 @@ import "@git-diff-view/react/styles/diff-view.css";
 import type { DiffFile, DiffHunk, RepoDiff, Side, Thread } from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import { api } from "../api.js";
-import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { CommentForm } from "./CommentForm.js";
-import { CrossFileDialog } from "./CrossFileDialog.js";
+import { FullFilePreview } from "./FullFilePreview.js";
 import { DiffStat } from "./DiffStat.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
@@ -36,6 +35,9 @@ interface Props {
   onToggleWrap: () => void;
   theme: Theme;
   onToggleViewed: (path: string) => void;
+  /** A tracked file outside the current diff selected from the All files sidebar. */
+  previewFile: string | null;
+  onBackToDiff: () => void;
   onChanged: () => void;
 }
 
@@ -55,28 +57,15 @@ export const DiffView = memo(function DiffView({
   onToggleWrap,
   theme,
   onToggleViewed,
+  previewFile,
+  onBackToDiff,
   onChanged,
 }: Props) {
-  const [crossFileOpen, setCrossFileOpen] = useState(false);
   // One pass to bucket threads by file, kept stable across renders so each file
   // gets a referentially-stable array (memo can then skip unchanged files).
   const threadsByFile = useMemo(() => groupThreadsByFile(threads), [threads]);
-  const dialog = crossFileOpen ? (
-    <CrossFileDialog
-      repo={repo}
-      worktree={worktree}
-      onClose={() => setCrossFileOpen(false)}
-      onCreated={onChanged}
-    />
-  ) : null;
-
   if (!diff) {
-    return (
-      <>
-        {dialog}
-        <div className="loading">Loading diff…</div>
-      </>
-    );
+    return <div className="loading">Loading diff…</div>;
   }
 
   // Include rename old-paths so a thread on the pre-rename path of a file that's
@@ -96,22 +85,16 @@ export const DiffView = memo(function DiffView({
   const totalAdd = files.reduce((n, f) => n + f.additions, 0);
   const totalDel = files.reduce((n, f) => n + f.deletions, 0);
   const mode = split ? DiffModeEnum.Split : DiffModeEnum.Unified;
+  const showingPreview =
+    previewFile !== null && !files.some((f) => f.path === previewFile || f.oldPath === previewFile);
 
   return (
     <div className="diff">
-      {dialog}
       <div className="diff-summary">
         <span className="diff-summary-files">
           {files.length} {files.length === 1 ? "file" : "files"} changed
         </span>
         <DiffStat additions={totalAdd} deletions={totalDel} />
-        <button
-          type="button"
-          className="ghost cf-open"
-          onClick={() => setCrossFileOpen(true)}
-        >
-          <Icon name="plus" size={12} /> Comment on another file
-        </button>
         <button
           type="button"
           className="ghost view-toggle"
@@ -131,10 +114,20 @@ export const DiffView = memo(function DiffView({
           {wrap ? "No wrap" : "Wrap"}
         </button>
       </div>
-      {files.length === 0 ? (
+      {showingPreview ? (
+        <FullFilePreview
+          repo={repo}
+          worktree={worktree}
+          file={previewFile}
+          threads={threadsByFile.get(previewFile) ?? EMPTY_THREADS}
+          editors={editors}
+          onBackToDiff={onBackToDiff}
+          onChanged={onChanged}
+        />
+      ) : files.length === 0 ? (
         <div className="empty">
-          No changes in this target. Try a different compare target above, or
-          comment on another file.
+          No changes in this target. Try a different compare target above, or choose
+          All files in the sidebar to comment on unchanged files.
         </div>
       ) : (
         files.map((file) => (
@@ -154,7 +147,7 @@ export const DiffView = memo(function DiffView({
           />
         ))
       )}
-      {outOfDiff.map(([file, fileThreads]) => (
+      {!showingPreview && outOfDiff.map(([file, fileThreads]) => (
         <OutOfDiffFile
           key={file}
           repo={repo}

@@ -680,8 +680,34 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
+.file-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin: 0 4px 8px;
+}
+.file-mode {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.file-mode:hover,
+.file-mode:focus-visible {
+  color: var(--text);
+  background: var(--bg-elev);
+}
+.file-mode.active {
+  color: var(--text);
+  background: var(--nav-sel);
+  border-color: var(--accent);
+  font-weight: 600;
+}
 
-/* Changed-file tree */
+/* Changed/all-file tree */
 .tree-dir,
 .tree-file {
   display: flex;
@@ -855,13 +881,17 @@ body {
 .status-untracked {
   color: var(--success);
 }
+.status-modified {
+  color: var(--suggestion);
+}
 .status-deleted {
   color: var(--must-fix);
 }
 .status-renamed {
   color: var(--question);
 }
-.status-context {
+.status-context,
+.status-unchanged {
   color: var(--muted);
 }
 .out-of-diff-tag {
@@ -872,76 +902,14 @@ body {
   color: var(--muted);
 }
 
-/* Entry point + cross-file dialog */
-.cf-open {
-  margin-left: auto;
+/* Full-file preview for unchanged files selected from the sidebar. */
+.full-preview-back {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  font-size: 12px;
-  padding: 3px 8px;
 }
-.cf-picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.cf-files {
-  list-style: none;
-  margin: 0;
-  padding: var(--space-1);
-  max-height: 320px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-.cf-files .muted {
-  color: var(--muted);
-  font-size: 12px;
-  padding: var(--space-2);
-}
-.cf-file {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-.cf-file:hover {
-  background: var(--bg);
-}
-.cf-viewer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.cf-viewer-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.cf-path {
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cf-lines {
-  display: block;
-  max-height: 50vh;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+.full-preview-note {
+  padding: var(--space-3);
 }
 
 .hunk {

@@ -1,27 +1,27 @@
 import { test, expect } from "@playwright/test";
 
-test("comment on a file outside the diff, shown as an out-of-diff block", async ({
-  page,
-}) => {
+test("comment on an unchanged file from the all-files sidebar", async ({ page }) => {
   await page.goto("/");
 
-  // Open the cross-file picker and choose the unchanged README (not in the diff).
-  await page.getByRole("button", { name: "Comment on another file" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.locator(".aw-input").fill("README");
-  await dialog.locator(".cf-file", { hasText: "README.md" }).click();
+  // Switch the sidebar from changed files to all tracked files and choose the
+  // unchanged README (not in the current diff).
+  await page.getByRole("button", { name: "All files" }).click();
+  await page.locator(".tree-file", { hasText: "README.md" }).click();
+
+  const preview = page.locator(".full-file-preview", { hasText: "README.md" });
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText("not in this diff");
 
   // Hover a line and open the comment form via the + affordance.
-  const row = dialog.locator(".cf-lines tr.line").first();
+  const row = preview.locator(".full-file-lines tr.line").first();
   await row.hover();
   await row.locator("button.comment-btn").click();
-  await dialog.locator(".comment-form textarea").fill("typo on this line");
-  await dialog.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
+  await preview.locator(".comment-form textarea").fill("typo on this line");
+  await preview.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
 
-  // The dialog closes and the thread surfaces as an out-of-diff block + in the inbox.
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  const block = page.locator(".file.out-of-diff", { hasText: "README.md" });
-  await expect(block).toBeVisible();
-  await expect(block).toContainText("typo on this line");
+  // The thread renders inline in the full-file preview and in the inbox.
+  await expect(
+    preview.locator(".inline-thread .body", { hasText: "typo on this line" }).first(),
+  ).toBeVisible();
   await expect(page.locator(".thread-pane")).toContainText("typo on this line");
 });

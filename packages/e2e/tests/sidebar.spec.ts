@@ -9,9 +9,17 @@ test("sidebar shows the repo and a file tree, toggles and persists", async ({ pa
   await expect(page.locator(".tree-file", { hasText: "calc.js" })).toBeVisible();
   await expect(page.locator(".tree-dir", { hasText: "src/util" })).toBeVisible();
 
+  // Changed files keep their status markers; modified is highlighted separately.
+  await expect(page.locator('.tree-file:has-text("calc.js") .status-modified')).toBeVisible();
+
   // Clicking a file marks it active (and scrolls to it).
   await page.locator(".tree-file", { hasText: "calc.js" }).click();
   await expect(page.locator(".tree-file.active")).toHaveCount(1);
+
+  // All files mode includes unchanged tracked files with a neutral icon.
+  await page.getByRole("button", { name: "All files" }).click();
+  await expect(page.locator(".tree-file", { hasText: "README.md" })).toBeVisible();
+  await expect(page.locator('.tree-file:has-text("README.md") .status-unchanged')).toBeVisible();
 
   // Hamburger collapses the sidebar and the choice persists across reload.
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
