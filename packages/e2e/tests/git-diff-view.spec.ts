@@ -61,3 +61,22 @@ test("toggles line wrapping", async ({ page }) => {
   await page.reload();
   await expect(page.locator(".unified-diff-view-normal").first()).toBeVisible(); // persisted
 });
+
+test("keeps the diff action bar sticky while scrolling", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector("tbody.diff-table-body tr");
+
+  const summary = page.locator(".diff-summary");
+  const before = await summary.boundingBox();
+  expect(before).not.toBeNull();
+
+  await page.locator(".diff-pane").evaluate((el) => {
+    el.scrollTop = 700;
+  });
+
+  const after = await summary.boundingBox();
+  expect(after).not.toBeNull();
+  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
+  await expect(page.locator(".view-toggle")).toBeVisible();
+  await expect(page.locator(".wrap-toggle")).toBeVisible();
+});
