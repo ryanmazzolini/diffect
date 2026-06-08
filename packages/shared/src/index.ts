@@ -102,6 +102,28 @@ export interface RefList {
   commits: { sha: string; subject: string }[];
 }
 
+export type RefSearchKind = "branch" | "tag" | "commit";
+
+/** One selectable base/compare point returned by `GET /repos/:repo/refs/search`. */
+export interface RefSearchOption {
+  kind: RefSearchKind;
+  /** Value to place in a Review Target Spec. Branches/tags use their names; commits use the full SHA. */
+  value: string;
+  /** Primary label. For commits this is the short SHA. */
+  label: string;
+  /** Commit subject, when known. */
+  subject?: string;
+  /** Full commit SHA for commit results. */
+  sha?: string;
+}
+
+export interface RefSearchResults {
+  query: string;
+  branches: RefSearchOption[];
+  tags: RefSearchOption[];
+  commits: RefSearchOption[];
+}
+
 /** A slice of a file's lines, for unfolding collapsed diff context (GET /repos/:repo/file). */
 export interface FileRange {
   /** 1-based line number of the first returned line. */

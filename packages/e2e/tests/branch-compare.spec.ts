@@ -1,21 +1,35 @@
 import { test, expect } from "@playwright/test";
 
-/** The compare picker lists refs and can target a ref range or a raw spec. */
-test("compare picker lists refs and applies targets", async ({ page }) => {
+/** The target picker has visible state, local modes, searchable refs, and commits. */
+test("target picker applies local modes, compare refs, and commit search", async ({ page }) => {
   await page.goto("/");
 
-  // base…compare dropdowns are populated from the repo's refs (fixture has main).
-  const baseSelect = page.locator('.compare select[title="Base"]');
-  await expect(baseSelect).toBeVisible();
-  await expect(baseSelect).toContainText("main");
+  const all = page.getByRole("button", { name: "All local changes", exact: true });
+  const staged = page.getByRole("button", { name: "Staged changes", exact: true });
+  const unstaged = page.getByRole("button", { name: "Unstaged changes", exact: true });
 
-  // Selecting a base forms a base...compare target; the diff reloads, no error.
-  await baseSelect.selectOption("main");
+  await expect(all).toHaveAttribute("aria-pressed", "true");
+
+  await staged.click();
+  await expect(staged).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".error")).toHaveCount(0);
 
-  // The raw ref/range escape hatch applies on Enter.
-  const raw = page.locator(".raw-target");
-  await raw.fill("staged");
-  await raw.press("Enter");
+  await unstaged.click();
+  await expect(unstaged).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".error")).toHaveCount(0);
+
+  // Selecting a base applies a GitHub-like base...compare target using HEAD.
+  const basePicker = page.locator('.compare .ref-trigger[title^="Base:"]');
+  await basePicker.click();
+  await page.getByPlaceholder("Find a branch, tag, or commit…").fill("main");
+  await page.getByRole("option", { name: /main/ }).first().click();
+  await expect(page.locator('.compare .ref-trigger[title="Base: main"]')).toBeVisible();
+  await expect(page.locator('.compare .ref-trigger[title="Compare: HEAD"]')).toBeVisible();
+  await expect(page.locator(".error")).toHaveCount(0);
+
+  // Commit search results show both short hash and subject.
+  const comparePicker = page.locator('.compare .ref-trigger[title^="Compare:"]');
+  await comparePicker.click();
+  await page.getByPlaceholder("Find a branch, tag, or commit…").fill("base");
+  await expect(page.getByRole("option", { name: /^[0-9a-f]+\s+base$/ })).toBeVisible();
 });

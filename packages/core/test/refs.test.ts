@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { git } from "../src/git/exec.js";
-import { listRefs } from "../src/git/refs.js";
+import { listRefs, searchRefs } from "../src/git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "../src/git/target.js";
 
 let dir: string;
@@ -32,6 +32,30 @@ describe("listRefs", () => {
     expect(refs.commits).toHaveLength(1);
     expect(refs.commits[0]!.subject).toBe("first commit");
     expect(refs.commits[0]!.sha).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it("searches branches, tags, commit subjects, and SHA prefixes", async () => {
+    await writeFile(join(dir, "a.txt"), "two\n");
+    await git(dir, ["commit", "-am", "searchable topic"]);
+    const { stdout } = await git(dir, ["rev-parse", "HEAD"]);
+    const fullSha = stdout.trim();
+
+    const branchMatches = await searchRefs(dir, "feat", 5);
+    expect(branchMatches.branches.map((r) => r.label)).toContain("feature");
+
+    const tagMatches = await searchRefs(dir, "v1", 5);
+    expect(tagMatches.tags[0]).toMatchObject({ label: "v1", value: "tags/v1" });
+
+    const subjectMatches = await searchRefs(dir, "searchable", 5);
+    expect(subjectMatches.commits[0]).toMatchObject({
+      label: expect.stringMatching(/^[0-9a-f]+$/),
+      subject: "searchable topic",
+      sha: fullSha,
+      value: fullSha,
+    });
+
+    const hashMatches = await searchRefs(dir, fullSha.slice(0, 8), 5);
+    expect(hashMatches.commits[0]).toMatchObject({ sha: fullSha });
   });
 
   it("does not let a flag-like target inject a git option (argument injection)", async () => {

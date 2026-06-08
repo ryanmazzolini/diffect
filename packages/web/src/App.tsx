@@ -367,6 +367,8 @@ export function App() {
       )}
       <Topbar
         workspace={workspace}
+        repo={repo}
+        worktree={worktree}
         target={target}
         onTarget={setTarget}
         refs={refs}

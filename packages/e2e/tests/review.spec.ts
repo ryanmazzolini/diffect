@@ -72,10 +72,10 @@ test("resolves a thread and the open count drops", async ({ page }) => {
 test("switches review target without errors", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
-  // The fixture has no staged changes, so 'staged' shows the empty state.
-  await page.locator("select.target-select").selectOption("staged");
+  // The fixture has no staged changes, so Staged shows the empty state.
+  await page.getByRole("button", { name: "Staged changes", exact: true }).click();
   await expect(page.locator(".empty")).toContainText("No changes");
-  // Back to work restores the diff.
-  await page.locator("select.target-select").selectOption("work");
+  // Back to all local changes restores the diff.
+  await page.getByRole("button", { name: "All local changes", exact: true }).click();
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
 });

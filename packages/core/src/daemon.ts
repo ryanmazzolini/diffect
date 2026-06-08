@@ -13,7 +13,7 @@ import type {
   WorkspaceMutationRequest,
 } from "@diffect/shared";
 import { resolveWorkBase } from "./git/diff.js";
-import { listRefs, listTrackedFiles } from "./git/refs.js";
+import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, readSideLines } from "./reviews/anchors.js";
 import {
@@ -382,6 +382,25 @@ async function repoRoutes(
     const target = normalizeTarget(url.searchParams.get("target"));
     const diff = await computeTargetDiff(treeRoot, target);
     sendJson(res, 200, { ...diff, repo: repoName, worktree });
+    return true;
+  }
+
+  const refSearchMatch = /^\/repos\/(.+)\/refs\/search$/.exec(path);
+  if (refSearchMatch) {
+    const treeRoot = resolveRepoTreeOr404(
+      ctx,
+      res,
+      decodeURIComponent(refSearchMatch[1]!),
+      worktree,
+    );
+    if (!treeRoot) return true;
+    const rawLimit = url.searchParams.get("limit");
+    const limit = rawLimit ? Number(rawLimit) : undefined;
+    sendJson(
+      res,
+      200,
+      await searchRefs(treeRoot, url.searchParams.get("q") ?? "", limit),
+    );
     return true;
   }
 

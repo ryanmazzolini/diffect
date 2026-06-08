@@ -5,6 +5,8 @@ import { TargetPicker } from "./TargetPicker.js";
 
 interface Props {
   workspace: WorkspaceInfo;
+  repo: string;
+  worktree: string | null;
   target: string;
   onTarget: (target: string) => void;
   refs: RefList | null;
@@ -20,6 +22,8 @@ interface Props {
  * the sidebar; thread counts live on the thread-pane filter bar. */
 export function Topbar({
   workspace,
+  repo,
+  worktree,
   target,
   onTarget,
   refs,
@@ -29,6 +33,8 @@ export function Topbar({
   onTogglePane,
   onToggleSidebar,
 }: Props) {
+  const activeRepo = workspace.repos.find((r) => r.name === repo);
+
   return (
     <header className="topbar">
       <button
@@ -45,7 +51,14 @@ export function Topbar({
         {workspace.root}
       </span>
 
-      <TargetPicker target={target} onTarget={onTarget} refs={refs} />
+      <TargetPicker
+        repo={repo}
+        worktree={worktree}
+        defaultBranch={activeRepo?.defaultBranch ?? null}
+        target={target}
+        onTarget={onTarget}
+        refs={refs}
+      />
 
       <span className="spacer" />
       <button

@@ -9,6 +9,7 @@ import type {
   OpenRequest,
   RecommendedWorkspace,
   RefList,
+  RefSearchResults,
   RepoDiff,
   RepoFileList,
   ResolveThreadRequest,
@@ -101,6 +102,20 @@ export const api = {
     return fetch(
       `/repos/${encodeURIComponent(repo)}/refs${qs ? `?${qs}` : ""}`,
     ).then((r) => json<RefList>(r));
+  },
+
+  searchRefs: (
+    repo: string,
+    opts: { query?: string; limit?: number; worktree?: string | null } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (opts.query) q.set("q", opts.query);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    const qs = q.toString();
+    return fetch(
+      `/repos/${encodeURIComponent(repo)}/refs/search${qs ? `?${qs}` : ""}`,
+    ).then((r) => json<RefSearchResults>(r));
   },
 
   threads: (opts: { status?: string; repo?: string; worktree?: string | null } = {}) => {
