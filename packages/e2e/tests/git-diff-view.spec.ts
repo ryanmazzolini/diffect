@@ -66,17 +66,21 @@ test("keeps the diff action bar sticky while scrolling", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("tbody.diff-table-body tr");
 
+  const pane = page.locator(".diff-pane");
   const summary = page.locator(".diff-summary");
+  const paneBox = await pane.boundingBox();
   const before = await summary.boundingBox();
+  expect(paneBox).not.toBeNull();
   expect(before).not.toBeNull();
+  expect(Math.abs((before?.y ?? 0) - (paneBox?.y ?? 0))).toBeLessThanOrEqual(1);
 
-  await page.locator(".diff-pane").evaluate((el) => {
+  await pane.evaluate((el) => {
     el.scrollTop = 700;
   });
 
   const after = await summary.boundingBox();
   expect(after).not.toBeNull();
-  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
+  expect(Math.abs((after?.y ?? 0) - (paneBox?.y ?? 0))).toBeLessThanOrEqual(1);
   await expect(page.locator(".view-toggle")).toBeVisible();
   await expect(page.locator(".wrap-toggle")).toBeVisible();
 });
