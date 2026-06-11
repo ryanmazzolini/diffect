@@ -1,0 +1,29 @@
+# Diffect Desktop
+
+A Tauri shell over diffectd. On launch it spawns a private daemon with
+`--port 0 --no-workspace` (ephemeral loopback port, registered workspaces
+only), waits for the daemon's `DIFFECTD_READY <url>` stdout line, and opens
+the main window at that origin. The web UI is served by the daemon and uses
+relative URLs, so it runs unmodified; review state lives in the same per-user
+store (`~/.config/diffect/`) the CLI, agents, and any manually run daemon
+share — the daemon's store watcher pushes their writes into the window live.
+
+```sh
+mise run desktop        # build the monorepo, then launch the app
+```
+
+The dev build runs the daemon from `packages/core/dist` with the system
+`node`; a packaged build (sidecar binary + bundled web assets) is planned but
+not wired up yet.
+
+For UI work with hot reload, point the shell at an existing origin instead of
+spawning a daemon:
+
+```sh
+mise run daemon         # terminal 1: API on :7421
+mise run dev            # terminal 2: Vite on :5173 (proxies to the daemon)
+mise run desktop:dev    # terminal 3: window on the Vite origin
+```
+
+(`desktop:dev` sets `DIFFECT_DESKTOP_URL=http://127.0.0.1:5173`; set it
+manually to any URL to do the same.)

@@ -1,0 +1,16 @@
+[package]
+name = "diffect-desktop"
+version = "0.1.0"
+description = "Diffect desktop shell: a Tauri window over a private diffectd"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+strip = true
+lto = true
