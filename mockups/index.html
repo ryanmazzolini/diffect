@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffect — UI redesign mockups</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    color: #1c1917; background: #fafaf9; -webkit-font-smoothing: antialiased;
+    padding: 48px 24px 96px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 26px; letter-spacing: -.02em; margin-bottom: 6px; }
+  .sub { color: #78716c; margin-bottom: 36px; }
+  .card {
+    display: block; text-decoration: none; color: inherit;
+    background: #fff; border: 1px solid #e7e5e4; border-radius: 14px;
+    padding: 22px 24px; margin-bottom: 18px;
+    box-shadow: 0 1px 3px rgba(28,25,23,.06);
+    transition: box-shadow .15s, transform .15s;
+  }
+  .card:hover { box-shadow: 0 8px 28px rgba(28,25,23,.10); transform: translateY(-1px); }
+  .card .head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .swatches { display: flex; gap: 4px; }
+  .sw { width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(0,0,0,.08); }
+  .card h2 { font-size: 17px; }
+  .card .open { margin-left: auto; color: #78716c; font-size: 13px; }
+  .card p { color: #57534e; font-size: 14px; margin-bottom: 10px; }
+  .traits { display: flex; flex-wrap: wrap; gap: 6px; }
+  .trait { font-size: 12px; color: #57534e; background: #f5f5f4; border-radius: 99px; padding: 3px 10px; }
+  .section { margin-top: 44px; }
+  .section h3 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: #a8a29e; margin-bottom: 12px; }
+  .section p, .section li { color: #44403c; font-size: 14px; }
+  .section ul { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+  .section b { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Diffect UI redesign — three directions</h1>
+  <p class="sub">Each mockup is a self-contained page with a screen switcher in the dark bar at the top (inbox/home, review, thread panel, ⌘K palette, empty state). Same fake data everywhere so you're comparing design, not content. All three are light, Linear-influenced, and shadcn-compatible.</p>
+
+  <a class="card" href="mockup-1-quiet-precision.html">
+    <div class="head">
+      <div class="swatches"><span class="sw" style="background:#fafafa"></span><span class="sw" style="background:#5e5ce6"></span><span class="sw" style="background:#18181b"></span></div>
+      <h2>1 · Quiet Precision</h2>
+      <span class="open">open →</span>
+    </div>
+    <p>The most literal "Linear, but light" take. Dense three-pane layout, zinc neutrals with a single indigo accent, hairline borders, 13px type. Contextual actions appear as a dark floating bar on the hovered diff line; threads open in a Linear-style side peek over the diff. A persistent keyboard-hint bar keeps shortcuts visible.</p>
+    <div class="traits"><span class="trait">densest</span><span class="trait">closest to current layout</span><span class="trait">side peek</span><span class="trait">hover action bar</span><span class="trait">always-visible shortcuts</span></div>
+  </a>
+
+  <a class="card" href="mockup-2-studio.html">
+    <div class="head">
+      <div class="swatches"><span class="sw" style="background:#f8fafc"></span><span class="sw" style="background:#2563eb"></span><span class="sw" style="background:#0f172a"></span></div>
+      <h2>2 · Studio</h2>
+      <span class="open">open →</span>
+    </div>
+    <p>Most "shadcn classic": slate neutrals, blue accent, cards with soft shadows, more whitespace, 14px type. The review is framed like a PR — title header with checks, a Finish-review verdict button, and tabs for Files / Guide / Threads / Activity. Includes a mock of Linear's <b>Guides</b> idea: an AI-grouped walkthrough of the change. Selection gets a floating pill toolbar; threads open in a right-hand sheet.</p>
+    <div class="traits"><span class="trait">most featureful</span><span class="trait">guide tab</span><span class="trait">selection toolbar</span><span class="trait">PR-style header</span><span class="trait">maps 1:1 to shadcn components</span></div>
+  </a>
+
+  <a class="card" href="mockup-3-paper.html">
+    <div class="head">
+      <div class="swatches"><span class="sw" style="background:#faf9f7"></span><span class="sw" style="background:#0f766e"></span><span class="sw" style="background:#1c1917"></span></div>
+      <h2>3 · Paper</h2>
+      <span class="open">open →</span>
+    </div>
+    <p>The boldest departure: a warm, document-like reading experience. No persistent sidebar — files live in a summonable panel, viewed-progress is a thin bar under the topbar, and threads sit as <b>margin annotations</b> beside the code (Google-Docs-style) instead of interrupting the diff. A floating bottom command bar shows the actions for whatever you're pointing at.</p>
+    <div class="traits"><span class="trait">calmest</span><span class="trait">margin-note threads</span><span class="trait">floating command bar</span><span class="trait">warm palette</span><span class="trait">reading-first</span></div>
+  </a>
+
+  <div class="section">
+    <h3>Shared across all three</h3>
+    <ul>
+      <li><b>Reviews inbox</b> (Linear's "For me / Created" idea) replacing a bare workspace list — needs-attention grouping, open-thread counts, +/− deltas.</li>
+      <li><b>⌘K command palette</b> with context-aware suggestions and visible key hints (recognition over recall, accelerators for experts).</li>
+      <li><b>Finish review</b> verdict (approve / request changes / comment) and a checks indicator, echoing Linear Diffs' review flow.</li>
+      <li><b>Viewed progress</b> always visible (visibility of system status), live-sync indicator for the SSE connection.</li>
+      <li>Contextual actions on the object, not in global toolbars; <b>esc-closable</b> overlays and labeled destructive-ish actions (user control & freedom).</li>
+      <li>Same severity system (must-fix / suggestion / nit / question) restyled per direction.</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h3>How to choose</h3>
+    <p>They're separable on three axes — <b>density</b> (1 &gt; 2 &gt; 3), <b>feature surface</b> (2 adds the Guide tab and PR framing), and <b>thread placement</b> (inline-card vs sheet vs margin notes). Mixing is cheap at this stage: e.g. mockup 1's density with mockup 3's margin notes, or mockup 2's Guide tab grafted onto either.</p>
+  </div>
+</div>
+</body>
+</html>

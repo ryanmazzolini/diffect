@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffect — Mockup 2 · Studio</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --panel-2: #f1f5f9;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --faint: #94a3b8;
+    --accent: #2563eb;
+    --accent-ink: #1d4ed8;
+    --accent-soft: #eff6ff;
+    --add-bg: #f0fdf4;
+    --add-ink: #15803d;
+    --add-num: #dcfce7;
+    --del-bg: #fef2f2;
+    --del-ink: #b91c1c;
+    --del-num: #fee2e2;
+    --must-fix: #dc2626;
+    --suggestion: #d97706;
+    --nit: #64748b;
+    --question: #7c3aed;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+    --shadow-card: 0 1px 3px rgba(15,23,42,.07), 0 1px 2px rgba(15,23,42,.05);
+    --shadow-lg: 0 20px 50px rgba(15,23,42,.18), 0 4px 14px rgba(15,23,42,.08);
+    --r: 10px;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  kbd {
+    font: 10.5px/1 var(--mono); color: var(--muted); background: var(--panel);
+    border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px;
+    padding: 2px 4px; min-width: 16px; text-align: center; display: inline-block;
+  }
+  .screen { display: none; height: calc(100vh - 44px); overflow-y: auto; position: relative; }
+  body[data-screen="home"]   #screen-home,
+  body[data-screen="files"]  #screen-review,
+  body[data-screen="guide"]  #screen-review,
+  body[data-screen="sheet"]  #screen-review,
+  body[data-screen="palette"]#screen-review,
+  body[data-screen="empty"]  #screen-empty { display: block; }
+  body[data-screen="files"] #tab-files, body[data-screen="sheet"] #tab-files, body[data-screen="palette"] #tab-files { display: block; }
+  body[data-screen="guide"] #tab-guide { display: block; }
+  body[data-screen="guide"] .seg-files { background: transparent; color: var(--muted); box-shadow: none; font-weight: 400; }
+  body[data-screen="guide"] .seg-guide { background: var(--panel); color: var(--ink); box-shadow: var(--shadow-sm); font-weight: 500; }
+  body[data-screen="sheet"] #sheet-overlay { display: block; }
+  body[data-screen="palette"] #palette-overlay { display: flex; }
+  #tab-files, #tab-guide { display: none; }
+
+  .switcher {
+    height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
+    background: #0f172a; color: #cbd5e1; font-size: 12px;
+  }
+  .switcher b { color: #fff; font-weight: 600; margin-right: 8px; }
+  .switcher button {
+    font: inherit; color: #94a3b8; background: transparent; border: 1px solid #334155;
+    border-radius: 99px; padding: 4px 12px; cursor: pointer;
+  }
+  .switcher button.on { color: #fff; background: #334155; border-color: #475569; }
+  .switcher .note { margin-left: auto; color: #64748b; }
+
+  /* ============ app bar ============ */
+  .appbar {
+    height: 54px; display: flex; align-items: center; gap: 12px; padding: 0 20px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14.5px; }
+  .brand .mark {
+    width: 26px; height: 26px; border-radius: 8px; background: var(--accent);
+    color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+  }
+  .ws-switch {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; cursor: pointer; background: var(--panel);
+  }
+  .ws-switch:hover { background: var(--panel-2); }
+  .searchbox {
+    margin-left: auto; display: flex; align-items: center; gap: 8px; width: 280px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; color: var(--faint);
+    font-size: 13px; background: var(--bg); cursor: text;
+  }
+  .searchbox kbd { margin-left: auto; }
+  .avatar-sm { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .live .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel); color: var(--ink);
+    border-radius: 8px; padding: 6px 13px; box-shadow: var(--shadow-sm);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { background: var(--panel-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent-ink); color: #fff; }
+  .btn.primary:hover { background: var(--accent-ink); }
+  .btn.success { background: #16a34a; border-color: #15803d; color: #fff; }
+  .btn.ghost { border-color: transparent; box-shadow: none; color: var(--muted); }
+  .btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
+  .btn.sm { font-size: 12px; padding: 4px 10px; }
+
+  /* ============ home ============ */
+  .home-wrap { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .home-wrap h1 { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+  .home-sub { color: var(--muted); font-size: 13.5px; margin: 4px 0 24px; }
+  .ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-bottom: 36px; }
+  .ws-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+    box-shadow: var(--shadow-card); padding: 16px; cursor: pointer; transition: box-shadow .15s, transform .15s;
+  }
+  .ws-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,.10); transform: translateY(-1px); }
+  .ws-card .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .ws-card .glyph { width: 32px; height: 32px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .ws-card .name { font-weight: 600; font-size: 14.5px; }
+  .ws-card .path { font: 11.5px var(--mono); color: var(--faint); }
+  .ws-card .stats { display: flex; gap: 16px; font-size: 12.5px; color: var(--muted); }
+  .ws-card .stats b { color: var(--ink); font-weight: 600; }
+  .ws-card.new { border-style: dashed; display: flex; align-items: center; justify-content: center; color: var(--muted); box-shadow: none; min-height: 110px; }
+  .section-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .section-h h2 { font-size: 15px; font-weight: 600; }
+  .section-h .n { color: var(--faint); font-size: 12.5px; }
+  .review-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+    box-shadow: var(--shadow-card); padding: 14px 16px; display: flex; align-items: center; gap: 14px;
+    margin-bottom: 10px; cursor: pointer;
+  }
+  .review-card:hover { border-color: var(--border-strong); }
+  .rc-status { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .rc-status.attn { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .rc-status.prog { background: var(--suggestion); box-shadow: 0 0 0 4px #fef3c7; }
+  .rc-status.done { background: #22c55e; box-shadow: 0 0 0 4px #dcfce7; }
+  .review-card .title { font-weight: 550; }
+  .review-card .sub { font-size: 12px; color: var(--muted); margin-top: 1px; display: flex; gap: 10px; }
+  .review-card .sub .mono { font-family: var(--mono); font-size: 11px; }
+  .review-card .right { margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 12.5px; color: var(--muted); flex: none; }
+  .delta .p { color: var(--add-ink); } .delta .m { color: var(--del-ink); }
+  .thread-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 99px; padding: 3px 9px; }
+
+  /* ============ review header ============ */
+  .review-head { background: var(--panel); border-bottom: 1px solid var(--border); padding: 18px 24px 0; position: sticky; top: 54px; z-index: 9; }
+  .rh-inner { max-width: 1180px; margin: 0 auto; }
+  .rh-top { display: flex; align-items: flex-start; gap: 14px; }
+  .rh-top h1 { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+  .rh-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+  .branch { font: 11.5px var(--mono); background: var(--panel-2); border-radius: 6px; padding: 2px 8px; color: var(--ink); }
+  .arrow { color: var(--faint); }
+  .check-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 99px; padding: 3px 10px; background: var(--panel); color: var(--muted); }
+  .check-pill .ok { color: #16a34a; }
+  .rh-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
+  .rh-tabs { display: flex; gap: 4px; margin-top: 14px; }
+  .seg {
+    font-size: 13px; padding: 7px 14px 9px; color: var(--muted); cursor: pointer;
+    border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 7px;
+  }
+  .seg.on { color: var(--ink); font-weight: 550; border-bottom-color: var(--accent); }
+  .seg .badge { font-size: 11px; font-weight: 600; background: var(--panel-2); border-radius: 99px; padding: 1px 7px; color: var(--muted); }
+  .seg .badge.new { background: var(--accent-soft); color: var(--accent-ink); }
+  .progress-strip { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); margin-left: auto; padding-bottom: 8px; }
+  .progress-strip .bar { width: 120px; height: 5px; background: var(--panel-2); border-radius: 99px; overflow: hidden; }
+  .progress-strip .fill { width: 62%; height: 100%; background: var(--accent); }
+
+  /* ============ files tab ============ */
+  .files-layout { max-width: 1180px; margin: 0 auto; display: flex; gap: 24px; padding: 20px 24px 120px; align-items: flex-start; }
+  .outline {
+    width: 250px; flex: none; position: sticky; top: 178px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+    box-shadow: var(--shadow-card); padding: 8px; max-height: calc(100vh - 240px); overflow-y: auto;
+  }
+  .outline .o-head { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; padding: 6px 8px; }
+  .o-file { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+  .o-file:hover { background: var(--panel-2); color: var(--ink); }
+  .o-file.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
+  .o-file .check { color: #16a34a; font-size: 11px; width: 13px; }
+  .o-file .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); margin: 0 3.5px; }
+  .o-file .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .o-file .t { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 99px; padding: 1px 6px; }
+  .o-file.on .t { background: #fff; }
+
+  .file-cards { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+  .file-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+    box-shadow: var(--shadow-card); overflow: hidden;
+  }
+  .fc-head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); background: #fcfdfe;
+    position: sticky; top: 178px; z-index: 5; border-radius: var(--r) var(--r) 0 0;
+  }
+  .fc-head .path { font: 12.5px var(--mono); } .fc-head .path .dir { color: var(--faint); }
+  .fc-head .delta { font: 11px var(--mono); }
+  .fc-head .right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .viewed-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .viewed-check .box { width: 15px; height: 15px; border: 1.5px solid var(--border-strong); border-radius: 5px; }
+  .viewed-check.checked { color: #16a34a; }
+  .viewed-check.checked .box { background: #16a34a; border-color: #16a34a; color: #fff; font-size: 10px; line-height: 14px; text-align: center; }
+
+  table.diff { width: 100%; border-collapse: collapse; font: 12.5px/1.6 var(--mono); }
+  .diff td { vertical-align: top; }
+  .diff .num { width: 46px; min-width: 46px; text-align: right; padding-right: 10px; color: var(--faint); user-select: none; font-size: 11px; }
+  .diff .sign { width: 20px; min-width: 20px; text-align: center; color: var(--faint); user-select: none; }
+  .diff .code { white-space: pre; padding-right: 14px; }
+  tr.add { background: var(--add-bg); } tr.add .num { background: var(--add-num); color: var(--add-ink); } tr.add .sign { color: var(--add-ink); }
+  tr.del { background: var(--del-bg); } tr.del .num { background: var(--del-num); color: var(--del-ink); } tr.del .sign { color: var(--del-ink); }
+  tr.hunk td { background: var(--panel-2); color: var(--faint); font-size: 11px; padding: 4px 14px; }
+  tr.hunk .unfold { color: var(--accent-ink); cursor: pointer; margin-right: 10px; }
+  .tok-kw { color: #9333ea; } .tok-fn { color: #2563eb; } .tok-str { color: #15803d; } .tok-cm { color: var(--faint); font-style: italic; } .tok-ty { color: #0d9488; }
+
+  /* selection + floating toolbar */
+  tr.selected { background: #dbeafe; }
+  tr.selected .num { background: #bfdbfe; color: var(--accent-ink); }
+  .sel-toolbar-row td { padding: 0; }
+  .sel-toolbar {
+    display: inline-flex; align-items: center; gap: 2px; margin: 6px 0 6px 70px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 99px;
+    padding: 4px; box-shadow: var(--shadow-lg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .sel-toolbar button {
+    font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 500; color: var(--ink);
+    background: transparent; border: 0; border-radius: 99px; padding: 5px 12px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sel-toolbar button:hover { background: var(--panel-2); }
+  .sel-toolbar button.cta { background: var(--accent); color: #fff; }
+  .sel-toolbar .vr { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+  .sel-note { font: 11.5px -apple-system, sans-serif; color: var(--faint); margin-left: 10px; }
+
+  /* inline thread (card style) */
+  .inline-thread-row td { padding: 0; }
+  .inline-thread {
+    margin: 8px 16px 12px 70px; max-width: 640px;
+    border: 1px solid var(--border); border-left: 3px solid var(--suggestion);
+    border-radius: var(--r); background: var(--panel); box-shadow: var(--shadow-card); overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .it-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px 0; }
+  .sev { font-size: 11px; font-weight: 600; border-radius: 99px; padding: 2px 9px; }
+  .sev.must-fix { color: var(--must-fix); background: #fee2e2; }
+  .sev.suggestion { color: var(--suggestion); background: #fef3c7; }
+  .sev.question { color: var(--question); background: #f3e8ff; }
+  .it-head .who { font-size: 12.5px; color: var(--muted); }
+  .it-head .who b { color: var(--ink); }
+  .it-head .open-panel { margin-left: auto; }
+  .it-body { padding: 8px 14px 12px; font-size: 13px; line-height: 1.55; }
+  .it-body code { font: 11.5px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
+  .it-actions { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px; }
+  .reaction { font-size: 11.5px; border: 1px solid var(--border); border-radius: 99px; padding: 2px 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
+
+  /* ============ guide tab ============ */
+  .guide-layout { max-width: 860px; margin: 0 auto; padding: 24px 24px 120px; }
+  .guide-intro {
+    background: linear-gradient(135deg, #eff6ff, #f5f3ff); border: 1px solid #dbeafe;
+    border-radius: var(--r); padding: 16px 18px; margin-bottom: 22px; display: flex; gap: 12px;
+  }
+  .guide-intro .spark { font-size: 18px; }
+  .guide-intro p { font-size: 13.5px; color: #1e3a8a; line-height: 1.55; }
+  .guide-intro .gen { font-size: 11.5px; color: #60a5fa; margin-top: 4px; }
+  .guide-section { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-card); margin-bottom: 16px; overflow: hidden; }
+  .gs-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; }
+  .gs-head .n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+  .gs-head h3 { font-size: 14px; font-weight: 600; }
+  .gs-head .kind { font-size: 11px; font-weight: 600; border-radius: 99px; padding: 2px 8px; }
+  .kind.core { color: var(--accent-ink); background: var(--accent-soft); }
+  .kind.support { color: var(--muted); background: var(--panel-2); }
+  .gs-head .tri { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .gs-body { padding: 0 16px 14px 48px; }
+  .gs-body p { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+  .gs-files { display: flex; flex-wrap: wrap; gap: 6px; }
+  .gs-file {
+    display: inline-flex; align-items: center; gap: 6px; font: 11.5px var(--mono);
+    border: 1px solid var(--border); border-radius: 7px; padding: 4px 9px; cursor: pointer; background: var(--bg);
+  }
+  .gs-file:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .gs-file .d { font-size: 10.5px; }
+  .gs-file .d .p { color: var(--add-ink); } .gs-file .d .m { color: var(--del-ink); }
+
+  /* ============ sheet ============ */
+  #sheet-overlay { display: none; position: fixed; inset: 44px 0 0 0; z-index: 40; }
+  .sheet-scrim { position: absolute; inset: 0; background: rgba(15,23,42,.20); }
+  .sheet {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 440px; background: var(--panel);
+    border-left: 1px solid var(--border); box-shadow: -16px 0 48px rgba(15,23,42,.14);
+    display: flex; flex-direction: column;
+  }
+  .sheet-head { display: flex; align-items: center; gap: 9px; padding: 16px 18px 10px; }
+  .sheet-head h3 { font-size: 14.5px; font-weight: 650; }
+  .sheet-head .nav { margin-left: auto; display: flex; gap: 2px; }
+  .sheet-loc {
+    margin: 0 18px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+    padding: 8px 12px; font: 11.5px var(--mono); color: var(--muted); display: flex; align-items: center; gap: 8px;
+  }
+  .sheet-loc .jump { margin-left: auto; font-family: -apple-system, sans-serif; color: var(--accent-ink); cursor: pointer; font-size: 12px; }
+  .sheet-body { flex: 1; overflow-y: auto; padding: 6px 18px; display: flex; flex-direction: column; gap: 16px; }
+  .comment { display: flex; gap: 10px; }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; color: #fff; }
+  .avatar.you { background: var(--accent); } .avatar.agent { background: #0d9488; }
+  .c-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+  .c-meta .name { font-weight: 600; font-size: 13px; } .c-meta .when { font-size: 11.5px; color: var(--faint); }
+  .c-text { font-size: 13px; line-height: 1.55; }
+  .c-text code { font: 11.5px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
+  .sheet-compose { padding: 14px 18px; border-top: 1px solid var(--border); }
+  .compose-box { border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-sm); }
+  .compose-box textarea { width: 100%; border: 0; resize: none; font: 13px -apple-system, sans-serif; padding: 10px 12px; height: 64px; outline: none; }
+  .compose-foot { display: flex; align-items: center; gap: 6px; padding: 7px 9px; background: var(--bg); border-top: 1px solid var(--border); }
+  .compose-foot .send { margin-left: auto; display: flex; gap: 7px; }
+
+  /* ============ palette ============ */
+  #palette-overlay { display: none; position: fixed; inset: 44px 0 0 0; z-index: 50; align-items: flex-start; justify-content: center; }
+  .palette-scrim { position: absolute; inset: 0; background: rgba(15,23,42,.30); }
+  .palette {
+    position: relative; margin-top: 11vh; width: 580px; max-width: 92vw; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .palette-input { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .palette-input input { flex: 1; border: 0; outline: 0; font: 14.5px -apple-system, sans-serif; }
+  .palette-list { max-height: 380px; overflow-y: auto; padding: 8px; }
+  .palette-group { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; padding: 10px 12px 4px; }
+  .palette-item { display: flex; align-items: center; gap: 11px; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+  .palette-item:hover { background: var(--panel-2); }
+  .palette-item.selected { background: var(--accent-soft); }
+  .palette-item .glyph { width: 18px; text-align: center; color: var(--muted); }
+  .palette-item .desc { color: var(--faint); font-size: 12px; }
+  .palette-item .keys { margin-left: auto; display: flex; gap: 3px; }
+  .palette-foot { display: flex; gap: 16px; padding: 9px 16px; border-top: 1px solid var(--border); background: var(--bg); font-size: 11.5px; color: var(--faint); }
+
+  /* ============ empty ============ */
+  #screen-empty { display: none; }
+  .empty-wrap { height: 100%; display: flex; align-items: center; justify-content: center; position: relative; }
+  .empty-card { text-align: center; max-width: 400px; opacity: .35; }
+  .empty-card .art { width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 18px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; box-shadow: var(--shadow-card); }
+  .empty-card h2 { font-size: 18px; font-weight: 650; margin-bottom: 8px; }
+  .empty-card p { color: var(--muted); margin-bottom: 20px; }
+  .dialog {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 520px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .dialog-head { padding: 18px 20px 6px; }
+  .dialog-head h3 { font-size: 15.5px; font-weight: 650; }
+  .dialog-head p { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .dialog-body { padding: 14px 20px 18px; }
+  .path-input { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 9px; padding: 9px 12px; font: 12.5px var(--mono); box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+  .path-input .ph { color: var(--faint); }
+  .recent-label { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+  .recent-item { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; }
+  .recent-item:hover { background: var(--bg); border-color: var(--border); }
+  .recent-item .glyph { width: 30px; height: 30px; border-radius: 8px; background: var(--panel-2); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  .recent-item .name { font-weight: 550; font-size: 13px; }
+  .recent-item .path { font: 11px var(--mono); color: var(--faint); }
+  .recent-item .when { margin-left: auto; font-size: 12px; color: var(--faint); }
+  .dialog-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border); background: var(--bg); }
+</style>
+</head>
+<body data-screen="files">
+
+<div class="switcher">
+  <b>Mockup 2 · Studio</b>
+  <button data-s="home">1 Home</button>
+  <button data-s="files" class="on">2 Files</button>
+  <button data-s="guide">3 Guide</button>
+  <button data-s="sheet">4 Thread sheet</button>
+  <button data-s="palette">5 ⌘K palette</button>
+  <button data-s="empty">6 Empty state</button>
+  <span class="note">switcher is a mockup aid, not part of the design</span>
+</div>
+
+<!-- ===================== HOME ===================== -->
+<div class="screen" id="screen-home">
+  <div class="appbar">
+    <div class="brand"><span class="mark">d</span>diffect</div>
+    <div class="searchbox">⌕ Search reviews, files, threads… <kbd>⌘K</kbd></div>
+    <span class="live"><span class="dot"></span>live</span>
+    <div class="avatar-sm">R</div>
+  </div>
+  <div class="home-wrap">
+    <h1>Good morning</h1>
+    <div class="home-sub">2 reviews need your attention across 2 workspaces.</div>
+
+    <div class="ws-grid">
+      <div class="ws-card">
+        <div class="head"><span class="glyph">▣</span><div><div class="name">diffect</div><div class="path">~/code/diffect · 3 repos</div></div></div>
+        <div class="stats"><span><b>2</b> active reviews</span><span><b>4</b> open threads</span><span><b>+600 −136</b></span></div>
+      </div>
+      <div class="ws-card">
+        <div class="head"><span class="glyph">▣</span><div><div class="name">side-projects</div><div class="path">~/code/side-projects · 5 repos</div></div></div>
+        <div class="stats"><span><b>1</b> active review</span><span><b>0</b> open threads</span><span><b>+57 −112</b></span></div>
+      </div>
+      <div class="ws-card new">＋ Add workspace</div>
+    </div>
+
+    <div class="section-h"><h2>Needs attention</h2><span class="n">sorted by activity</span></div>
+    <div class="review-card">
+      <span class="rc-status attn"></span>
+      <div>
+        <div class="title">Re-anchor threads when hunks move</div>
+        <div class="sub"><span class="mono">work · main…HEAD+unstaged</span><span>diffect</span><span>updated 12m ago</span></div>
+      </div>
+      <div class="right">
+        <span class="delta"><span class="p">+412</span> <span class="m">−96</span> · 8 files</span>
+        <span class="thread-pill">◉ 3 open</span>
+        <button class="btn sm primary">Resume</button>
+      </div>
+    </div>
+    <div class="review-card">
+      <span class="rc-status prog"></span>
+      <div>
+        <div class="title">Sidebar virtualization for large repos</div>
+        <div class="sub"><span class="mono">feat/virtual-tree…main</span><span>diffect</span><span>updated 2h ago</span></div>
+      </div>
+      <div class="right">
+        <span class="delta"><span class="p">+188</span> <span class="m">−40</span> · 4 files</span>
+        <span class="thread-pill">◉ 1 open</span>
+        <button class="btn sm">Open</button>
+      </div>
+    </div>
+    <div class="section-h" style="margin-top:24px"><h2>Recently completed</h2></div>
+    <div class="review-card" style="opacity:.7">
+      <span class="rc-status done"></span>
+      <div>
+        <div class="title">Migrate config loader to zod</div>
+        <div class="sub"><span class="mono">staged</span><span>side-projects</span><span>finished yesterday</span></div>
+      </div>
+      <div class="right"><span>all threads resolved</span><button class="btn sm ghost">View</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== REVIEW (files + guide tabs) ===================== -->
+<div class="screen" id="screen-review">
+  <div class="appbar">
+    <div class="brand"><span class="mark">d</span>diffect</div>
+    <div class="ws-switch">▣ diffect ▾</div>
+    <div class="searchbox">⌕ Search… <kbd>⌘K</kbd></div>
+    <span class="live"><span class="dot"></span>live</span>
+    <div class="avatar-sm">R</div>
+  </div>
+
+  <div class="review-head">
+    <div class="rh-inner">
+      <div class="rh-top">
+        <div>
+          <h1>Re-anchor threads when hunks move</h1>
+          <div class="rh-meta">
+            <span class="branch">main</span><span class="arrow">←</span><span class="branch">HEAD + unstaged</span>
+            <span class="check-pill"><span class="ok">●</span> checks 4/4</span>
+            <span>8 files · <span style="color:var(--add-ink)">+412</span> <span style="color:var(--del-ink)">−96</span></span>
+          </div>
+        </div>
+        <div class="rh-actions">
+          <button class="btn">Unified ▾</button>
+          <button class="btn success">Finish review ▾</button>
+        </div>
+      </div>
+      <div class="rh-tabs">
+        <span class="seg on seg-files">Files <span class="badge">8</span></span>
+        <span class="seg seg-guide">✦ Guide <span class="badge new">new</span></span>
+        <span class="seg">Threads <span class="badge">4</span></span>
+        <span class="seg">Activity</span>
+        <div class="progress-strip"><span>5 of 8 viewed</span><div class="bar"><div class="fill"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FILES TAB -->
+  <div id="tab-files">
+    <div class="files-layout">
+      <div class="outline">
+        <div class="o-head">Changed files</div>
+        <div class="o-file"><span class="check">✓</span><span class="name">anchor.ts</span></div>
+        <div class="o-file on"><span class="dot"></span><span class="name">reanchor.ts</span><span class="t">2</span></div>
+        <div class="o-file"><span class="check">✓</span><span class="name">event-log.ts</span></div>
+        <div class="o-file"><span class="dot"></span><span class="name">DiffView.tsx</span><span class="t">1</span></div>
+        <div class="o-file"><span class="check">✓</span><span class="name">ThreadList.tsx</span></div>
+        <div class="o-file"><span class="check">✓</span><span class="name">Sidebar.tsx</span></div>
+        <div class="o-file"><span class="check">✓</span><span class="name">index.ts</span></div>
+        <div class="o-file"><span class="dot"></span><span class="name">anchors.test.ts</span></div>
+        <div style="padding: 10px 8px 4px; border-top: 1px solid var(--border); margin-top: 8px; display:flex; gap:6px; align-items:center; font-size:11.5px; color:var(--faint);">
+          <kbd>j</kbd><kbd>k</kbd> next / prev file
+        </div>
+      </div>
+
+      <div class="file-cards">
+        <div class="file-card">
+          <div class="fc-head">
+            <span class="path"><span class="dir">packages/core/src/reviews/</span>reanchor.ts</span>
+            <span class="delta"><span style="color:var(--add-ink)">+124</span> <span style="color:var(--del-ink)">−31</span></span>
+            <div class="right">
+              <div class="viewed-check"><span class="box"></span>Viewed</div>
+              <button class="btn ghost sm">⋯</button>
+            </div>
+          </div>
+          <table class="diff">
+            <tr class="hunk"><td colspan="3"><span class="unfold">⌃ Expand 24 lines</span>@@ -118,9 +118,21 @@</td></tr>
+            <tr><td class="num">118</td><td class="sign"></td><td class="code"><span class="tok-kw">export function</span> <span class="tok-fn">reanchorThread</span>(thread: <span class="tok-ty">Thread</span>, diff: <span class="tok-ty">FileDiff</span>): <span class="tok-ty">AnchorResult</span> {</td></tr>
+            <tr class="del"><td class="num">120</td><td class="sign">−</td><td class="code">  <span class="tok-kw">if</span> (!anchor) <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span> };</td></tr>
+            <tr class="add"><td class="num">120</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (!anchor) <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span>, reason: <span class="tok-str">'missing-anchor'</span> };</td></tr>
+            <tr class="add selected"><td class="num">123</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> exact = <span class="tok-fn">matchContext</span>(anchor.context, diff.newLines, { fuzz: <span class="tok-str">0</span> });</td></tr>
+            <tr class="add selected"><td class="num">124</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (exact) <span class="tok-kw">return</span> { state: <span class="tok-str">'active'</span>, line: exact.line };</td></tr>
+            <tr class="sel-toolbar-row"><td colspan="3">
+              <div class="sel-toolbar">
+                <button class="cta">💬 Comment <kbd style="background:#fff2;border-color:#fff4;color:#fff">c</kbd></button>
+                <button>Suggest change</button>
+                <div class="vr"></div>
+                <button>✦ Explain</button>
+                <button>🔗</button>
+              </div>
+              <span class="sel-note">2 lines selected — drag line numbers to adjust</span>
+            </td></tr>
+            <tr class="add"><td class="num">126</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> fuzzy = <span class="tok-fn">matchContext</span>(anchor.context, diff.newLines, { fuzz: <span class="tok-str">2</span> });</td></tr>
+            <tr class="inline-thread-row"><td colspan="3">
+              <div class="inline-thread">
+                <div class="it-head">
+                  <span class="sev question" style="color:var(--question);background:#f3e8ff">question</span>
+                  <span class="who"><b>pi</b> · agent · 24m ago · 2 replies</span>
+                  <button class="btn ghost sm open-panel">Open ⤢</button>
+                </div>
+                <div class="it-body">Should fuzz radius be configurable per-workspace? A hard-coded <code>2</code> may be too tight for generated files.</div>
+                <div class="it-actions">
+                  <span class="reaction">👍 1</span>
+                  <button class="btn ghost sm">Reply</button>
+                  <button class="btn ghost sm">Resolve ✓</button>
+                </div>
+              </div>
+            </td></tr>
+            <tr class="add"><td class="num">127</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (fuzzy) <span class="tok-kw">return</span> { state: <span class="tok-str">'active'</span>, line: fuzzy.line, fuzzed: <span class="tok-kw">true</span> };</td></tr>
+            <tr class="add"><td class="num">129</td><td class="sign">+</td><td class="code">  <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span>, reason: <span class="tok-str">'context-moved'</span> };</td></tr>
+            <tr><td class="num">130</td><td class="sign"></td><td class="code">}</td></tr>
+          </table>
+        </div>
+
+        <div class="file-card">
+          <div class="fc-head">
+            <span class="path"><span class="dir">packages/core/src/reviews/</span>event-log.ts</span>
+            <span class="delta"><span style="color:var(--add-ink)">+18</span> <span style="color:var(--del-ink)">−4</span></span>
+            <div class="right">
+              <div class="viewed-check checked"><span class="box">✓</span>Viewed</div>
+              <button class="btn ghost sm">⋯</button>
+            </div>
+          </div>
+          <table class="diff" style="opacity:.55">
+            <tr class="hunk"><td colspan="3">@@ -42,4 +42,8 @@ <span style="color:var(--muted)">— collapsed (viewed)</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GUIDE TAB -->
+  <div id="tab-guide">
+    <div class="guide-layout">
+      <div class="guide-intro">
+        <span class="spark">✦</span>
+        <div>
+          <p>This change makes review threads survive code movement. The core is a new two-pass matcher in <b>reanchor.ts</b> — exact context match first, fuzzy fallback second — with everything else wiring results through the event log and into the UI.</p>
+          <div class="gen">Generated from the diff · regenerate ↻</div>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <div class="gs-head"><span class="n">1</span><h3>Two-pass anchor matching</h3><span class="kind core">core</span><span class="tri">▼</span></div>
+        <div class="gs-body">
+          <p>Replaces the single strict match with exact-then-fuzzy passes. Stale results now carry a <b>reason</b> (<code style="font-family:var(--mono)">missing-anchor</code>, <code style="font-family:var(--mono)">context-moved</code>) so the UI can explain <i>why</i> a thread detached instead of silently flagging it.</p>
+          <div class="gs-files">
+            <span class="gs-file">reanchor.ts <span class="d"><span class="p">+124</span> <span class="m">−31</span></span></span>
+            <span class="gs-file">anchor.ts <span class="d"><span class="p">+86</span></span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <div class="gs-head"><span class="n">2</span><h3>Persisting re-anchor results</h3><span class="kind core">core</span><span class="tri">▼</span></div>
+        <div class="gs-body">
+          <p>Anchor transitions are appended to the event log as <code style="font-family:var(--mono)">thread.reanchored</code> events, keeping CLI, agents, and the browser in sync through the same append-only stream.</p>
+          <div class="gs-files">
+            <span class="gs-file">event-log.ts <span class="d"><span class="p">+18</span> <span class="m">−4</span></span></span>
+            <span class="gs-file">index.ts <span class="d"><span class="p">+14</span></span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <div class="gs-head"><span class="n">3</span><h3>Surfacing anchor state in the UI</h3><span class="kind support">supporting</span><span class="tri">▼</span></div>
+        <div class="gs-body">
+          <p>Diff and thread components read the new anchor state to show "moved here" markers and stale-reason tooltips. Mostly mechanical prop-threading.</p>
+          <div class="gs-files">
+            <span class="gs-file">DiffView.tsx <span class="d"><span class="p">+96</span> <span class="m">−41</span></span></span>
+            <span class="gs-file">ThreadList.tsx <span class="d"><span class="p">+22</span> <span class="m">−9</span></span></span>
+            <span class="gs-file">Sidebar.tsx <span class="d"><span class="p">+31</span> <span class="m">−2</span></span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <div class="gs-head"><span class="n">4</span><h3>Test coverage</h3><span class="kind support">supporting</span><span class="tri">▶</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHEET overlay -->
+  <div id="sheet-overlay">
+    <div class="sheet-scrim"></div>
+    <div class="sheet">
+      <div class="sheet-head">
+        <span class="sev question" style="font-size:11px;font-weight:600;border-radius:99px;padding:2px 9px;color:var(--question);background:#f3e8ff">question</span>
+        <h3>Fuzz radius configurability</h3>
+        <div class="nav">
+          <button class="btn ghost sm" title="Previous thread">↑</button>
+          <button class="btn ghost sm" title="Next thread">↓</button>
+          <button class="btn ghost sm" title="Close (esc)">✕</button>
+        </div>
+      </div>
+      <div class="sheet-loc">reanchor.ts:126 · anchor <b style="color:var(--add-ink)">active</b><span class="jump">Jump to line ↗</span></div>
+      <div class="sheet-body">
+        <div class="comment">
+          <div class="avatar agent">pi</div>
+          <div>
+            <div class="c-meta"><span class="name">pi</span><span class="when">agent · 24m ago</span></div>
+            <div class="c-text">Should fuzz radius be configurable per-workspace? A hard-coded <code>2</code> may be too tight for generated files.</div>
+          </div>
+        </div>
+        <div class="comment">
+          <div class="avatar you">R</div>
+          <div>
+            <div class="c-meta"><span class="name">you</span><span class="when">9m ago</span></div>
+            <div class="c-text">Good catch — thinking of threading it through <code>ReviewConfig</code>. Will follow up in a separate change.</div>
+          </div>
+        </div>
+      </div>
+      <div class="sheet-compose">
+        <div class="compose-box">
+          <textarea placeholder="Reply… markdown supported, drag images here"></textarea>
+          <div class="compose-foot">
+            <button class="btn ghost sm">🖼</button>
+            <button class="btn ghost sm">Preview</button>
+            <div class="send">
+              <button class="btn sm">Resolve ✓</button>
+              <button class="btn sm primary">Reply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PALETTE overlay -->
+  <div id="palette-overlay">
+    <div class="palette-scrim"></div>
+    <div class="palette">
+      <div class="palette-input"><span style="color:var(--faint)">⌕</span><input placeholder="Type a command or search…"></div>
+      <div class="palette-list">
+        <div class="palette-group">Suggestions</div>
+        <div class="palette-item selected"><span class="glyph">⏎</span>Finish review: Approve<span class="keys"><kbd>⌘</kbd><kbd>⏎</kbd></span></div>
+        <div class="palette-item"><span class="glyph">✕</span>Finish review: Request changes</div>
+        <div class="palette-item"><span class="glyph">✦</span>Open Guide<span class="desc">structured walkthrough of this change</span><span class="keys"><kbd>g</kbd><kbd>g</kbd></span></div>
+        <div class="palette-group">View</div>
+        <div class="palette-item"><span class="glyph">⫝</span>Switch to split view<span class="keys"><kbd>⌘</kbd><kbd>B</kbd></span></div>
+        <div class="palette-item"><span class="glyph">◉</span>Show open threads only<span class="keys"><kbd>f</kbd><kbd>o</kbd></span></div>
+        <div class="palette-item"><span class="glyph">▦</span>Collapse viewed files</div>
+        <div class="palette-group">Go to file</div>
+        <div class="palette-item"><span class="glyph">📄</span>reanchor.ts<span class="desc">2 open threads · not viewed</span></div>
+        <div class="palette-item"><span class="glyph">📄</span>DiffView.tsx<span class="desc">1 open thread</span></div>
+      </div>
+      <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>⏎</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== EMPTY ===================== -->
+<div class="screen" id="screen-empty">
+  <div class="empty-wrap">
+    <div class="empty-card">
+      <div class="art">d</div>
+      <h2>No workspaces yet</h2>
+      <p>Point diffect at a folder of git repositories to start reviewing local changes — no server, no signup.</p>
+      <button class="btn primary">Add workspace</button>
+    </div>
+    <div class="dialog">
+      <div class="dialog-head">
+        <h3>Add workspace</h3>
+        <p>Choose a folder that contains one or more git repositories.</p>
+      </div>
+      <div class="dialog-body">
+        <div class="path-input">📁 <span>~/code/</span><span class="ph">type or browse…</span></div>
+        <div class="recent-label">Recent projects</div>
+        <div class="recent-item"><span class="glyph">▣</span><div><div class="name">diffect</div><div class="path">~/code/diffect</div></div><span class="when">today</span></div>
+        <div class="recent-item"><span class="glyph">▣</span><div><div class="name">side-projects</div><div class="path">~/code/side-projects</div></div><span class="when">2d ago</span></div>
+        <div class="recent-item"><span class="glyph">▣</span><div><div class="name">dotfiles</div><div class="path">~/dotfiles</div></div><span class="when">1w ago</span></div>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn">Cancel</button>
+        <button class="btn primary">Add workspace</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.switcher button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.body.dataset.screen = b.dataset.s;
+      document.querySelectorAll('.switcher button').forEach(x => x.classList.toggle('on', x === b));
+    });
+  });
+</script>
+</body>
+</html>

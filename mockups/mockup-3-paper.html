@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffect — Mockup 3 · Paper</title>
+<style>
+  :root {
+    --bg: #faf9f7;
+    --panel: #ffffff;
+    --panel-2: #f3f1ed;
+    --border: #e8e5e0;
+    --border-strong: #d6d2cb;
+    --ink: #1c1917;
+    --muted: #78716c;
+    --faint: #a8a29e;
+    --accent: #0f766e;
+    --accent-ink: #115e59;
+    --accent-soft: #f0fdfa;
+    --accent-soft-2: #ccfbf1;
+    --add-bg: #f1f8f1;
+    --add-ink: #3f6212;
+    --add-num: #e3efdc;
+    --del-bg: #fbf1ef;
+    --del-ink: #9f1239;
+    --del-num: #f6e0dc;
+    --must-fix: #be123c;
+    --suggestion: #b45309;
+    --nit: #78716c;
+    --question: #6d28d9;
+    --shadow-sm: 0 1px 2px rgba(28,25,23,.05);
+    --shadow-md: 0 4px 18px rgba(28,25,23,.07), 0 1px 3px rgba(28,25,23,.05);
+    --shadow-lg: 0 20px 56px rgba(28,25,23,.16), 0 4px 14px rgba(28,25,23,.07);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  kbd {
+    font: 10.5px/1 var(--mono); color: var(--muted); background: var(--panel);
+    border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px;
+    padding: 2px 4px; min-width: 16px; text-align: center; display: inline-block;
+  }
+  .screen { display: none; height: calc(100vh - 44px); overflow-y: auto; position: relative; }
+  body[data-screen="home"]    #screen-home,
+  body[data-screen="review"]  #screen-review,
+  body[data-screen="files"]   #screen-review,
+  body[data-screen="palette"] #screen-review,
+  body[data-screen="empty"]   #screen-empty { display: block; }
+  body[data-screen="files"]   #files-overlay { display: block; }
+  body[data-screen="palette"] #palette-overlay { display: flex; }
+
+  .switcher {
+    height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
+    background: #1c1917; color: #d6d3d1; font-size: 12px;
+  }
+  .switcher b { color: #fff; font-weight: 600; margin-right: 8px; }
+  .switcher button {
+    font: inherit; color: #a8a29e; background: transparent; border: 1px solid #44403c;
+    border-radius: 99px; padding: 4px 12px; cursor: pointer;
+  }
+  .switcher button.on { color: #fff; background: #44403c; border-color: #57534e; }
+  .switcher .note { margin-left: auto; color: #78716c; }
+
+  /* ============ minimal top bar ============ */
+  .topbar {
+    height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 20px;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .wordmark { font-weight: 650; font-size: 14px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+  .wordmark .tilde { color: var(--accent); font-size: 16px; }
+  .bc { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+  .bc .sep { color: var(--faint); }
+  .bc .seg { padding: 3px 7px; border-radius: 6px; cursor: pointer; }
+  .bc .seg:hover { background: var(--panel-2); }
+  .bc .seg.current { color: var(--ink); font-weight: 550; }
+  .bc .caret { font-size: 9px; color: var(--faint); }
+  .top-right { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--muted); }
+  .sync { display: flex; align-items: center; gap: 6px; }
+  .sync .dot { width: 7px; height: 7px; border-radius: 50%; background: #4d7c0f; }
+  .top-progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: transparent; }
+  .top-progress .fill { width: 62%; height: 100%; background: var(--accent); border-radius: 0 2px 2px 0; }
+
+  .btn {
+    font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--ink);
+    border-radius: 8px; padding: 5px 12px; box-shadow: var(--shadow-sm);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { background: var(--panel-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent-ink); color: #fff; }
+  .btn.primary:hover { background: var(--accent-ink); }
+  .btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted); }
+  .btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
+  .btn.sm { font-size: 11.5px; padding: 3px 9px; }
+
+  /* ============ home (reading list) ============ */
+  .home-wrap { max-width: 720px; margin: 0 auto; padding: 48px 24px 120px; }
+  .home-wrap h1 { font-size: 22px; font-weight: 650; letter-spacing: -.015em; margin-bottom: 4px; }
+  .home-sub { color: var(--muted); margin-bottom: 36px; }
+  .home-section { margin-bottom: 36px; }
+  .home-section h2 {
+    font-size: 11.5px; font-weight: 650; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .07em; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .read-row {
+    display: flex; align-items: baseline; gap: 12px; padding: 12px 4px; cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .read-row:hover { background: var(--panel); margin: 0 -12px; padding: 12px 16px; border-radius: 10px; border-bottom-color: transparent; box-shadow: var(--shadow-md); }
+  .read-row .mark { font-size: 11px; flex: none; width: 14px; }
+  .mark.attn { color: var(--accent); } .mark.prog { color: var(--suggestion); } .mark.done { color: #4d7c0f; }
+  .read-row .title { font-weight: 550; font-size: 14.5px; }
+  .read-row .target { font: 11px var(--mono); color: var(--faint); margin-left: 2px; }
+  .read-row .meta { margin-left: auto; flex: none; font-size: 12px; color: var(--faint); display: flex; gap: 14px; }
+  .read-row .meta .open-t { color: var(--accent-ink); font-weight: 550; }
+  .home-foot { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 12px; margin-top: 28px; }
+
+  /* ============ review: document layout ============ */
+  .doc { max-width: 1240px; margin: 0 auto; padding: 28px 24px 160px; display: flex; gap: 28px; }
+  .doc-main { flex: 1; min-width: 0; max-width: 820px; margin: 0 auto; }
+  .doc-margin { width: 300px; flex: none; position: relative; }
+
+  .change-title { margin-bottom: 6px; font-size: 19px; font-weight: 650; letter-spacing: -.015em; }
+  .change-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; margin-bottom: 34px; flex-wrap: wrap; }
+  .change-meta .mono { font: 11px var(--mono); background: var(--panel-2); padding: 2px 8px; border-radius: 6px; color: var(--ink); }
+  .change-meta .ok { color: #4d7c0f; }
+
+  .file-section { margin-bottom: 44px; }
+  .fs-head {
+    display: flex; align-items: baseline; gap: 10px; padding-bottom: 8px; margin-bottom: 2px;
+    border-bottom: 1px solid var(--border); position: sticky; top: 48px; background: var(--bg); z-index: 5; padding-top: 8px;
+  }
+  .fs-head .path { font: 13px var(--mono); font-weight: 600; }
+  .fs-head .path .dir { color: var(--faint); font-weight: 400; }
+  .fs-head .delta { font: 11px var(--mono); color: var(--faint); }
+  .fs-head .delta .p { color: var(--add-ink); } .fs-head .delta .m { color: var(--del-ink); }
+  .fs-head .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .viewed-toggle { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+  .viewed-toggle .box { width: 14px; height: 14px; border: 1.5px solid var(--border-strong); border-radius: 4px; background: var(--panel); }
+  .viewed-toggle.checked { color: #4d7c0f; }
+  .viewed-toggle.checked .box { background: #4d7c0f; border-color: #4d7c0f; color: #fff; font-size: 10px; line-height: 13px; text-align: center; }
+
+  .diff-block { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-sm); margin-top: 12px; }
+  table.diff { width: 100%; border-collapse: collapse; font: 12.5px/1.65 var(--mono); }
+  .diff td { vertical-align: top; }
+  .diff .num { width: 44px; min-width: 44px; text-align: right; padding-right: 10px; color: var(--faint); user-select: none; font-size: 10.5px; }
+  .diff .sign { width: 18px; min-width: 18px; text-align: center; color: var(--faint); user-select: none; }
+  .diff .code { white-space: pre; padding-right: 14px; }
+  tr.add { background: var(--add-bg); } tr.add .num { background: var(--add-num); color: var(--add-ink); } tr.add .sign { color: var(--add-ink); }
+  tr.del { background: var(--del-bg); } tr.del .num { background: var(--del-num); color: var(--del-ink); } tr.del .sign { color: var(--del-ink); }
+  tr.hunk td { background: var(--panel-2); color: var(--faint); font-size: 10.5px; padding: 3px 14px; }
+  tr.hunk .unfold { color: var(--accent-ink); cursor: pointer; margin-right: 10px; }
+  .tok-kw { color: #7e22ce; } .tok-fn { color: #1d4ed8; } .tok-str { color: #3f6212; } .tok-cm { color: var(--faint); font-style: italic; } .tok-ty { color: #0f766e; }
+
+  /* annotated line: connects to margin note */
+  tr.annotated { background: var(--accent-soft); }
+  tr.annotated .num { background: var(--accent-soft-2); color: var(--accent-ink); }
+  tr.annotated .code { position: relative; }
+  .anno-tick {
+    position: absolute; right: 0; top: 4px; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--panel);
+  }
+  tr.line-hover { background: #fdfcf9; }
+  tr.line-hover .num { color: var(--accent-ink); font-weight: 700; }
+  .gutter-plus {
+    display: inline-flex; width: 16px; height: 16px; border-radius: 5px; background: var(--accent);
+    color: #fff; align-items: center; justify-content: center; font-size: 11px; vertical-align: -3px;
+    margin-right: 6px; cursor: pointer; box-shadow: var(--shadow-sm);
+  }
+
+  /* ============ margin notes ============ */
+  .margin-note {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-md); padding: 12px 14px; margin-bottom: 14px; position: relative;
+    font-size: 12.5px; cursor: pointer; transition: box-shadow .15s;
+  }
+  .margin-note:hover { box-shadow: var(--shadow-lg); }
+  .margin-note.focused { border-color: var(--accent); }
+  .margin-note.focused::before {
+    content: ""; position: absolute; left: -29px; top: 18px; width: 28px; height: 1.5px;
+    background: var(--accent); opacity: .5;
+  }
+  .mn-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .sev { font-size: 10px; font-weight: 650; border-radius: 99px; padding: 2px 8px; letter-spacing: .01em; }
+  .sev.must-fix { color: var(--must-fix); background: #fde8e8; }
+  .sev.suggestion { color: var(--suggestion); background: #fdf0dc; }
+  .sev.question { color: var(--question); background: #f1e9fd; }
+  .sev.nit { color: var(--nit); background: var(--panel-2); }
+  .mn-head .who { font-size: 11.5px; color: var(--muted); }
+  .mn-head .who b { color: var(--ink); }
+  .mn-head .loc { margin-left: auto; font: 10px var(--mono); color: var(--faint); }
+  .mn-body { line-height: 1.5; color: var(--ink); }
+  .mn-body code { font: 11px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
+  .mn-foot { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+  .mn-foot .replies { font-size: 11px; color: var(--accent-ink); font-weight: 550; }
+  .mn-foot .resolve { margin-left: auto; }
+  .mn-reply { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .mn-reply .avatar { width: 20px; height: 20px; border-radius: 50%; flex: none; font-size: 9px; font-weight: 700; color: #fff; display: flex; align-items: center; justify-content: center; }
+  .avatar.you { background: var(--accent); } .avatar.agent { background: #b45309; }
+  .mn-reply .text { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .mn-reply .text b { color: var(--ink); }
+  .mn-compose {
+    width: 100%; font: 12px -apple-system, sans-serif; color: var(--faint); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; margin-top: 10px;
+  }
+  .margin-spacer-sm { height: 110px; }
+
+  /* ============ floating command bar ============ */
+  .cmdbar {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30;
+    display: flex; align-items: center; gap: 4px; padding: 6px;
+    background: rgba(28,25,23,.97); border-radius: 14px; box-shadow: var(--shadow-lg);
+  }
+  .cmdbar .ctx {
+    font-size: 11px; color: #a8a29e; padding: 0 10px 0 8px; display: flex; align-items: center; gap: 7px;
+    border-right: 1px solid #44403c; margin-right: 2px;
+  }
+  .cmdbar .ctx .f { font-family: var(--mono); color: #e7e5e4; }
+  .cmdbar button {
+    font: 12px -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 500; color: #d6d3d1;
+    background: transparent; border: 0; border-radius: 9px; padding: 6px 11px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .cmdbar button:hover { background: #44403c; color: #fff; }
+  .cmdbar button.cta { background: var(--accent); color: #fff; }
+  .cmdbar kbd { background: #44403c; border-color: #57534e; color: #a8a29e; }
+
+  /* ============ files overlay panel ============ */
+  #files-overlay { display: none; position: fixed; left: 20px; top: 104px; z-index: 25; }
+  .files-panel {
+    width: 300px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .fp-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px 9px; border-bottom: 1px solid var(--border); }
+  .fp-head .t { font-weight: 600; font-size: 12.5px; }
+  .fp-head .prog { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .fp-search { display: flex; align-items: center; gap: 7px; margin: 10px 12px 6px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--faint); background: var(--bg); }
+  .fp-list { padding: 6px 8px 10px; max-height: 380px; overflow-y: auto; }
+  .fp-file { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; font-size: 12.5px; cursor: pointer; }
+  .fp-file:hover { background: var(--panel-2); }
+  .fp-file.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 550; }
+  .fp-file .check { color: #4d7c0f; font-size: 10.5px; width: 13px; }
+  .fp-file .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); margin: 0 3.5px; }
+  .fp-file .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fp-file .dir { color: var(--faint); font-size: 10.5px; }
+  .fp-file .t { margin-left: auto; font-size: 10px; font-weight: 650; color: var(--accent-ink); background: var(--accent-soft-2); border-radius: 99px; padding: 1px 6px; }
+  .fp-foot { display: flex; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--border); background: var(--bg); font-size: 11px; color: var(--faint); }
+
+  /* ============ palette ============ */
+  #palette-overlay { display: none; position: fixed; inset: 44px 0 0 0; z-index: 50; align-items: flex-start; justify-content: center; }
+  .palette-scrim { position: absolute; inset: 0; background: rgba(28,25,23,.22); backdrop-filter: blur(2px); }
+  .palette {
+    position: relative; margin-top: 12vh; width: 540px; max-width: 92vw; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .palette-input { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .palette-input input { flex: 1; border: 0; outline: 0; font: 14px -apple-system, sans-serif; background: transparent; }
+  .palette-list { max-height: 360px; overflow-y: auto; padding: 8px; }
+  .palette-group { font-size: 10.5px; font-weight: 650; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 9px 12px 4px; }
+  .palette-item { display: flex; align-items: center; gap: 11px; padding: 8px 12px; border-radius: 9px; cursor: pointer; font-size: 13px; }
+  .palette-item:hover { background: var(--panel-2); }
+  .palette-item.selected { background: var(--accent-soft); }
+  .palette-item .glyph { width: 17px; text-align: center; color: var(--muted); }
+  .palette-item .desc { color: var(--faint); font-size: 11.5px; }
+  .palette-item .keys { margin-left: auto; display: flex; gap: 3px; }
+
+  /* ============ empty ============ */
+  .empty-wrap { height: 100%; display: flex; align-items: center; justify-content: center; position: relative; }
+  .empty-card { text-align: center; max-width: 420px; opacity: .4; }
+  .empty-card .tilde { font-size: 40px; color: var(--accent); margin-bottom: 12px; }
+  .empty-card h2 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 8px; }
+  .empty-card p { color: var(--muted); margin-bottom: 20px; line-height: 1.6; }
+  .dialog {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 480px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .dialog-head { padding: 20px 22px 6px; }
+  .dialog-head h3 { font-size: 15.5px; font-weight: 650; }
+  .dialog-head p { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .dialog-body { padding: 14px 22px 18px; }
+  .path-input { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 12px; font: 12px var(--mono); box-shadow: var(--shadow-sm); margin-bottom: 16px; background: var(--bg); }
+  .path-input .ph { color: var(--faint); }
+  .recent-label { font-size: 10.5px; font-weight: 650; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .recent-item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+  .recent-item:hover { background: var(--panel-2); }
+  .recent-item .name { font-weight: 550; font-size: 13px; }
+  .recent-item .path { font: 10.5px var(--mono); color: var(--faint); }
+  .recent-item .when { margin-left: auto; font-size: 11.5px; color: var(--faint); }
+  .dialog-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); background: var(--bg); }
+</style>
+</head>
+<body data-screen="review">
+
+<div class="switcher">
+  <b>Mockup 3 · Paper</b>
+  <button data-s="home">1 Home</button>
+  <button data-s="review" class="on">2 Review</button>
+  <button data-s="files">3 Files panel</button>
+  <button data-s="palette">4 ⌘K palette</button>
+  <button data-s="empty">5 Empty state</button>
+  <span class="note">switcher is a mockup aid, not part of the design</span>
+</div>
+
+<!-- ===================== HOME ===================== -->
+<div class="screen" id="screen-home">
+  <div class="topbar">
+    <div class="wordmark"><span class="tilde">≈</span>diffect</div>
+    <div class="top-right">
+      <span class="sync"><span class="dot"></span>live</span>
+      <span><kbd>⌘K</kbd></span>
+    </div>
+  </div>
+  <div class="home-wrap">
+    <h1>Reviews</h1>
+    <div class="home-sub">2 changes waiting on you · last synced just now</div>
+
+    <div class="home-section">
+      <h2>Needs attention</h2>
+      <div class="read-row">
+        <span class="mark attn">●</span>
+        <span><span class="title">Re-anchor threads when hunks move</span><span class="target">  work · main…HEAD+unstaged</span></span>
+        <span class="meta"><span class="open-t">3 open threads</span><span>8 files</span><span>12m</span></span>
+      </div>
+      <div class="read-row">
+        <span class="mark prog">◐</span>
+        <span><span class="title">Sidebar virtualization for large repos</span><span class="target">  feat/virtual-tree…main</span></span>
+        <span class="meta"><span class="open-t">1 open</span><span>4 files</span><span>2h</span></span>
+      </div>
+    </div>
+
+    <div class="home-section">
+      <h2>Done</h2>
+      <div class="read-row" style="opacity:.6">
+        <span class="mark done">✓</span>
+        <span><span class="title">Migrate config loader to zod</span><span class="target">  staged · side-projects</span></span>
+        <span class="meta"><span>resolved</span><span>1d</span></span>
+      </div>
+    </div>
+
+    <div class="home-foot">
+      <button class="btn sm">＋ Add workspace</button>
+      <span>workspaces: <b style="color:var(--muted)">diffect</b>, side-projects</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== REVIEW ===================== -->
+<div class="screen" id="screen-review">
+  <div class="topbar">
+    <div class="wordmark"><span class="tilde">≈</span></div>
+    <div class="bc">
+      <span class="seg">diffect</span><span class="sep">/</span>
+      <span class="seg current">work · main…HEAD+unstaged <span class="caret">▾</span></span>
+    </div>
+    <div class="top-right">
+      <span class="sync"><span class="dot"></span>checks 4/4</span>
+      <span>5/8 viewed</span>
+      <button class="btn primary sm">Finish review</button>
+    </div>
+    <div class="top-progress"><div class="fill"></div></div>
+  </div>
+
+  <div class="doc">
+    <div class="doc-main">
+      <div class="change-title">Re-anchor threads when hunks move</div>
+      <div class="change-meta">
+        <span class="mono">main ← HEAD + unstaged</span>
+        <span>8 files</span>
+        <span><span style="color:var(--add-ink)">+412</span> <span style="color:var(--del-ink)">−96</span></span>
+        <span class="ok">● all checks passing</span>
+        <span style="margin-left:auto"><kbd>f</kbd> files · <kbd>n</kbd> next thread</span>
+      </div>
+
+      <div class="file-section">
+        <div class="fs-head">
+          <span class="path"><span class="dir">packages/core/src/reviews/</span>reanchor.ts</span>
+          <span class="delta"><span class="p">+124</span> <span class="m">−31</span></span>
+          <div class="right">
+            <div class="viewed-toggle"><span class="box"></span>viewed <kbd>v</kbd></div>
+          </div>
+        </div>
+        <div class="diff-block">
+          <table class="diff">
+            <tr class="hunk"><td colspan="3"><span class="unfold">⌃ 24 lines</span>@@ -118,9 +118,21 @@</td></tr>
+            <tr><td class="num">118</td><td class="sign"></td><td class="code"><span class="tok-kw">export function</span> <span class="tok-fn">reanchorThread</span>(thread: <span class="tok-ty">Thread</span>, diff: <span class="tok-ty">FileDiff</span>): <span class="tok-ty">AnchorResult</span> {</td></tr>
+            <tr><td class="num">119</td><td class="sign"></td><td class="code">  <span class="tok-kw">const</span> anchor = thread.anchor;</td></tr>
+            <tr class="del"><td class="num">120</td><td class="sign">−</td><td class="code">  <span class="tok-kw">if</span> (!anchor) <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span> };</td></tr>
+            <tr class="add"><td class="num">120</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (!anchor) <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span>, reason: <span class="tok-str">'missing-anchor'</span> };</td></tr>
+            <tr class="add"><td class="num">122</td><td class="sign">+</td><td class="code">  <span class="tok-cm">// Try exact context match first, then fuzzy within ±radius.</span></td></tr>
+            <tr class="add line-hover"><td class="num"><span class="gutter-plus">＋</span>123</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> exact = <span class="tok-fn">matchContext</span>(anchor.context, diff.newLines, { fuzz: <span class="tok-str">0</span> });</td></tr>
+            <tr class="add"><td class="num">124</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (exact) <span class="tok-kw">return</span> { state: <span class="tok-str">'active'</span>, line: exact.line };</td></tr>
+            <tr class="add annotated"><td class="num">126</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> fuzzy = <span class="tok-fn">matchContext</span>(anchor.context, diff.newLines, { fuzz: <span class="tok-str">2</span> });<span class="anno-tick"></span></td></tr>
+            <tr class="add"><td class="num">127</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (fuzzy) <span class="tok-kw">return</span> { state: <span class="tok-str">'active'</span>, line: fuzzy.line, fuzzed: <span class="tok-kw">true</span> };</td></tr>
+            <tr class="add"><td class="num">129</td><td class="sign">+</td><td class="code">  <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span>, reason: <span class="tok-str">'context-moved'</span> };</td></tr>
+            <tr><td class="num">130</td><td class="sign"></td><td class="code">}</td></tr>
+            <tr class="hunk"><td colspan="3"><span class="unfold">⌃ 41 lines</span>@@ -174,6 +186,12 @@</td></tr>
+            <tr><td class="num">186</td><td class="sign"></td><td class="code"><span class="tok-kw">function</span> <span class="tok-fn">matchContext</span>(ctx: <span class="tok-ty">AnchorContext</span>, lines: <span class="tok-kw">string</span>[], opts: <span class="tok-ty">MatchOpts</span>) {</td></tr>
+            <tr class="del"><td class="num">187</td><td class="sign">−</td><td class="code">  <span class="tok-kw">const</span> window = <span class="tok-str">3</span>;</td></tr>
+            <tr class="add annotated"><td class="num">187</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> window = opts.window ?? <span class="tok-str">3</span>;<span class="anno-tick" style="background:var(--suggestion)"></span></td></tr>
+            <tr><td class="num">188</td><td class="sign"></td><td class="code">  <span class="tok-kw">const</span> target = ctx.lines.<span class="tok-fn">slice</span>(<span class="tok-str">0</span>, window);</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="file-section">
+        <div class="fs-head">
+          <span class="path"><span class="dir">packages/core/src/reviews/</span>event-log.ts</span>
+          <span class="delta"><span class="p">+18</span> <span class="m">−4</span></span>
+          <div class="right">
+            <div class="viewed-toggle checked"><span class="box">✓</span>viewed</div>
+            <button class="btn ghost sm">expand ▾</button>
+          </div>
+        </div>
+        <div style="font-size:12px; color:var(--faint); padding:10px 4px;">Collapsed — marked as viewed.</div>
+      </div>
+    </div>
+
+    <!-- margin annotations -->
+    <div class="doc-margin">
+      <div class="margin-spacer-sm" style="height:240px"></div>
+      <div class="margin-note focused">
+        <div class="mn-head">
+          <span class="sev question">question</span>
+          <span class="who"><b>pi</b> · agent</span>
+          <span class="loc">:126</span>
+        </div>
+        <div class="mn-body">Should fuzz radius be configurable per-workspace? A hard-coded <code>2</code> may be too tight for generated files.</div>
+        <div class="mn-reply">
+          <span class="avatar you">R</span>
+          <span class="text"><b>you</b> — Good catch, will thread it through <code style="font:10.5px var(--mono);background:var(--panel-2);border-radius:4px;padding:1px 4px">ReviewConfig</code>.</span>
+        </div>
+        <div class="mn-foot">
+          <span class="replies">1 reply</span>
+          <button class="btn ghost sm resolve">resolve ✓</button>
+        </div>
+        <input class="mn-compose" placeholder="Reply… (r)" readonly>
+      </div>
+      <div class="margin-note">
+        <div class="mn-head">
+          <span class="sev suggestion">suggestion</span>
+          <span class="who"><b>you</b></span>
+          <span class="loc">:187</span>
+        </div>
+        <div class="mn-body">Default <code>window</code> should live next to the other anchor constants so they evolve together.</div>
+        <div class="mn-foot">
+          <span class="replies" style="color:var(--faint); font-weight:400">no replies</span>
+          <button class="btn ghost sm resolve">resolve ✓</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- floating command bar -->
+  <div class="cmdbar">
+    <span class="ctx"><span class="f">reanchor.ts</span> · line 123</span>
+    <button class="cta">＋ Comment <kbd style="background:#0d9488;border-color:#14b8a6;color:#fff">c</kbd></button>
+    <button>Viewed <kbd>v</kbd></button>
+    <button>Next file <kbd>j</kbd></button>
+    <button>Threads <kbd>t</kbd></button>
+    <button>⌘K</button>
+  </div>
+
+  <!-- files overlay panel -->
+  <div id="files-overlay">
+    <div class="files-panel">
+      <div class="fp-head"><span class="t">Files</span><span class="prog">5 of 8 viewed</span></div>
+      <div class="fp-search">⌕ Filter files…</div>
+      <div class="fp-list">
+        <div class="fp-file"><span class="check">✓</span><span class="name">anchor.ts</span><span class="dir">core/reviews</span></div>
+        <div class="fp-file on"><span class="dot"></span><span class="name">reanchor.ts</span><span class="dir">core/reviews</span><span class="t">2</span></div>
+        <div class="fp-file"><span class="check">✓</span><span class="name">event-log.ts</span><span class="dir">core/reviews</span></div>
+        <div class="fp-file"><span class="dot"></span><span class="name">DiffView.tsx</span><span class="dir">web/components</span><span class="t">1</span></div>
+        <div class="fp-file"><span class="check">✓</span><span class="name">ThreadList.tsx</span><span class="dir">web/components</span></div>
+        <div class="fp-file"><span class="check">✓</span><span class="name">Sidebar.tsx</span><span class="dir">web/components</span></div>
+        <div class="fp-file"><span class="check">✓</span><span class="name">index.ts</span><span class="dir">shared/src</span></div>
+        <div class="fp-file"><span class="dot"></span><span class="name">anchors.test.ts</span><span class="dir">core/test</span></div>
+      </div>
+      <div class="fp-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>⏎</kbd> jump</span><span><kbd>esc</kbd> close</span></div>
+    </div>
+  </div>
+
+  <!-- palette -->
+  <div id="palette-overlay">
+    <div class="palette-scrim"></div>
+    <div class="palette">
+      <div class="palette-input"><span style="color:var(--faint)">⌕</span><input placeholder="Type a command or search…"></div>
+      <div class="palette-list">
+        <div class="palette-group">Review</div>
+        <div class="palette-item selected"><span class="glyph">⏎</span>Finish review…<span class="desc">approve · request changes · comment</span><span class="keys"><kbd>⌘</kbd><kbd>⏎</kbd></span></div>
+        <div class="palette-item"><span class="glyph">◉</span>Next open thread<span class="keys"><kbd>n</kbd></span></div>
+        <div class="palette-item"><span class="glyph">✓</span>Mark file viewed<span class="keys"><kbd>v</kbd></span></div>
+        <div class="palette-group">View</div>
+        <div class="palette-item"><span class="glyph">⫝</span>Split view<span class="keys"><kbd>⌘</kbd><kbd>B</kbd></span></div>
+        <div class="palette-item"><span class="glyph">▦</span>Collapse viewed files</div>
+        <div class="palette-group">Go to</div>
+        <div class="palette-item"><span class="glyph">📄</span>DiffView.tsx<span class="desc">1 open thread</span></div>
+        <div class="palette-item"><span class="glyph">≈</span>Reviews home<span class="keys"><kbd>g</kbd><kbd>h</kbd></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== EMPTY ===================== -->
+<div class="screen" id="screen-empty">
+  <div class="empty-wrap">
+    <div class="empty-card">
+      <div class="tilde">≈</div>
+      <h2>Nothing to review yet</h2>
+      <p>diffect reads git diffs straight from your machine. Add a folder of repositories and your working changes appear here.</p>
+      <button class="btn primary">Add workspace</button>
+    </div>
+    <div class="dialog">
+      <div class="dialog-head">
+        <h3>Add workspace</h3>
+        <p>Choose a folder that contains one or more git repositories.</p>
+      </div>
+      <div class="dialog-body">
+        <div class="path-input">📁 <span>~/code/</span><span class="ph">type or browse…</span></div>
+        <div class="recent-label">Recent projects</div>
+        <div class="recent-item"><div><div class="name">diffect</div><div class="path">~/code/diffect</div></div><span class="when">today</span></div>
+        <div class="recent-item"><div><div class="name">side-projects</div><div class="path">~/code/side-projects</div></div><span class="when">2d ago</span></div>
+        <div class="recent-item"><div><div class="name">dotfiles</div><div class="path">~/dotfiles</div></div><span class="when">1w ago</span></div>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn">Cancel <kbd>esc</kbd></button>
+        <button class="btn primary">Add workspace</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.switcher button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.body.dataset.screen = b.dataset.s;
+      document.querySelectorAll('.switcher button').forEach(x => x.classList.toggle('on', x === b));
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffect — Mockup 1 · Quiet Precision</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --panel: #ffffff;
+    --panel-2: #f4f4f5;
+    --border: #e4e4e7;
+    --border-strong: #d4d4d8;
+    --ink: #18181b;
+    --muted: #71717a;
+    --faint: #a1a1aa;
+    --accent: #5e5ce6;
+    --accent-ink: #4644c9;
+    --accent-soft: #eeeefc;
+    --add-bg: #f0fdf4;
+    --add-ink: #15803d;
+    --add-num: #dcfce7;
+    --del-bg: #fef2f2;
+    --del-ink: #b91c1c;
+    --del-num: #fee2e2;
+    --must-fix: #dc2626;
+    --suggestion: #d97706;
+    --nit: #71717a;
+    --question: #7c3aed;
+    --shadow-sm: 0 1px 2px rgba(24,24,27,.05);
+    --shadow-md: 0 4px 16px rgba(24,24,27,.08), 0 1px 3px rgba(24,24,27,.06);
+    --shadow-lg: 0 16px 48px rgba(24,24,27,.16), 0 4px 12px rgba(24,24,27,.08);
+    --r: 6px;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  kbd {
+    font: 10.5px/1 var(--mono);
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 4px;
+    min-width: 16px;
+    text-align: center;
+    display: inline-block;
+  }
+  .screen { display: none; height: calc(100vh - 44px); }
+  body[data-screen="inbox"]   #screen-inbox,
+  body[data-screen="review"]  #screen-review,
+  body[data-screen="peek"]    #screen-review,
+  body[data-screen="palette"] #screen-review,
+  body[data-screen="empty"]   #screen-empty { display: flex; }
+  body[data-screen="peek"]    #peek-overlay,
+  body[data-screen="palette"] #palette-overlay { display: flex; }
+
+  /* ============ mockup switcher (not part of the design) ============ */
+  .switcher {
+    height: 44px; display: flex; align-items: center; gap: 8px;
+    padding: 0 16px; background: #18181b; color: #d4d4d8; font-size: 12px;
+  }
+  .switcher b { color: #fff; font-weight: 600; margin-right: 8px; }
+  .switcher button {
+    font: inherit; color: #a1a1aa; background: transparent; border: 1px solid #3f3f46;
+    border-radius: 99px; padding: 4px 12px; cursor: pointer;
+  }
+  .switcher button.on { color: #fff; background: #3f3f46; border-color: #52525b; }
+  .switcher .note { margin-left: auto; color: #71717a; }
+
+  /* ============ shared chrome ============ */
+  .topbar {
+    height: 46px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    width: 22px; height: 22px; border-radius: 6px; flex: none;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 700;
+  }
+  .crumbs { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; min-width: 0; }
+  .crumbs .sep { color: var(--faint); }
+  .crumb { padding: 3px 6px; border-radius: var(--r); cursor: pointer; white-space: nowrap; }
+  .crumb:hover { background: var(--panel-2); }
+  .crumb.current { color: var(--ink); font-weight: 500; }
+  .crumb .caret { font-size: 9px; color: var(--faint); margin-left: 3px; }
+  .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 99px; padding: 3px 10px; background: var(--panel);
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot.green { background: #22c55e; }
+  .dot.amber { background: #f59e0b; }
+  .btn {
+    font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel); color: var(--ink);
+    border-radius: var(--r); padding: 5px 11px; box-shadow: var(--shadow-sm);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: var(--panel-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent-ink); color: #fff; }
+  .btn.primary:hover { background: var(--accent-ink); }
+  .btn.ghost { border-color: transparent; box-shadow: none; color: var(--muted); }
+  .btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
+  .icon-btn { padding: 5px 7px; }
+
+  /* ============ inbox ============ */
+  #screen-inbox { background: var(--bg); flex-direction: column; }
+  .inbox-body { flex: 1; display: flex; min-height: 0; }
+  .rail {
+    width: 220px; flex: none; border-right: 1px solid var(--border);
+    background: var(--bg); padding: 12px 8px; overflow-y: auto;
+  }
+  .rail .section { margin-bottom: 18px; }
+  .rail .section-label {
+    font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .04em; padding: 0 8px 6px;
+  }
+  .rail-item {
+    display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--r);
+    color: var(--muted); cursor: pointer; font-size: 12.5px;
+  }
+  .rail-item:hover { background: var(--panel-2); color: var(--ink); }
+  .rail-item.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
+  .rail-item .count { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .rail-item.active .count { color: var(--accent-ink); }
+  .rail-item .glyph { width: 14px; text-align: center; font-size: 12px; }
+
+  .inbox-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel); }
+  .inbox-head {
+    display: flex; align-items: center; gap: 12px; padding: 14px 20px 0;
+  }
+  .inbox-head h1 { font-size: 15px; font-weight: 600; }
+  .tabs { display: flex; gap: 2px; margin-left: 12px; background: var(--panel-2); border-radius: 99px; padding: 2px; }
+  .tab { font-size: 12px; color: var(--muted); padding: 3px 12px; border-radius: 99px; cursor: pointer; }
+  .tab.on { background: var(--panel); color: var(--ink); font-weight: 500; box-shadow: var(--shadow-sm); }
+  .inbox-head .display-opts { margin-left: auto; }
+  .group-label {
+    font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em;
+    padding: 18px 20px 6px; display: flex; align-items: center; gap: 8px;
+  }
+  .group-label .n { color: var(--faint); font-weight: 400; }
+  .review-row {
+    display: flex; align-items: center; gap: 12px; padding: 9px 20px; cursor: pointer;
+    border-top: 1px solid transparent; border-bottom: 1px solid transparent;
+  }
+  .review-row:hover { background: #fafafa; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; border: 2px solid transparent; }
+  .status-dot.attention { background: var(--accent); }
+  .status-dot.progress { background: transparent; border-color: var(--suggestion); }
+  .status-dot.done { background: #22c55e; }
+  .review-row .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .review-row .target { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--panel-2); border-radius: 4px; padding: 2px 6px; flex: none; }
+  .review-row .meta { margin-left: auto; display: flex; align-items: center; gap: 14px; color: var(--faint); font-size: 12px; flex: none; }
+  .delta .plus { color: var(--add-ink); }
+  .delta .minus { color: var(--del-ink); }
+  .meta .threads { display: flex; align-items: center; gap: 4px; }
+  .meta .threads.open { color: var(--accent-ink); font-weight: 500; }
+
+  /* ============ review screen ============ */
+  #screen-review { flex-direction: column; }
+  .review-body { flex: 1; display: flex; min-height: 0; position: relative; }
+  .filetree {
+    width: 260px; flex: none; border-right: 1px solid var(--border); background: var(--bg);
+    overflow-y: auto; padding: 10px 8px 60px;
+  }
+  .ft-progress { padding: 4px 8px 12px; }
+  .ft-progress .label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+  .ft-progress .bar { height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .ft-progress .fill { width: 62%; height: 100%; background: var(--accent); border-radius: 99px; }
+  .ft-dir { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; color: var(--muted); font-weight: 500; }
+  .ft-dir .tri { font-size: 8px; color: var(--faint); }
+  .ft-file {
+    display: flex; align-items: center; gap: 7px; padding: 4px 8px 4px 24px; border-radius: var(--r);
+    font-size: 12.5px; color: var(--ink); cursor: pointer; position: relative;
+  }
+  .ft-file:hover { background: var(--panel-2); }
+  .ft-file.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
+  .ft-file .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ft-file .badges { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: none; }
+  .ft-file .tcount {
+    font-size: 10px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft);
+    border-radius: 99px; padding: 1px 6px;
+  }
+  .ft-file.active .tcount { background: #fff; }
+  .ft-file .viewed { color: #22c55e; font-size: 11px; }
+  .ft-file .unviewed { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+  .ft-file .stat { font-size: 10.5px; font-family: var(--mono); }
+  .stat.a { color: var(--add-ink); } .stat.d { color: var(--del-ink); } .stat.m { color: var(--suggestion); }
+
+  .diff-pane { flex: 1; min-width: 0; overflow-y: auto; background: var(--panel); padding-bottom: 80px; }
+  .file-header {
+    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; background: rgba(255,255,255,.92); backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  .file-header .path { font-family: var(--mono); font-size: 12px; }
+  .file-header .path .dir { color: var(--faint); }
+  .file-header .chip { font-size: 10.5px; font-weight: 600; border-radius: 4px; padding: 1px 6px; }
+  .chip.modified { color: var(--suggestion); background: #fef3c7; }
+  .file-header .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .viewed-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .viewed-toggle .box { width: 14px; height: 14px; border: 1.5px solid var(--border-strong); border-radius: 4px; }
+  .viewed-toggle.checked .box { background: #22c55e; border-color: #22c55e; color: #fff; font-size: 10px; text-align: center; line-height: 13px; }
+
+  table.diff { width: 100%; border-collapse: collapse; font: 12px/1.55 var(--mono); }
+  .diff td { padding: 0 12px 0 0; vertical-align: top; }
+  .diff .num {
+    width: 44px; min-width: 44px; text-align: right; padding-right: 10px; color: var(--faint);
+    user-select: none; font-size: 11px; line-height: 1.7;
+  }
+  .diff .sign { width: 18px; min-width: 18px; text-align: center; color: var(--faint); user-select: none; }
+  .diff .code { white-space: pre; line-height: 1.7; }
+  tr.ctx:hover { background: #fafafa; }
+  tr.add { background: var(--add-bg); }
+  tr.add .num { background: var(--add-num); color: var(--add-ink); }
+  tr.add .sign { color: var(--add-ink); }
+  tr.del { background: var(--del-bg); }
+  tr.del .num { background: var(--del-num); color: var(--del-ink); }
+  tr.del .sign { color: var(--del-ink); }
+  tr.hunk td { background: var(--panel-2); color: var(--faint); font-size: 11px; padding: 3px 12px; }
+  tr.hunk .unfold { color: var(--accent-ink); cursor: pointer; margin-right: 10px; }
+  .tok-kw { color: #9333ea; } .tok-fn { color: #2563eb; } .tok-str { color: #15803d; }
+  .tok-cm { color: var(--faint); font-style: italic; } .tok-ty { color: #0d9488; }
+
+  /* contextual hover actions on a line */
+  tr.hovered { background: var(--accent-soft); }
+  tr.hovered .num { background: #e0e0fa; color: var(--accent-ink); }
+  .line-anchor { position: relative; }
+  .line-actions {
+    position: absolute; top: -34px; left: 60px; display: flex; align-items: center; gap: 2px;
+    background: var(--ink); border-radius: 8px; padding: 3px; box-shadow: var(--shadow-lg); z-index: 6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .line-actions button {
+    font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e4e4e7; background: transparent;
+    border: 0; border-radius: 5px; padding: 4px 9px; cursor: pointer; display: flex; align-items: center; gap: 5px;
+  }
+  .line-actions button:hover { background: #3f3f46; color: #fff; }
+  .line-actions kbd { background: #3f3f46; border-color: #52525b; color: #a1a1aa; }
+  .line-actions .sep { width: 1px; height: 16px; background: #3f3f46; margin: 0 2px; }
+
+  /* inline thread */
+  .inline-thread-row td { padding: 0; }
+  .inline-thread {
+    margin: 6px 16px 10px 62px; max-width: 660px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--panel); box-shadow: var(--shadow-md); overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .it-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  .sev { font-size: 10.5px; font-weight: 600; border-radius: 99px; padding: 2px 8px; }
+  .sev.must-fix { color: var(--must-fix); background: #fee2e2; }
+  .sev.suggestion { color: var(--suggestion); background: #fef3c7; }
+  .sev.question { color: var(--question); background: #f3e8ff; }
+  .sev.nit { color: var(--nit); background: var(--panel-2); }
+  .it-head .who { font-size: 12px; color: var(--muted); }
+  .it-head .actions { margin-left: auto; display: flex; gap: 4px; }
+  .it-body { padding: 10px 12px; font-size: 12.5px; line-height: 1.5; }
+  .it-body code { font: 11px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
+  .it-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); }
+  .reactions { display: flex; gap: 4px; }
+  .reaction { font-size: 11px; border: 1px solid var(--border); border-radius: 99px; padding: 2px 7px; background: var(--panel); cursor: pointer; color: var(--muted); }
+  .reaction.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+  .it-foot .reply { margin-left: auto; }
+  .reply-input {
+    flex: 1; font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif; color: var(--faint);
+    border: 1px solid var(--border); border-radius: var(--r); padding: 6px 10px; background: var(--bg);
+  }
+
+  /* footer hint bar */
+  .hintbar {
+    position: absolute; bottom: 0; left: 260px; right: 0; height: 34px; z-index: 4;
+    display: flex; align-items: center; gap: 18px; padding: 0 16px;
+    background: rgba(255,255,255,.9); backdrop-filter: blur(6px); border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 11.5px;
+  }
+  .hintbar .hint { display: flex; align-items: center; gap: 6px; }
+  .hintbar .spacer { flex: 1; }
+  .hintbar .sync { display: flex; align-items: center; gap: 6px; color: var(--faint); }
+
+  /* ============ peek panel ============ */
+  #peek-overlay { display: none; position: absolute; inset: 0; z-index: 20; }
+  .peek-scrim { position: absolute; inset: 0; background: rgba(24,24,27,.12); }
+  .peek {
+    position: absolute; top: 10px; right: 10px; bottom: 10px; width: 420px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .peek-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .peek-head .title { font-weight: 600; font-size: 13px; }
+  .peek-head .nav { margin-left: auto; display: flex; gap: 2px; }
+  .peek-loc {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--bg);
+    border-bottom: 1px solid var(--border); font: 11px var(--mono); color: var(--muted);
+  }
+  .peek-loc .anchor-state { font-size: 10px; font-weight: 600; color: var(--add-ink); background: var(--add-num); border-radius: 4px; padding: 1px 6px; font-family: -apple-system, sans-serif; }
+  .peek-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  .comment { display: flex; gap: 10px; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; }
+  .avatar.you { background: var(--accent); }
+  .avatar.agent { background: #0d9488; }
+  .comment .c-body { flex: 1; min-width: 0; }
+  .comment .c-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+  .comment .c-meta .name { font-weight: 600; font-size: 12.5px; }
+  .comment .c-meta .when { font-size: 11px; color: var(--faint); }
+  .comment .c-text { font-size: 12.5px; line-height: 1.55; }
+  .comment .c-text code { font: 11px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
+  .codeblock { font: 11px/1.6 var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); padding: 8px 10px; margin: 6px 0; white-space: pre; overflow-x: auto; }
+  .peek-compose { border-top: 1px solid var(--border); padding: 12px 14px; }
+  .compose-box { border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow-sm); }
+  .compose-box textarea {
+    width: 100%; border: 0; resize: none; font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 9px 11px; height: 60px; outline: none;
+  }
+  .compose-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border-top: 1px solid var(--border); }
+  .compose-foot .send { margin-left: auto; }
+
+  /* ============ command palette ============ */
+  #palette-overlay { display: none; position: absolute; inset: 0; z-index: 30; align-items: flex-start; justify-content: center; }
+  .palette-scrim { position: absolute; inset: 0; background: rgba(24,24,27,.25); }
+  .palette {
+    position: relative; margin-top: 12vh; width: 560px; max-width: 92vw;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .palette-input { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  .palette-input input { flex: 1; border: 0; outline: 0; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink); }
+  .palette-input .ctx-chip { font-size: 11px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 2px 7px; }
+  .palette-list { max-height: 380px; overflow-y: auto; padding: 6px; }
+  .palette-group { font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px 4px; }
+  .palette-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  .palette-item:hover { background: var(--panel-2); }
+  .palette-item.selected { background: var(--accent-soft); }
+  .palette-item .glyph { width: 16px; text-align: center; color: var(--muted); font-size: 13px; }
+  .palette-item .desc { color: var(--faint); font-size: 11.5px; margin-left: 2px; }
+  .palette-item .keys { margin-left: auto; display: flex; gap: 3px; }
+
+  /* ============ empty / add workspace ============ */
+  #screen-empty { background: var(--bg); align-items: center; justify-content: center; position: relative; }
+  .empty-card { text-align: center; max-width: 380px; }
+  .empty-card .art {
+    width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px; font-weight: 700;
+    box-shadow: var(--shadow-md);
+  }
+  .empty-card h2 { font-size: 16px; margin-bottom: 6px; }
+  .empty-card p { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .dialog {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 480px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow-lg); overflow: hidden;
+  }
+  .dialog-head { padding: 14px 16px 4px; }
+  .dialog-head h3 { font-size: 14px; }
+  .dialog-head p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .dialog-body { padding: 12px 16px 16px; }
+  .path-input {
+    display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: var(--r);
+    padding: 7px 10px; font: 12px var(--mono); color: var(--ink); box-shadow: var(--shadow-sm); margin-bottom: 12px;
+  }
+  .path-input .ph { color: var(--faint); }
+  .recent-label { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+  .recent-item { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--r); cursor: pointer; }
+  .recent-item:hover { background: var(--panel-2); }
+  .recent-item .glyph { color: var(--faint); }
+  .recent-item .name { font-weight: 500; font-size: 12.5px; }
+  .recent-item .path { font: 11px var(--mono); color: var(--faint); }
+  .recent-item .when { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg); }
+</style>
+</head>
+<body data-screen="review">
+
+<div class="switcher">
+  <b>Mockup 1 · Quiet Precision</b>
+  <button data-s="inbox">1 Inbox</button>
+  <button data-s="review" class="on">2 Review</button>
+  <button data-s="peek">3 Thread peek</button>
+  <button data-s="palette">4 ⌘K palette</button>
+  <button data-s="empty">5 Empty state</button>
+  <span class="note">switcher is a mockup aid, not part of the design</span>
+</div>
+
+<!-- ===================== SCREEN: INBOX ===================== -->
+<div class="screen" id="screen-inbox" style="flex-direction: column;">
+  <div class="topbar">
+    <div class="brand">d</div>
+    <div class="crumbs"><span class="crumb current">Reviews</span></div>
+    <div class="top-actions">
+      <span class="pill"><span class="dot green"></span>daemon · live</span>
+      <button class="btn ghost icon-btn" title="Search (⌘K)">⌘K</button>
+    </div>
+  </div>
+  <div class="inbox-body">
+    <div class="rail">
+      <div class="section">
+        <div class="rail-item active"><span class="glyph">◉</span>Reviews<span class="count">3</span></div>
+        <div class="rail-item"><span class="glyph">✓</span>Recently viewed</div>
+      </div>
+      <div class="section">
+        <div class="section-label">Workspaces</div>
+        <div class="rail-item"><span class="glyph">▣</span>diffect<span class="count">2</span></div>
+        <div class="rail-item"><span class="glyph">▣</span>side-projects<span class="count">1</span></div>
+        <div class="rail-item"><span class="glyph">＋</span>Add workspace</div>
+      </div>
+    </div>
+    <div class="inbox-main">
+      <div class="inbox-head">
+        <h1>Reviews</h1>
+        <div class="tabs">
+          <span class="tab on">Needs attention</span>
+          <span class="tab">In progress</span>
+          <span class="tab">All</span>
+        </div>
+        <button class="btn ghost display-opts">Display ▾</button>
+      </div>
+
+      <div class="group-label">diffect <span class="n">· 2</span></div>
+      <div class="review-row">
+        <span class="status-dot attention"></span>
+        <span class="title">Re-anchor threads when hunks move</span>
+        <span class="target">work · main…HEAD+unstaged</span>
+        <div class="meta">
+          <span class="delta"><span class="plus">+412</span> <span class="minus">−96</span></span>
+          <span>8 files</span>
+          <span class="threads open">◉ 3 open</span>
+          <span>12m</span>
+        </div>
+      </div>
+      <div class="review-row">
+        <span class="status-dot progress"></span>
+        <span class="title">Sidebar virtualization for large repos</span>
+        <span class="target">feat/virtual-tree…main</span>
+        <div class="meta">
+          <span class="delta"><span class="plus">+188</span> <span class="minus">−40</span></span>
+          <span>4 files</span>
+          <span class="threads">◉ 1 open</span>
+          <span>2h</span>
+        </div>
+      </div>
+
+      <div class="group-label">side-projects <span class="n">· 1</span></div>
+      <div class="review-row">
+        <span class="status-dot done"></span>
+        <span class="title">Migrate config loader to zod</span>
+        <span class="target">staged</span>
+        <div class="meta">
+          <span class="delta"><span class="plus">+57</span> <span class="minus">−112</span></span>
+          <span>3 files</span>
+          <span class="threads">✓ resolved</span>
+          <span>1d</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN: REVIEW ===================== -->
+<div class="screen" id="screen-review" style="flex-direction: column;">
+  <div class="topbar">
+    <div class="brand">d</div>
+    <div class="crumbs">
+      <span class="crumb">diffect</span><span class="sep">/</span>
+      <span class="crumb">packages</span><span class="sep">/</span>
+      <span class="crumb current">work · main…HEAD+unstaged <span class="caret">▾</span></span>
+    </div>
+    <div class="top-actions">
+      <span class="pill"><span class="dot green"></span>checks 4/4</span>
+      <span class="pill">5/8 viewed</span>
+      <button class="btn ghost icon-btn" title="Toggle split view (⌘B)">⫝</button>
+      <button class="btn primary">Finish review <kbd style="background:#fff2;border-color:#fff4;color:#fff">⌘⏎</kbd></button>
+    </div>
+  </div>
+  <div class="review-body">
+    <div class="filetree">
+      <div class="ft-progress">
+        <div class="label"><span>Viewed</span><span>5 of 8</span></div>
+        <div class="bar"><div class="fill"></div></div>
+      </div>
+      <div class="ft-dir"><span class="tri">▼</span>packages/core/src/reviews</div>
+      <div class="ft-file"><span class="viewed">✓</span><span class="name">anchor.ts</span><div class="badges"><span class="stat a">+86</span></div></div>
+      <div class="ft-file active"><span class="unviewed"></span><span class="name">reanchor.ts</span><div class="badges"><span class="tcount">2</span><span class="stat m">+124 −31</span></div></div>
+      <div class="ft-file"><span class="viewed">✓</span><span class="name">event-log.ts</span><div class="badges"><span class="stat m">+18 −4</span></div></div>
+      <div class="ft-dir"><span class="tri">▼</span>packages/web/src/components</div>
+      <div class="ft-file"><span class="unviewed"></span><span class="name">DiffView.tsx</span><div class="badges"><span class="tcount">1</span><span class="stat m">+96 −41</span></div></div>
+      <div class="ft-file"><span class="viewed">✓</span><span class="name">ThreadList.tsx</span><div class="badges"><span class="stat m">+22 −9</span></div></div>
+      <div class="ft-file"><span class="viewed">✓</span><span class="name">Sidebar.tsx</span><div class="badges"><span class="stat m">+31 −2</span></div></div>
+      <div class="ft-dir"><span class="tri">▼</span>packages/shared/src</div>
+      <div class="ft-file"><span class="viewed">✓</span><span class="name">index.ts</span><div class="badges"><span class="stat a">+14</span></div></div>
+      <div class="ft-file"><span class="unviewed"></span><span class="name">anchors.test.ts</span><div class="badges"><span class="stat a">+121</span></div></div>
+    </div>
+
+    <div class="diff-pane">
+      <div class="file-header">
+        <span class="path"><span class="dir">packages/core/src/reviews/</span>reanchor.ts</span>
+        <span class="chip modified">modified</span>
+        <span style="font:11px var(--mono); color: var(--faint)">+124 −31</span>
+        <div class="right">
+          <div class="viewed-toggle"><span class="box"></span>Viewed <kbd>v</kbd></div>
+          <button class="btn ghost icon-btn" title="More actions">⋯</button>
+        </div>
+      </div>
+
+      <table class="diff">
+        <tr class="hunk"><td colspan="3"><span class="unfold">⌃ Expand 24 lines</span>@@ -118,9 +118,21 @@ <span style="color:var(--muted)">function reanchorThread(</span></td></tr>
+        <tr class="ctx"><td class="num">118</td><td class="sign"></td><td class="code"><span class="tok-kw">export function</span> <span class="tok-fn">reanchorThread</span>(thread: <span class="tok-ty">Thread</span>, diff: <span class="tok-ty">FileDiff</span>): <span class="tok-ty">AnchorResult</span> {</td></tr>
+        <tr class="ctx"><td class="num">119</td><td class="sign"></td><td class="code">  <span class="tok-kw">const</span> anchor = thread.anchor;</td></tr>
+        <tr class="del"><td class="num">120</td><td class="sign">−</td><td class="code">  <span class="tok-kw">if</span> (!anchor) <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span> };</td></tr>
+        <tr class="add"><td class="num">120</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (!anchor) <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span>, reason: <span class="tok-str">'missing-anchor'</span> };</td></tr>
+        <tr class="add"><td class="num">121</td><td class="sign">+</td><td class="code"></td></tr>
+        <tr class="add"><td class="num">122</td><td class="sign">+</td><td class="code">  <span class="tok-cm">// Try exact context match first, then fuzzy within ±radius.</span></td></tr>
+        <tr class="add hovered"><td class="num">123</td><td class="sign">+</td><td class="code"><div class="line-anchor"><div class="line-actions">
+          <button>💬 Comment <kbd>c</kbd></button>
+          <div class="sep"></div>
+          <button>🔗 Copy link</button>
+          <div class="sep"></div>
+          <button>✦ Explain</button>
+        </div></div>  <span class="tok-kw">const</span> exact = <span class="tok-fn">matchContext</span>(anchor.context, diff.newLines, { fuzz: <span class="tok-str">0</span> });</td></tr>
+        <tr class="add"><td class="num">124</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (exact) <span class="tok-kw">return</span> { state: <span class="tok-str">'active'</span>, line: exact.line };</td></tr>
+        <tr class="add"><td class="num">125</td><td class="sign">+</td><td class="code"></td></tr>
+        <tr class="add"><td class="num">126</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> fuzzy = <span class="tok-fn">matchContext</span>(anchor.context, diff.newLines, { fuzz: <span class="tok-str">2</span> });</td></tr>
+        <tr class="inline-thread-row"><td colspan="3">
+          <div class="inline-thread">
+            <div class="it-head">
+              <span class="sev question">question</span>
+              <span class="who"><b style="color:var(--ink)">pi</b> · agent · 24m ago</span>
+              <div class="actions">
+                <button class="btn ghost icon-btn" title="Open in panel">⤢</button>
+                <button class="btn ghost icon-btn" title="Resolve">✓</button>
+              </div>
+            </div>
+            <div class="it-body">Should fuzz radius be configurable per-workspace? A hard-coded <code>2</code> may be too tight for generated files.</div>
+            <div class="it-foot">
+              <div class="reactions">
+                <span class="reaction mine">👍 1</span>
+                <span class="reaction">＋</span>
+              </div>
+              <input class="reply-input" value="" placeholder="Reply… (r)" readonly>
+            </div>
+          </div>
+        </td></tr>
+        <tr class="add"><td class="num">127</td><td class="sign">+</td><td class="code">  <span class="tok-kw">if</span> (fuzzy) <span class="tok-kw">return</span> { state: <span class="tok-str">'active'</span>, line: fuzzy.line, fuzzed: <span class="tok-kw">true</span> };</td></tr>
+        <tr class="add"><td class="num">128</td><td class="sign">+</td><td class="code"></td></tr>
+        <tr class="add"><td class="num">129</td><td class="sign">+</td><td class="code">  <span class="tok-kw">return</span> { state: <span class="tok-str">'stale'</span>, reason: <span class="tok-str">'context-moved'</span> };</td></tr>
+        <tr class="ctx"><td class="num">130</td><td class="sign"></td><td class="code">}</td></tr>
+        <tr class="hunk"><td colspan="3"><span class="unfold">⌃ Expand 41 lines</span>@@ -174,6 +186,12 @@ <span style="color:var(--muted)">function matchContext(</span></td></tr>
+        <tr class="ctx"><td class="num">186</td><td class="sign"></td><td class="code"><span class="tok-kw">function</span> <span class="tok-fn">matchContext</span>(ctx: <span class="tok-ty">AnchorContext</span>, lines: <span class="tok-kw">string</span>[], opts: <span class="tok-ty">MatchOpts</span>) {</td></tr>
+        <tr class="del"><td class="num">187</td><td class="sign">−</td><td class="code">  <span class="tok-kw">const</span> window = <span class="tok-str">3</span>;</td></tr>
+        <tr class="add"><td class="num">187</td><td class="sign">+</td><td class="code">  <span class="tok-kw">const</span> window = opts.window ?? <span class="tok-str">3</span>;</td></tr>
+        <tr class="ctx"><td class="num">188</td><td class="sign"></td><td class="code">  <span class="tok-kw">const</span> target = ctx.lines.<span class="tok-fn">slice</span>(<span class="tok-str">0</span>, window);</td></tr>
+        <tr class="ctx"><td class="num">189</td><td class="sign"></td><td class="code">  <span class="tok-cm">// …</span></td></tr>
+      </table>
+    </div>
+
+    <div class="hintbar">
+      <span class="hint"><kbd>j</kbd><kbd>k</kbd> files</span>
+      <span class="hint"><kbd>n</kbd><kbd>p</kbd> threads</span>
+      <span class="hint"><kbd>c</kbd> comment</span>
+      <span class="hint"><kbd>v</kbd> viewed</span>
+      <span class="hint"><kbd>⌘K</kbd> commands</span>
+      <span class="spacer"></span>
+      <span class="sync"><span class="dot green" style="width:6px;height:6px;border-radius:50%;display:inline-block"></span>synced · event log #482</span>
+    </div>
+
+    <!-- peek overlay (screen 3) -->
+    <div id="peek-overlay">
+      <div class="peek-scrim"></div>
+      <div class="peek">
+        <div class="peek-head">
+          <span class="sev question">question</span>
+          <span class="title">Fuzz radius configurability</span>
+          <div class="nav">
+            <button class="btn ghost icon-btn" title="Previous thread (p)">↑</button>
+            <button class="btn ghost icon-btn" title="Next thread (n)">↓</button>
+            <button class="btn ghost icon-btn" title="Close (esc)">✕</button>
+          </div>
+        </div>
+        <div class="peek-loc">
+          reanchor.ts:126 <span class="anchor-state">anchor active</span>
+          <span style="margin-left:auto; font-family: -apple-system, sans-serif; color: var(--accent-ink); cursor: pointer;">Jump to line ↗</span>
+        </div>
+        <div class="peek-body">
+          <div class="comment">
+            <div class="avatar agent">pi</div>
+            <div class="c-body">
+              <div class="c-meta"><span class="name">pi</span><span class="when">agent · 24m ago</span></div>
+              <div class="c-text">Should fuzz radius be configurable per-workspace? A hard-coded <code>2</code> may be too tight for generated files.</div>
+            </div>
+          </div>
+          <div class="comment">
+            <div class="avatar you">R</div>
+            <div class="c-body">
+              <div class="c-meta"><span class="name">you</span><span class="when">9m ago</span></div>
+              <div class="c-text">Good catch — thinking of threading it through <code>ReviewConfig</code>:
+                <div class="codeblock">reanchor: {
+  fuzzRadius: 2,   // default
+  window: 3,
+}</div>
+              Will follow up in a separate change.</div>
+            </div>
+          </div>
+        </div>
+        <div class="peek-compose">
+          <div class="compose-box">
+            <textarea placeholder="Reply… markdown supported, drag images here"></textarea>
+            <div class="compose-foot">
+              <button class="btn ghost icon-btn" title="Attach image">🖼</button>
+              <button class="btn ghost icon-btn" title="Preview">👁</button>
+              <div class="send" style="display:flex; gap:6px;">
+                <button class="btn">Resolve ✓</button>
+                <button class="btn primary">Reply <kbd style="background:#fff2;border-color:#fff4;color:#fff">⌘⏎</kbd></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- palette overlay (screen 4) -->
+    <div id="palette-overlay">
+      <div class="palette-scrim"></div>
+      <div class="palette">
+        <div class="palette-input">
+          <span style="color:var(--faint)">⌕</span>
+          <input placeholder="Type a command or search files…" value="">
+          <span class="ctx-chip">reanchor.ts</span>
+        </div>
+        <div class="palette-list">
+          <div class="palette-group">This file</div>
+          <div class="palette-item selected"><span class="glyph">✓</span>Mark file as viewed<span class="keys"><kbd>v</kbd></span></div>
+          <div class="palette-item"><span class="glyph">💬</span>Comment on selection<span class="keys"><kbd>c</kbd></span></div>
+          <div class="palette-item"><span class="glyph">⊞</span>Open full file<span class="desc">outside the diff</span><span class="keys"><kbd>o</kbd></span></div>
+          <div class="palette-group">Review</div>
+          <div class="palette-item"><span class="glyph">⏎</span>Finish review…<span class="desc">approve · request changes · comment</span><span class="keys"><kbd>⌘</kbd><kbd>⏎</kbd></span></div>
+          <div class="palette-item"><span class="glyph">⫝</span>Toggle split view<span class="keys"><kbd>⌘</kbd><kbd>B</kbd></span></div>
+          <div class="palette-item"><span class="glyph">◉</span>Filter threads: open only<span class="keys"><kbd>f</kbd><kbd>o</kbd></span></div>
+          <div class="palette-group">Go to</div>
+          <div class="palette-item"><span class="glyph">📄</span>DiffView.tsx<span class="desc">packages/web/src/components · 1 open thread</span></div>
+          <div class="palette-item"><span class="glyph">📄</span>anchors.test.ts<span class="desc">packages/core/test · not viewed</span></div>
+          <div class="palette-item"><span class="glyph">◉</span>Reviews inbox<span class="keys"><kbd>g</kbd><kbd>r</kbd></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN: EMPTY ===================== -->
+<div class="screen" id="screen-empty">
+  <div class="empty-card" style="opacity:.35">
+    <div class="art">d</div>
+    <h2>No workspaces yet</h2>
+    <p>Point diffect at a folder of git repositories to start reviewing local changes — no server, no signup.</p>
+    <button class="btn primary">Add workspace</button>
+  </div>
+  <div class="dialog">
+    <div class="dialog-head">
+      <h3>Add workspace</h3>
+      <p>Choose a folder that contains one or more git repositories.</p>
+    </div>
+    <div class="dialog-body">
+      <div class="path-input">📁 <span>~/code/</span><span class="ph">type or browse…</span></div>
+      <div class="recent-label">Recent projects</div>
+      <div class="recent-item"><span class="glyph">▣</span><div><div class="name">diffect</div><div class="path">~/code/diffect</div></div><span class="when">today</span></div>
+      <div class="recent-item"><span class="glyph">▣</span><div><div class="name">side-projects</div><div class="path">~/code/side-projects</div></div><span class="when">2d ago</span></div>
+      <div class="recent-item"><span class="glyph">▣</span><div><div class="name">dotfiles</div><div class="path">~/dotfiles</div></div><span class="when">1w ago</span></div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn">Cancel <kbd>esc</kbd></button>
+      <button class="btn primary">Add workspace</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.switcher button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.body.dataset.screen = b.dataset.s;
+      document.querySelectorAll('.switcher button').forEach(x => x.classList.toggle('on', x === b));
+    });
+  });
+</script>
+</body>
+</html>
