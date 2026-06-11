@@ -7,6 +7,10 @@ web/dist/
 .reviews/
 .claude/
 
+# Rust (desktop shell)
+target/
+packages/desktop/src-tauri/gen/schemas/
+
 # Playwright
 test-results/
 playwright-report/
