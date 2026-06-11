@@ -169,7 +169,7 @@ fn watch_daemon(handle: AppHandle, launch: DaemonLaunch, daemon: Arc<Mutex<Optio
             match spawn_daemon(&launch) {
                 Ok((child, url)) => {
                     *daemon.lock().unwrap() = Some(child);
-                    if let Some(mut w) = handle.get_webview_window("main") {
+                    if let Some(w) = handle.get_webview_window("main") {
                         let _ = w.navigate(url.parse().expect("ready line carries a valid URL"));
                     }
                 }

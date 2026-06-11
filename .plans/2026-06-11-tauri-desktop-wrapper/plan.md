@@ -6,7 +6,7 @@ goal: Ship Diffect as a double-clickable desktop app by wrapping diffectd + the 
 
 # Tauri Desktop Wrapper
 
-**Status**: slices 1–2 implemented; slice 3 (packaging) next
+**Status**: slices 1–3 implemented (CI deferred — the repo has no CI yet); slice 4 affordances open
 **Workflow**: `.plans/2026-06-11-tauri-desktop-wrapper/`
 
 ## Goal
