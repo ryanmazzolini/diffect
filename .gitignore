@@ -10,6 +10,7 @@ web/dist/
 # Rust (desktop shell)
 target/
 packages/desktop/src-tauri/gen/schemas/
+packages/desktop/src-tauri/binaries/
 
 # Playwright
 test-results/

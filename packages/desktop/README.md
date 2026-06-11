@@ -21,8 +21,21 @@ mise run desktop        # build the monorepo, then launch the app
 ```
 
 The dev build runs the daemon from `packages/core/dist` with the system
-`node`; a packaged build (sidecar binary + bundled web assets) is planned but
-not wired up yet.
+`node`. A packaged build is self-contained — no Node on the host:
+
+```sh
+mise run desktop:bundle   # → src-tauri/target/release/bundle/<format>/…
+```
+
+`scripts/build-sidecar.mjs` esbuild-bundles the built daemon to one CJS file
+and injects it into the running Node binary as a SEA (single executable
+application), emitting `src-tauri/binaries/diffectd-<target-triple>`; `tauri
+build --config src-tauri/tauri.bundle.conf.json` then bundles that sidecar
+plus `packages/web/dist` (as a resource) into platform installers. At
+runtime the shell prefers a `diffectd` sidecar sitting beside the app
+executable and falls back to the monorepo layout, so dev and packaged builds
+share one code path. macOS signing is ad-hoc for now; notarization and an
+updater are future release work.
 
 For UI work with hot reload, point the shell at an existing origin instead of
 spawning a daemon:
