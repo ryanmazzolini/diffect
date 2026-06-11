@@ -27,9 +27,18 @@ const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const CRASH_WINDOW: Duration = Duration::from_secs(60);
 const MAX_RAPID_RESPAWNS: u32 = 3;
 
+/// How to start diffectd: either the bundled SEA sidecar (packaged app) or
+/// the monorepo's built daemon via the system `node` (dev).
+#[derive(Clone)]
+struct DaemonLaunch {
+    program: PathBuf,
+    /// `daemon-bin.js` for the dev path; the sidecar needs no script arg.
+    script: Option<PathBuf>,
+    web_root: PathBuf,
+}
+
 /// Dev layout: this crate lives at packages/desktop/src-tauri, so the built
-/// daemon and web assets sit under the monorepo root three levels up. A
-/// packaged build replaces this with a bundled sidecar + resource dir.
+/// daemon and web assets sit under the monorepo root three levels up.
 fn monorepo_root() -> Result<PathBuf, String> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -37,7 +46,24 @@ fn monorepo_root() -> Result<PathBuf, String> {
         .map_err(|e| format!("could not resolve monorepo root: {e}"))
 }
 
-fn spawn_daemon() -> Result<(Child, String), String> {
+/// Prefer the packaged layout (a `diffectd` sidecar beside this executable,
+/// web assets in the resource dir); fall back to the dev monorepo.
+fn resolve_daemon(handle: &AppHandle) -> Result<DaemonLaunch, String> {
+    let sidecar = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join(format!("diffectd{}", std::env::consts::EXE_SUFFIX))))
+        .filter(|p| p.exists());
+    if let Some(sidecar) = sidecar {
+        let res = handle
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("no resource dir: {e}"))?;
+        let web_root = [res.join("web"), res.join("web/dist")]
+            .into_iter()
+            .find(|p| p.join("index.html").exists())
+            .ok_or("bundled web assets not found in resource dir")?;
+        return Ok(DaemonLaunch { program: sidecar, script: None, web_root });
+    }
     let root = monorepo_root()?;
     let daemon_js = root.join("packages/core/dist/daemon-bin.js");
     let web_root = root.join("packages/web/dist");
@@ -47,20 +73,26 @@ fn spawn_daemon() -> Result<(Child, String), String> {
             missing.display()
         ));
     }
+    Ok(DaemonLaunch { program: "node".into(), script: Some(daemon_js), web_root })
+}
 
+fn spawn_daemon(launch: &DaemonLaunch) -> Result<(Child, String), String> {
     // --no-workspace: the app serves registered workspaces only; it must not
     // register its own cwd as something to review. The piped stdin is held
     // open for the daemon's whole life; the OS closes it when this process
     // dies — however it dies — and the daemon exits on that EOF.
-    let mut child = Command::new("node")
-        .arg(&daemon_js)
+    let mut cmd = Command::new(&launch.program);
+    if let Some(script) = &launch.script {
+        cmd.arg(script);
+    }
+    let mut child = cmd
         .args(["--port", "0", "--no-workspace", "--exit-on-stdin-close", "--web-root"])
-        .arg(&web_root)
+        .arg(&launch.web_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("could not spawn `node`: {e}"))?;
+        .map_err(|e| format!("could not spawn {}: {e}", launch.program.display()))?;
 
     // One thread owns the child's stdout for the daemon's whole life: it
     // hands the ready URL back over a channel, then keeps draining (and
@@ -113,7 +145,7 @@ fn show_error(handle: &AppHandle, message: &str) {
 
 /// Respawn the daemon if it dies underneath the window; give up (with a
 /// visible error) when it crashloops.
-fn watch_daemon(handle: AppHandle, daemon: Arc<Mutex<Option<Child>>>) {
+fn watch_daemon(handle: AppHandle, launch: DaemonLaunch, daemon: Arc<Mutex<Option<Child>>>) {
     thread::spawn(move || {
         let mut rapid = 0u32;
         let mut last_spawn = Instant::now();
@@ -134,7 +166,7 @@ fn watch_daemon(handle: AppHandle, daemon: Arc<Mutex<Option<Child>>>) {
             }
             eprintln!("diffectd exited unexpectedly; respawning ({rapid}/{MAX_RAPID_RESPAWNS})");
             last_spawn = Instant::now();
-            match spawn_daemon() {
+            match spawn_daemon(&launch) {
                 Ok((child, url)) => {
                     *daemon.lock().unwrap() = Some(child);
                     if let Some(mut w) = handle.get_webview_window("main") {
@@ -177,10 +209,11 @@ fn main() {
             let url = match std::env::var("DIFFECT_DESKTOP_URL") {
                 Ok(u) if !u.is_empty() => u,
                 _ => {
-                    let (child, url) = spawn_daemon()?;
+                    let launch = resolve_daemon(app.handle())?;
+                    let (child, url) = spawn_daemon(&launch)?;
                     let daemon = Arc::new(Mutex::new(Some(child)));
                     app.manage(Daemon(daemon.clone()));
-                    watch_daemon(app.handle().clone(), daemon);
+                    watch_daemon(app.handle().clone(), launch, daemon);
                     url
                 }
             };

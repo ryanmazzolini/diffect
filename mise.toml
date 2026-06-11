@@ -26,6 +26,11 @@ description = "Build everything and run the desktop app (Tauri shell over diffec
 depends = ["build"]
 run = "cargo run --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml"
 
+[tasks."desktop:bundle"]
+description = "Package the desktop app: SEA sidecar + bundled web assets + installer"
+depends = ["build"]
+run = "pnpm --filter @diffect/desktop bundle"
+
 [tasks."desktop:dev"]
 description = "Desktop shell against the Vite dev server (run `mise run dev` + `mise run daemon` separately)"
 run = "cargo run --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml"

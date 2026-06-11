@@ -6,5 +6,7 @@ dangerouslyAllowAllBuilds: false
 # Supply-chain hardening: lifecycle (build) scripts are blocked by default in
 # pnpm. Only packages listed here may run their install scripts. esbuild needs
 # its postinstall to fetch the platform binary that powers vitest/Vite.
-onlyBuiltDependencies:
-  - esbuild
+# (pnpm 11 renamed `onlyBuiltDependencies` to this map form; the old key is
+# silently ignored and `pnpm install` fails with ERR_PNPM_IGNORED_BUILDS.)
+allowBuilds:
+  esbuild: true
