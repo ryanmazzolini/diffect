@@ -9,17 +9,23 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
 
-/// The spawned diffectd, killed on app exit.
-struct Daemon(Mutex<Option<Child>>);
+/// The spawned diffectd. Emptied on shutdown, which also stands the crash
+/// watcher down; the daemon's `--exit-on-stdin-close` pipe is the backstop
+/// that reaps it even when this process dies without running cleanup.
+struct Daemon(Arc<Mutex<Option<Child>>>);
 
 const READY_PREFIX: &str = "DIFFECTD_READY ";
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
+/// Crashes after at least this much uptime earn a fresh respawn allowance.
+const CRASH_WINDOW: Duration = Duration::from_secs(60);
+const MAX_RAPID_RESPAWNS: u32 = 3;
 
 /// Dev layout: this crate lives at packages/desktop/src-tauri, so the built
 /// daemon and web assets sit under the monorepo root three levels up. A
@@ -43,11 +49,14 @@ fn spawn_daemon() -> Result<(Child, String), String> {
     }
 
     // --no-workspace: the app serves registered workspaces only; it must not
-    // register its own cwd as something to review.
+    // register its own cwd as something to review. The piped stdin is held
+    // open for the daemon's whole life; the OS closes it when this process
+    // dies — however it dies — and the daemon exits on that EOF.
     let mut child = Command::new("node")
         .arg(&daemon_js)
-        .args(["--port", "0", "--no-workspace", "--web-root"])
+        .args(["--port", "0", "--no-workspace", "--exit-on-stdin-close", "--web-root"])
         .arg(&web_root)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
@@ -84,8 +93,83 @@ fn spawn_daemon() -> Result<(Child, String), String> {
     }
 }
 
+/// Replace the window contents with a terminal error state. There is no IPC
+/// bridge to retry from, so the message tells the user to relaunch.
+fn show_error(handle: &AppHandle, message: &str) {
+    eprintln!("diffect-desktop: {message}");
+    if let Some(w) = handle.get_webview_window("main") {
+        let html = format!(
+            "<body style=\"font-family:system-ui;background:#1e293b;color:#e2e8f0;\
+             display:grid;place-items:center;height:100vh;margin:0\">\
+             <div style=\"max-width:32rem\"><h1>Diffect hit a problem</h1>\
+             <p>{message}</p><p>Quit and relaunch to try again.</p></div></body>"
+        );
+        let _ = w.eval(&format!(
+            "document.open(); document.write({}); document.close();",
+            serde_json::to_string(&html).unwrap_or_default()
+        ));
+    }
+}
+
+/// Respawn the daemon if it dies underneath the window; give up (with a
+/// visible error) when it crashloops.
+fn watch_daemon(handle: AppHandle, daemon: Arc<Mutex<Option<Child>>>) {
+    thread::spawn(move || {
+        let mut rapid = 0u32;
+        let mut last_spawn = Instant::now();
+        loop {
+            thread::sleep(Duration::from_secs(1));
+            {
+                let mut guard = daemon.lock().unwrap();
+                let Some(child) = guard.as_mut() else { return }; // shutting down
+                if !matches!(child.try_wait(), Ok(Some(_))) {
+                    continue;
+                }
+                *guard = None;
+            }
+            rapid = if last_spawn.elapsed() > CRASH_WINDOW { 1 } else { rapid + 1 };
+            if rapid > MAX_RAPID_RESPAWNS {
+                show_error(&handle, "diffectd keeps crashing; check the terminal output.");
+                return;
+            }
+            eprintln!("diffectd exited unexpectedly; respawning ({rapid}/{MAX_RAPID_RESPAWNS})");
+            last_spawn = Instant::now();
+            match spawn_daemon() {
+                Ok((child, url)) => {
+                    *daemon.lock().unwrap() = Some(child);
+                    if let Some(mut w) = handle.get_webview_window("main") {
+                        let _ = w.navigate(url.parse().expect("ready line carries a valid URL"));
+                    }
+                }
+                Err(e) => {
+                    show_error(&handle, &format!("could not restart diffectd: {e}"));
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(d)) => d == "localhost",
+        None => false,
+    }
+}
+
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // A second launch focuses the existing window instead of racing
+            // a second daemon into the same store.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Escape hatch for UI development: point the window at an
             // existing origin (Vite dev server or a manual daemon) instead
@@ -94,13 +178,29 @@ fn main() {
                 Ok(u) if !u.is_empty() => u,
                 _ => {
                     let (child, url) = spawn_daemon()?;
-                    app.manage(Daemon(Mutex::new(Some(child))));
+                    let daemon = Arc::new(Mutex::new(Some(child)));
+                    app.manage(Daemon(daemon.clone()));
+                    watch_daemon(app.handle().clone(), daemon);
                     url
                 }
             };
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+            let url: Url = url.parse()?;
+            // The app's own origins stay in the webview: any loopback port
+            // (respawns get new ones) plus whatever origin the window was
+            // started on. Everything else — links in comments, markdown —
+            // opens in the system browser.
+            let app_origin = url.origin();
+            let handle = app.handle().clone();
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Diffect")
                 .inner_size(1280.0, 860.0)
+                .on_navigation(move |target| {
+                    if is_loopback(target) || target.origin() == app_origin {
+                        return true;
+                    }
+                    let _ = handle.opener().open_url(target.as_str(), None::<&str>);
+                    false
+                })
                 .build()?;
             Ok(())
         })
