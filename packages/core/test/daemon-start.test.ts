@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PassThrough } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { git } from "../src/git/exec.js";
 import { formatUrl, parseArgs, resolveWebRoot, runDaemon } from "../src/daemon-start.js";
 import { readWorkspaceRegistry } from "../src/store/registry.js";
@@ -62,6 +63,11 @@ describe("parseArgs", () => {
 
   it("clears the boot workspace with --no-workspace", () => {
     expect(parseArgs(["--no-workspace"], noEnv).workspace).toBeNull();
+  });
+
+  it("reads --exit-on-stdin-close", () => {
+    expect(parseArgs([], noEnv).exitOnStdinClose).toBe(false);
+    expect(parseArgs(["--exit-on-stdin-close"], noEnv).exitOnStdinClose).toBe(true);
   });
 });
 
@@ -135,6 +141,19 @@ describe("runDaemon", () => {
         io,
       ),
     ).rejects.toThrow(/web root not found/);
+  });
+
+  it("exits when stdin closes under --exit-on-stdin-close", async () => {
+    const { io } = captured();
+    const stdin = new PassThrough();
+    let exited = false;
+    server = await runDaemon(
+      ["--port", "0", "--workspace", workspace, "--exit-on-stdin-close"],
+      { ...io, stdin, exit: () => (exited = true) },
+    );
+    expect(exited).toBe(false);
+    stdin.end();
+    await vi.waitFor(() => expect(exited).toBe(true));
   });
 
   it("does not register a workspace with --no-workspace", async () => {

@@ -8,6 +8,14 @@ relative URLs, so it runs unmodified; review state lives in the same per-user
 store (`~/.config/diffect/`) the CLI, agents, and any manually run daemon
 share — the daemon's store watcher pushes their writes into the window live.
 
+Lifecycle: the daemon is spawned with `--exit-on-stdin-close` and a pipe the
+shell holds open, so it dies with the app even if the app is killed without
+cleanup; a normal quit also kills it explicitly. If the daemon dies under a
+running window it is respawned (up to 3 times per minute, then a visible
+error). A second app launch focuses the existing window. Navigation stays
+in-window for loopback origins; anything else (links in comments) opens in
+the system browser.
+
 ```sh
 mise run desktop        # build the monorepo, then launch the app
 ```

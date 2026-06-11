@@ -14,6 +14,9 @@ export interface DaemonArgs {
   host: string;
   /** Explicit web asset dir; omitted falls back to the monorepo layout. */
   webRoot?: string;
+  /** Exit when stdin reaches EOF — embedders hold a pipe open so the daemon
+   * dies with them even when they are killed without running cleanup. */
+  exitOnStdinClose: boolean;
 }
 
 export function parseArgs(
@@ -24,6 +27,7 @@ export function parseArgs(
   let port = Number(env.DIFFECTD_PORT ?? 7421);
   let host = env.DIFFECTD_HOST ?? "127.0.0.1";
   let webRoot = env.DIFFECTD_WEB_ROOT;
+  let exitOnStdinClose = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--workspace" || arg === "-w") {
@@ -38,9 +42,17 @@ export function parseArgs(
       host = argv[++i] ?? host;
     } else if (arg === "--web-root") {
       webRoot = argv[++i] ?? webRoot;
+    } else if (arg === "--exit-on-stdin-close") {
+      exitOnStdinClose = true;
     }
   }
-  return { workspace, port, host, webRoot: webRoot ? resolve(webRoot) : undefined };
+  return {
+    workspace,
+    port,
+    host,
+    webRoot: webRoot ? resolve(webRoot) : undefined,
+    exitOnStdinClose,
+  };
 }
 
 /**
@@ -71,6 +83,8 @@ export function formatUrl(host: string, port: number): string {
 interface RunDaemonIo {
   stdout?: { write(chunk: string): unknown };
   stderr?: { write(chunk: string): unknown };
+  stdin?: { resume(): unknown; once(event: "end" | "close", cb: () => void): unknown };
+  exit?: () => void;
 }
 
 /**
@@ -86,6 +100,15 @@ export async function runDaemon(
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
   const args = parseArgs(argv);
+  if (args.exitOnStdinClose) {
+    // Attach before any slow startup work: a parent that dies mid-boot must
+    // still take the daemon down with it.
+    const stdin = io.stdin ?? process.stdin;
+    const exit = io.exit ?? (() => process.exit(0));
+    stdin.resume();
+    stdin.once("end", exit);
+    stdin.once("close", exit);
+  }
   if (args.workspace !== null) {
     // Remember this workspace so it persists across restarts (non-fatal, but
     // warn so a "where are my workspaces?" debug session has a breadcrumb).
