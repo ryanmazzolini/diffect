@@ -62,11 +62,12 @@
   .switcher {
     height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
     background: #0f172a; color: #cbd5e1; font-size: 12px;
+    white-space: nowrap; flex: none;
   }
   .switcher b { color: #fff; font-weight: 600; margin-right: 8px; }
   .switcher button {
     font: inherit; color: #94a3b8; background: transparent; border: 1px solid #334155;
-    border-radius: 99px; padding: 4px 12px; cursor: pointer;
+    border-radius: 5px; padding: 4px 12px; cursor: pointer;
   }
   .switcher button.on { color: #fff; background: #334155; border-color: #475569; }
   .switcher .note { margin-left: auto; color: #64748b; }
@@ -84,12 +85,12 @@
   }
   .ws-switch {
     display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted);
-    border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; cursor: pointer; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; background: var(--panel);
   }
   .ws-switch:hover { background: var(--panel-2); }
   .searchbox {
     margin-left: auto; display: flex; align-items: center; gap: 8px; width: 280px;
-    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; color: var(--faint);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--faint);
     font-size: 13px; background: var(--bg); cursor: text;
   }
   .searchbox kbd { margin-left: auto; }
@@ -100,7 +101,7 @@
   .btn {
     font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
     border: 1px solid var(--border); background: var(--panel); color: var(--ink);
-    border-radius: 8px; padding: 6px 13px; box-shadow: var(--shadow-sm);
+    border-radius: 6px; padding: 6px 13px; box-shadow: var(--shadow-sm);
     display: inline-flex; align-items: center; gap: 7px;
   }
   .btn:hover { background: var(--panel-2); }
@@ -146,7 +147,7 @@
   .review-card .sub .mono { font-family: var(--mono); font-size: 11px; }
   .review-card .right { margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 12.5px; color: var(--muted); flex: none; }
   .delta .p { color: var(--add-ink); } .delta .m { color: var(--del-ink); }
-  .thread-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 99px; padding: 3px 9px; }
+  .thread-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 5px; padding: 3px 9px; }
 
   /* ============ review header ============ */
   .review-head { background: var(--panel); border-bottom: 1px solid var(--border); padding: 18px 24px 0; position: sticky; top: 54px; z-index: 9; }
@@ -156,7 +157,7 @@
   .rh-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
   .branch { font: 11.5px var(--mono); background: var(--panel-2); border-radius: 6px; padding: 2px 8px; color: var(--ink); }
   .arrow { color: var(--faint); }
-  .check-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 99px; padding: 3px 10px; background: var(--panel); color: var(--muted); }
+  .check-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; padding: 3px 10px; background: var(--panel); color: var(--muted); }
   .check-pill .ok { color: #16a34a; }
   .rh-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
   .rh-tabs { display: flex; gap: 4px; margin-top: 14px; }
@@ -165,10 +166,10 @@
     border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 7px;
   }
   .seg.on { color: var(--ink); font-weight: 550; border-bottom-color: var(--accent); }
-  .seg .badge { font-size: 11px; font-weight: 600; background: var(--panel-2); border-radius: 99px; padding: 1px 7px; color: var(--muted); }
+  .seg .badge { font-size: 11px; font-weight: 600; background: var(--panel-2); border-radius: 5px; padding: 1px 7px; color: var(--muted); }
   .seg .badge.new { background: var(--accent-soft); color: var(--accent-ink); }
   .progress-strip { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); margin-left: auto; padding-bottom: 8px; }
-  .progress-strip .bar { width: 120px; height: 5px; background: var(--panel-2); border-radius: 99px; overflow: hidden; }
+  .progress-strip .bar { width: 120px; height: 5px; background: var(--panel-2); border-radius: 5px; overflow: hidden; }
   .progress-strip .fill { width: 62%; height: 100%; background: var(--accent); }
 
   /* ============ files tab ============ */
@@ -185,7 +186,7 @@
   .o-file .check { color: #16a34a; font-size: 11px; width: 13px; }
   .o-file .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); margin: 0 3.5px; }
   .o-file .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .o-file .t { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 99px; padding: 1px 6px; }
+  .o-file .t { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 5px; padding: 1px 6px; }
   .o-file.on .t { background: #fff; }
 
   .file-cards { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
@@ -196,7 +197,7 @@
   .fc-head {
     display: flex; align-items: center; gap: 10px; padding: 10px 14px;
     border-bottom: 1px solid var(--border); background: #fcfdfe;
-    position: sticky; top: 178px; z-index: 5; border-radius: var(--r) var(--r) 0 0;
+    border-radius: var(--r) var(--r) 0 0;
   }
   .fc-head .path { font: 12.5px var(--mono); } .fc-head .path .dir { color: var(--faint); }
   .fc-head .delta { font: 11px var(--mono); }
@@ -223,13 +224,13 @@
   .sel-toolbar-row td { padding: 0; }
   .sel-toolbar {
     display: inline-flex; align-items: center; gap: 2px; margin: 6px 0 6px 70px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 99px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
     padding: 4px; box-shadow: var(--shadow-lg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   .sel-toolbar button {
     font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 500; color: var(--ink);
-    background: transparent; border: 0; border-radius: 99px; padding: 5px 12px; cursor: pointer;
+    background: transparent; border: 0; border-radius: 5px; padding: 5px 12px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
   .sel-toolbar button:hover { background: var(--panel-2); }
@@ -246,7 +247,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   .it-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px 0; }
-  .sev { font-size: 11px; font-weight: 600; border-radius: 99px; padding: 2px 9px; }
+  .sev { font-size: 11px; font-weight: 600; border-radius: 5px; padding: 2px 9px; }
   .sev.must-fix { color: var(--must-fix); background: #fee2e2; }
   .sev.suggestion { color: var(--suggestion); background: #fef3c7; }
   .sev.question { color: var(--question); background: #f3e8ff; }
@@ -256,7 +257,7 @@
   .it-body { padding: 8px 14px 12px; font-size: 13px; line-height: 1.55; }
   .it-body code { font: 11.5px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
   .it-actions { display: flex; align-items: center; gap: 8px; padding: 0 14px 12px; }
-  .reaction { font-size: 11.5px; border: 1px solid var(--border); border-radius: 99px; padding: 2px 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
+  .reaction { font-size: 11.5px; border: 1px solid var(--border); border-radius: 5px; padding: 2px 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
 
   /* ============ guide tab ============ */
   .guide-layout { max-width: 860px; margin: 0 auto; padding: 24px 24px 120px; }
@@ -271,7 +272,7 @@
   .gs-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; }
   .gs-head .n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
   .gs-head h3 { font-size: 14px; font-weight: 600; }
-  .gs-head .kind { font-size: 11px; font-weight: 600; border-radius: 99px; padding: 2px 8px; }
+  .gs-head .kind { font-size: 11px; font-weight: 600; border-radius: 5px; padding: 2px 8px; }
   .kind.core { color: var(--accent-ink); background: var(--accent-soft); }
   .kind.support { color: var(--muted); background: var(--panel-2); }
   .gs-head .tri { margin-left: auto; color: var(--faint); font-size: 10px; }
@@ -360,6 +361,37 @@
   .recent-item .path { font: 11px var(--mono); color: var(--faint); }
   .recent-item .when { margin-left: auto; font-size: 12px; color: var(--faint); }
   .dialog-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border); background: var(--bg); }
+
+  /* ============ mobile ============ */
+  @media (max-width: 860px) {
+    .switcher { overflow-x: auto; }
+    .switcher button { flex: none; }
+    .switcher .note { display: none; }
+    .appbar { padding: 0 12px; gap: 8px; }
+    .searchbox, .live { display: none; }
+    .review-head { padding: 12px 14px 0; }
+    .rh-top { flex-wrap: wrap; row-gap: 10px; }
+    .rh-actions { margin-left: 0; }
+    .rh-tabs { overflow-x: auto; }
+    .rh-tabs .seg { flex: none; }
+    .progress-strip { display: none; }
+    .files-layout { padding: 14px 10px 120px; }
+    .outline { display: none; }
+    .mobile-files { display: inline-flex !important; position: fixed; right: 14px; bottom: 16px; z-index: 30; box-shadow: var(--shadow-lg); }
+    .file-card { overflow-x: auto; }
+    .fc-head { position: static; flex-wrap: wrap; row-gap: 4px; }
+    .sel-toolbar { margin-left: 12px; flex-wrap: wrap; }
+    .sel-note { display: block; margin: 0 0 8px 14px; }
+    .inline-thread { margin-left: 12px; margin-right: 12px; }
+    .home-wrap { padding: 20px 14px 80px; }
+    .review-card { flex-wrap: wrap; row-gap: 8px; }
+    .review-card .right { margin-left: 24px; }
+    .sheet { width: 100%; border-left: 0; }
+    .palette { width: calc(100vw - 20px); margin-top: 6vh; }
+    .guide-layout { padding: 16px 14px 120px; }
+    .gs-body { padding-left: 16px; }
+    .dialog { width: calc(100vw - 24px); }
+  }
 </style>
 </head>
 <body data-screen="files">
@@ -607,12 +639,14 @@
     </div>
   </div>
 
+  <button class="btn mobile-files" style="display:none">📄 Files · 5/8 viewed</button>
+
   <!-- SHEET overlay -->
   <div id="sheet-overlay">
     <div class="sheet-scrim"></div>
     <div class="sheet">
       <div class="sheet-head">
-        <span class="sev question" style="font-size:11px;font-weight:600;border-radius:99px;padding:2px 9px;color:var(--question);background:#f3e8ff">question</span>
+        <span class="sev question" style="font-size:11px;font-weight:600;border-radius:4px;padding:2px 9px;color:var(--question);background:#f3e8ff">question</span>
         <h3>Fuzz radius configurability</h3>
         <div class="nav">
           <button class="btn ghost sm" title="Previous thread">↑</button>

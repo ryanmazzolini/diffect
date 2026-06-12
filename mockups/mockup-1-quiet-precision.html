@@ -67,11 +67,12 @@
   .switcher {
     height: 44px; display: flex; align-items: center; gap: 8px;
     padding: 0 16px; background: #18181b; color: #d4d4d8; font-size: 12px;
+    white-space: nowrap; flex: none;
   }
   .switcher b { color: #fff; font-weight: 600; margin-right: 8px; }
   .switcher button {
     font: inherit; color: #a1a1aa; background: transparent; border: 1px solid #3f3f46;
-    border-radius: 99px; padding: 4px 12px; cursor: pointer;
+    border-radius: 5px; padding: 4px 12px; cursor: pointer;
   }
   .switcher button.on { color: #fff; background: #3f3f46; border-color: #52525b; }
   .switcher .note { margin-left: auto; color: #71717a; }
@@ -96,7 +97,7 @@
   .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
-    border: 1px solid var(--border); border-radius: 99px; padding: 3px 10px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 5px; padding: 3px 10px; background: var(--panel);
   }
   .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
   .dot.green { background: #22c55e; }
@@ -141,8 +142,8 @@
     display: flex; align-items: center; gap: 12px; padding: 14px 20px 0;
   }
   .inbox-head h1 { font-size: 15px; font-weight: 600; }
-  .tabs { display: flex; gap: 2px; margin-left: 12px; background: var(--panel-2); border-radius: 99px; padding: 2px; }
-  .tab { font-size: 12px; color: var(--muted); padding: 3px 12px; border-radius: 99px; cursor: pointer; }
+  .tabs { display: flex; gap: 2px; margin-left: 12px; background: var(--panel-2); border-radius: 5px; padding: 2px; }
+  .tab { font-size: 12px; color: var(--muted); padding: 3px 12px; border-radius: 5px; cursor: pointer; }
   .tab.on { background: var(--panel); color: var(--ink); font-weight: 500; box-shadow: var(--shadow-sm); }
   .inbox-head .display-opts { margin-left: auto; }
   .group-label {
@@ -176,8 +177,8 @@
   }
   .ft-progress { padding: 4px 8px 12px; }
   .ft-progress .label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
-  .ft-progress .bar { height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; }
-  .ft-progress .fill { width: 62%; height: 100%; background: var(--accent); border-radius: 99px; }
+  .ft-progress .bar { height: 4px; background: var(--border); border-radius: 5px; overflow: hidden; }
+  .ft-progress .fill { width: 62%; height: 100%; background: var(--accent); border-radius: 5px; }
   .ft-dir { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; color: var(--muted); font-weight: 500; }
   .ft-dir .tri { font-size: 8px; color: var(--faint); }
   .ft-file {
@@ -190,7 +191,7 @@
   .ft-file .badges { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: none; }
   .ft-file .tcount {
     font-size: 10px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft);
-    border-radius: 99px; padding: 1px 6px;
+    border-radius: 5px; padding: 1px 6px;
   }
   .ft-file.active .tcount { background: #fff; }
   .ft-file .viewed { color: #22c55e; font-size: 11px; }
@@ -258,7 +259,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   .it-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
-  .sev { font-size: 10.5px; font-weight: 600; border-radius: 99px; padding: 2px 8px; }
+  .sev { font-size: 10.5px; font-weight: 600; border-radius: 5px; padding: 2px 8px; }
   .sev.must-fix { color: var(--must-fix); background: #fee2e2; }
   .sev.suggestion { color: var(--suggestion); background: #fef3c7; }
   .sev.question { color: var(--question); background: #f3e8ff; }
@@ -269,7 +270,7 @@
   .it-body code { font: 11px var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 5px; }
   .it-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); }
   .reactions { display: flex; gap: 4px; }
-  .reaction { font-size: 11px; border: 1px solid var(--border); border-radius: 99px; padding: 2px 7px; background: var(--panel); cursor: pointer; color: var(--muted); }
+  .reaction { font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; background: var(--panel); cursor: pointer; color: var(--muted); }
   .reaction.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
   .it-foot .reply { margin-left: auto; }
   .reply-input {
@@ -378,6 +379,31 @@
   .recent-item .path { font: 11px var(--mono); color: var(--faint); }
   .recent-item .when { margin-left: auto; font-size: 11px; color: var(--faint); }
   .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg); }
+
+  /* ============ mobile ============ */
+  @media (max-width: 768px) {
+    .switcher { overflow-x: auto; }
+    .switcher button { flex: none; }
+    .switcher .note { display: none; }
+    .topbar { padding: 0 8px; gap: 6px; }
+    .top-actions .pill { display: none; }
+    .crumbs .crumb:not(.current), .crumbs .sep { display: none; }
+    .rail, .filetree { display: none; }
+    .mobile-files { display: inline-flex !important; position: absolute; right: 12px; bottom: 46px; z-index: 8; box-shadow: var(--shadow-md); }
+    .hintbar { left: 0; gap: 12px; overflow-x: auto; }
+    .hintbar .sync { display: none; }
+    .diff-pane { overflow-x: auto; }
+    .file-header { flex-wrap: wrap; row-gap: 4px; }
+    .inline-thread { margin-left: 12px; margin-right: 12px; }
+    .line-actions { left: 12px; }
+    .inbox-head { flex-wrap: wrap; padding: 12px 12px 0; row-gap: 8px; }
+    .group-label { padding: 14px 12px 6px; }
+    .review-row { flex-wrap: wrap; padding: 10px 12px; row-gap: 4px; }
+    .review-row .meta { margin-left: 21px; width: 100%; }
+    .peek { left: 0; right: 0; top: auto; bottom: 0; width: auto; height: 78%; border-radius: 12px 12px 0 0; }
+    .palette { width: calc(100vw - 20px); margin-top: 6vh; }
+    .dialog { width: calc(100vw - 24px); }
+  }
 </style>
 </head>
 <body data-screen="review">
@@ -562,6 +588,8 @@
         <tr class="ctx"><td class="num">189</td><td class="sign"></td><td class="code">  <span class="tok-cm">// …</span></td></tr>
       </table>
     </div>
+
+    <button class="btn mobile-files" style="display:none">📄 Files · 5/8 viewed</button>
 
     <div class="hintbar">
       <span class="hint"><kbd>j</kbd><kbd>k</kbd> files</span>
