@@ -12,6 +12,7 @@ import type {
 import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
+import { getStoredDensity, setDensity, type Density } from "./density.js";
 import { getStored, setStored } from "./storage.js";
 import { orderedDiffFiles } from "./fileTree.js";
 import { usePaneLayout } from "./usePaneLayout.js";
@@ -39,6 +40,7 @@ export function App() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const [density, setDensityState] = useState<Density>(getStoredDensity);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
@@ -80,6 +82,11 @@ export function App() {
     setTheme(next);
     setThemeState(next);
   };
+
+  const changeDensity = useCallback((next: Density) => {
+    setDensity(next);
+    setDensityState(next);
+  }, []);
 
   const toggleSidebar = () =>
     setSidebarCollapsed((c) => {
@@ -354,6 +361,29 @@ export function App() {
   const editors = useMemo(() => workspace?.editors ?? EMPTY_EDITORS, [workspace]);
   const openAdd = useCallback(() => setAddOpen(true), []);
 
+  // Header/sidebar derived counts — total diffstat, viewed progress, and the
+  // per-file open-thread counts the sidebar tree badges read.
+  const totalAdditions = useMemo(
+    () => sidebarFiles.reduce((n, f) => n + f.additions, 0),
+    [sidebarFiles],
+  );
+  const totalDeletions = useMemo(
+    () => sidebarFiles.reduce((n, f) => n + f.deletions, 0),
+    [sidebarFiles],
+  );
+  const viewedCount = useMemo(
+    () => sidebarFiles.reduce((n, f) => (viewed.has(f.path) ? n + 1 : n), 0),
+    [sidebarFiles, viewed],
+  );
+  const threadCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of scopedThreads) {
+      if (t.file === null) continue;
+      counts.set(t.file, (counts.get(t.file) ?? 0) + 1);
+    }
+    return counts;
+  }, [scopedThreads]);
+
   // A failed fetch no longer replaces the whole app; it shows a dismissible
   // banner so the current view stays usable and recoverable.
   const toast = error ? (
@@ -403,6 +433,16 @@ export function App() {
         refs={refs}
         theme={theme}
         onToggleTheme={toggleTheme}
+        density={density}
+        onDensity={changeDensity}
+        split={splitView}
+        onToggleSplit={toggleSplitView}
+        wrap={wrapLines}
+        onToggleWrap={toggleWrapLines}
+        additions={totalAdditions}
+        deletions={totalDeletions}
+        filesChanged={sidebarFiles.length}
+        viewedCount={viewedCount}
         paneCollapsed={paneCollapsed}
         onTogglePane={toggleCollapsed}
         onToggleSidebar={toggleSidebar}
@@ -419,6 +459,7 @@ export function App() {
               files={sidebarFiles}
               allFiles={allFiles}
               viewed={viewed}
+              threadCounts={threadCounts}
               activeFile={activeFile}
               onSelectFile={selectFile}
               onShowDiff={() => setPreviewFile(null)}
@@ -442,9 +483,7 @@ export function App() {
             editors={editors}
             viewed={viewed}
             split={splitView}
-            onToggleSplit={toggleSplitView}
             wrap={wrapLines}
-            onToggleWrap={toggleWrapLines}
             theme={theme}
             onToggleViewed={toggleViewed}
             previewFile={previewFile}

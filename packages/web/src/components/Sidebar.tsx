@@ -1,10 +1,18 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { DiffFile, RepoSummary, WorkspaceEntry } from "@diffect/shared";
 import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
 import {
   buildPathTree,
   type FileTreeEntry,
+  type TreeFile,
   type TreeFileStatus,
   type TreeNode,
 } from "../fileTree.js";
@@ -18,6 +26,8 @@ interface Props {
   files: DiffFile[];
   allFiles: string[];
   viewed: Set<string>;
+  /** Open-thread count per file path, for the tree/list badges. */
+  threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onShowDiff: () => void;
@@ -53,12 +63,14 @@ export const Sidebar = memo(function Sidebar({
   files,
   allFiles,
   viewed,
+  threadCounts,
   activeFile,
   onSelectFile,
   onShowDiff,
   onAddWorkspace,
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
+  const [viewMode, setViewMode] = useState<"tree" | "list">("tree");
   const treeEntries = useMemo(
     () => (fileMode === "all" ? allFileEntries(allFiles, files) : diffFileEntries(files)),
     [allFiles, fileMode, files],
@@ -114,7 +126,7 @@ export const Sidebar = memo(function Sidebar({
               />
             )}
           </div>
-          <div className="file-mode-toggle" role="group" aria-label="File list mode">
+          <div className="file-mode-toggle" role="group" aria-label="Review scope">
             <button
               type="button"
               className={`file-mode ${fileMode === "diff" ? "active" : ""}`}
@@ -135,15 +147,48 @@ export const Sidebar = memo(function Sidebar({
               All files
             </button>
           </div>
+          <div className="ft-toolbar">
+            <span className="ttl">{fileMode === "all" ? "All files" : "Changed"}</span>
+            <div className="seg" role="group" aria-label="File view">
+              <button
+                type="button"
+                className={viewMode === "tree" ? "on" : ""}
+                aria-pressed={viewMode === "tree"}
+                onClick={() => setViewMode("tree")}
+              >
+                Tree
+              </button>
+              <button
+                type="button"
+                className={viewMode === "list" ? "on" : ""}
+                aria-pressed={viewMode === "list"}
+                onClick={() => setViewMode("list")}
+              >
+                List
+              </button>
+            </div>
+          </div>
           {/* key remounts the tree on repo/mode switch so collapse state and
               the memoized tree re-initialize for the right file set. */}
-          <FileTree
-            key={`${repo}:${fileMode}`}
-            repo={repo}
-            entries={treeEntries}
-            activeFile={activeFile}
-            onSelectFile={onSelectFile}
-          />
+          {viewMode === "tree" ? (
+            <FileTree
+              key={`${repo}:${fileMode}`}
+              repo={repo}
+              entries={treeEntries}
+              viewed={viewed}
+              threadCounts={threadCounts}
+              activeFile={activeFile}
+              onSelectFile={onSelectFile}
+            />
+          ) : (
+            <FileList
+              entries={treeEntries}
+              viewed={viewed}
+              threadCounts={threadCounts}
+              activeFile={activeFile}
+              onSelectFile={onSelectFile}
+            />
+          )}
         </>
       )}
     </nav>
@@ -213,11 +258,15 @@ function loadCollapsed(repo: string): Set<string> {
 function FileTree({
   repo,
   entries,
+  viewed,
+  threadCounts,
   activeFile,
   onSelectFile,
 }: {
   repo: string;
   entries: FileTreeEntry[];
+  viewed: Set<string>;
+  threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
 }) {
@@ -250,6 +299,8 @@ function FileTree({
           depth={0}
           collapsed={collapsed}
           onToggleDir={toggleDir}
+          viewed={viewed}
+          threadCounts={threadCounts}
           activeFile={activeFile}
           onSelectFile={onSelectFile}
         />
@@ -263,6 +314,8 @@ function TreeRow({
   depth,
   collapsed,
   onToggleDir,
+  viewed,
+  threadCounts,
   activeFile,
   onSelectFile,
 }: {
@@ -270,22 +323,27 @@ function TreeRow({
   depth: number;
   collapsed: Set<string>;
   onToggleDir: (path: string) => void;
+  viewed: Set<string>;
+  threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
 }) {
-  // Indent by depth; pad files an extra step so they align past a folder chevron.
-  const indent = (depth: number, isFile: boolean) =>
-    ({ paddingLeft: `${depth * 12 + (isFile ? 18 : 4)}px` }) as const;
+  // Indent is driven entirely by --depth (the CSS draws guides + padding); a
+  // file's depth is already one past its folder, so no manual chevron offset.
+  const depthVar = { "--depth": depth } as CSSProperties;
 
   if (node.type === "file") {
+    const unchanged = node.status === "unchanged";
     return (
       <button
         type="button"
         role="treeitem"
         aria-level={depth + 1}
-        className={`tree-file ${node.path === activeFile ? "active" : ""}`}
-        style={indent(depth, true)}
-        title={node.path}
+        className={`tree-file${node.path === activeFile ? " active" : ""}${
+          unchanged ? " unchanged" : ""
+        }`}
+        style={depthVar}
+        title={unchanged ? `${node.path} — unchanged, open to comment` : node.path}
         onClick={() => onSelectFile(node.path)}
       >
         <Icon
@@ -294,6 +352,12 @@ function TreeRow({
           className={`tree-icon status-${node.status}`}
         />
         <span className="tree-name">{node.name}</span>
+        <FileBadges
+          status={node.status}
+          file={node.file}
+          viewed={viewed.has(node.path)}
+          threads={threadCounts.get(node.path) ?? 0}
+        />
       </button>
     );
   }
@@ -307,10 +371,14 @@ function TreeRow({
         aria-level={depth + 1}
         aria-expanded={!isCollapsed}
         className="tree-dir"
-        style={indent(depth, false)}
+        style={depthVar}
         onClick={() => onToggleDir(node.path)}
       >
-        <Icon name={isCollapsed ? "chevron-right" : "chevron-down"} size={12} />
+        <Icon
+          name={isCollapsed ? "chevron-right" : "chevron-down"}
+          size={12}
+          className="tree-chevron"
+        />
         <span className="tree-name">{node.name}</span>
       </button>
       {!isCollapsed &&
@@ -321,12 +389,108 @@ function TreeRow({
             depth={depth + 1}
             collapsed={collapsed}
             onToggleDir={onToggleDir}
+            viewed={viewed}
+            threadCounts={threadCounts}
             activeFile={activeFile}
             onSelectFile={onSelectFile}
           />
         ))}
     </>
   );
+}
+
+/** Right-aligned per-file badges: open-thread count, viewed mark, diffstat. */
+function FileBadges({
+  status,
+  file,
+  viewed,
+  threads,
+}: {
+  status: TreeFileStatus;
+  file?: DiffFile;
+  viewed: boolean;
+  threads: number;
+}) {
+  const unchanged = status === "unchanged";
+  const hasStat = file && (file.additions > 0 || file.deletions > 0);
+  if (!threads && unchanged && !hasStat) return null;
+  return (
+    <span className="ft-badges">
+      {threads > 0 && (
+        <span className="ft-tcount" title={`${threads} open thread${threads === 1 ? "" : "s"}`}>
+          {threads}
+        </span>
+      )}
+      {!unchanged &&
+        (viewed ? (
+          <span className="ft-viewed" title="Viewed" aria-hidden="true">
+            ✓
+          </span>
+        ) : (
+          <span className="ft-unviewed" title="Not viewed" aria-hidden="true" />
+        ))}
+      {hasStat && (
+        <span className="ft-stat">
+          {file!.additions > 0 && <span className="a">+{file!.additions}</span>}
+          {file!.additions > 0 && file!.deletions > 0 ? " " : ""}
+          {file!.deletions > 0 && <span className="d">&minus;{file!.deletions}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Flat list view: filename + muted parent path, in tree (folders-first) order. */
+function FileList({
+  entries,
+  viewed,
+  threadCounts,
+  activeFile,
+  onSelectFile,
+}: {
+  entries: FileTreeEntry[];
+  viewed: Set<string>;
+  threadCounts: Map<string, number>;
+  activeFile: string | null;
+  onSelectFile: (path: string) => void;
+}) {
+  const files = useMemo(() => flattenTree(buildPathTree(entries)), [entries]);
+  return (
+    <div className="file-list">
+      {files.map((node) => {
+        const slash = node.path.lastIndexOf("/");
+        const dir = slash >= 0 ? node.path.slice(0, slash) : "";
+        return (
+          <button
+            type="button"
+            key={node.path}
+            className={`lfile${node.path === activeFile ? " active" : ""}`}
+            title={node.path}
+            onClick={() => onSelectFile(node.path)}
+          >
+            <span className="lname">{node.name}</span>
+            {dir && <span className="lpath">{dir}</span>}
+            <FileBadges
+              status={node.status}
+              file={node.file}
+              viewed={viewed.has(node.path)}
+              threads={threadCounts.get(node.path) ?? 0}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Depth-first flatten of the built tree into files, preserving display order. */
+function flattenTree(nodes: TreeNode[]): TreeFile[] {
+  const out: TreeFile[] = [];
+  for (const node of nodes) {
+    if (node.type === "file") out.push(node);
+    else out.push(...flattenTree(node.children));
+  }
+  return out;
 }
 
 function statusIcon(status: TreeFileStatus): IconName {

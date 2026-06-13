@@ -6,8 +6,9 @@ import { Markdown } from "./Markdown.js";
 import { MarkdownEditor } from "./MarkdownEditor.js";
 
 /**
- * One thread's conversation plus its reply/resolve/dismiss controls. Shared by
- * the inline diff view and the thread inbox so both surfaces behave identically.
+ * One thread's conversation plus its reply/resolve/dismiss controls, rendered as
+ * a dense full-width strip (avatar + author inline, body using the width below).
+ * Shared by the inline diff view and the thread pane so both behave identically.
  */
 export function ThreadConversation({
   thread,
@@ -22,6 +23,7 @@ export function ThreadConversation({
   const [reply, setReply, clearReply] = useDraft(`draft-reply:${thread.id}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bodyOpen, setBodyOpen] = useState(true);
 
   const run = async (op: () => Promise<unknown>) => {
     setBusy(true);
@@ -43,15 +45,14 @@ export function ThreadConversation({
     setReplying(false);
   };
 
+  const count = thread.comments.length;
+
   return (
     <div className={`inline-thread status-${thread.status}`}>
-      <div className="thread-meta">
+      <div className="thread-head">
         {thread.severity && (
           <span className={`sev sev-${thread.severity}`}>{thread.severity}</span>
         )}
-        <span className={`status-badge status-${thread.status}`}>
-          {thread.status}
-        </span>
         {thread.anchorState === "stale" && (
           <span
             className="stale-badge"
@@ -60,92 +61,154 @@ export function ThreadConversation({
             outdated
           </span>
         )}
-      </div>
-      {thread.comments.map((c) => (
-        <div className="comment" key={c.id}>
-          <span className="author">
-            {c.author.type === "agent" ? c.author.name ?? "agent" : "you"}
-          </span>
-          <div className="body">
-            <Markdown>{c.body}</Markdown>
-          </div>
-        </div>
-      ))}
-
-      {replying ? (
-        <div className="reply-form">
-          <MarkdownEditor
-            autoFocus
-            value={reply}
-            placeholder="Reply…"
-            onChange={setReply}
-            onSubmitKey={submitReply}
-            onCancelKey={() => setReplying(false)}
-          />
-          <div className="thread-actions">
-            <button className="ghost" onClick={() => setReplying(false)} disabled={busy}>
-              Cancel
-            </button>
-            <button className="primary" onClick={submitReply} disabled={busy || !reply.trim()}>
-              Reply
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="thread-actions">
-          <button className="ghost" onClick={() => setReplying(true)} disabled={busy}>
-            Reply
+        <span className="thread-state">
+          {count} comment{count === 1 ? "" : "s"} · {thread.status}
+        </span>
+        <div className="thread-head-actions">
+          <button
+            type="button"
+            className="thread-collapse-toggle"
+            aria-expanded={bodyOpen}
+            onClick={() => setBodyOpen((o) => !o)}
+          >
+            {bodyOpen ? "Collapse" : "Expand"}
           </button>
-          {thread.status === "open" && (
-            <button
-              className="ghost"
-              disabled={busy}
-              onClick={() => run(() => api.resolve(thread.id))}
-            >
-              Close
-            </button>
-          )}
-          {thread.status !== "open" && (
-            <button
-              className="ghost danger"
-              disabled={busy}
-              title="Delete this thread permanently"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Delete this thread permanently? This cannot be undone.",
-                  )
-                ) {
-                  run(() => api.delete(thread.id));
-                }
-              }}
-            >
-              Delete
-            </button>
-          )}
-          {editors.length > 0 && thread.file && thread.line !== null && (
-            <button
-              className="ghost"
-              disabled={busy}
-              title={`Open ${thread.file}:${thread.line} in ${editors[0]}`}
-              onClick={() =>
-                run(() =>
-                  api.open({
-                    repo: thread.repo,
-                    worktree: thread.worktree,
-                    file: thread.file!,
-                    line: thread.line!,
-                    editor: editors[0]!,
-                  }),
-                )
-              }
-            >
-              Open
-            </button>
-          )}
         </div>
-      )}
-      {error && <div className="error">{error}</div>}
+      </div>
+
+      <div className={`thread-body-wrap${bodyOpen ? "" : " collapsed"}`}>
+        <div className="thread-body-inner">
+          {thread.comments.map((c) => {
+            const author = authorView(c.author);
+            return (
+              <div className="t-comment" key={c.id}>
+                <div className="c-meta">
+                  <span className={`avatar avatar-${author.kind}`} aria-hidden="true">
+                    {author.initials}
+                  </span>
+                  <span className="c-name">{author.name}</span>
+                  {author.role && <span className="c-role">{author.role}</span>}
+                  <span className="c-when" title={c.ts}>
+                    {relativeTime(c.ts)}
+                  </span>
+                </div>
+                <div className="c-text">
+                  <Markdown>{c.body}</Markdown>
+                </div>
+              </div>
+            );
+          })}
+
+          {replying ? (
+            <div className="reply-form">
+              <MarkdownEditor
+                autoFocus
+                value={reply}
+                placeholder="Reply…"
+                onChange={setReply}
+                onSubmitKey={submitReply}
+                onCancelKey={() => setReplying(false)}
+              />
+              <div className="thread-actions">
+                <button className="ghost" onClick={() => setReplying(false)} disabled={busy}>
+                  Cancel
+                </button>
+                <button
+                  className="primary"
+                  onClick={submitReply}
+                  disabled={busy || !reply.trim()}
+                >
+                  Reply
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="thread-actions">
+              <button className="ghost" onClick={() => setReplying(true)} disabled={busy}>
+                Reply
+              </button>
+              {thread.status === "open" && (
+                <button
+                  className="ghost"
+                  disabled={busy}
+                  onClick={() => run(() => api.resolve(thread.id))}
+                >
+                  Close
+                </button>
+              )}
+              {thread.status !== "open" && (
+                <button
+                  className="ghost danger"
+                  disabled={busy}
+                  title="Delete this thread permanently"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Delete this thread permanently? This cannot be undone.",
+                      )
+                    ) {
+                      run(() => api.delete(thread.id));
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+              {editors.length > 0 && thread.file && thread.line !== null && (
+                <button
+                  className="ghost"
+                  disabled={busy}
+                  title={`Open ${thread.file}:${thread.line} in ${editors[0]}`}
+                  onClick={() =>
+                    run(() =>
+                      api.open({
+                        repo: thread.repo,
+                        worktree: thread.worktree,
+                        file: thread.file!,
+                        line: thread.line!,
+                        editor: editors[0]!,
+                      }),
+                    )
+                  }
+                >
+                  Open
+                </button>
+              )}
+            </div>
+          )}
+          {error && <div className="error">{error}</div>}
+        </div>
+      </div>
     </div>
   );
+}
+
+/** Display name, role, avatar kind and initials for a comment author. */
+function authorView(author: { type: string; name?: string | null }): {
+  name: string;
+  role: string | null;
+  kind: "you" | "agent";
+  initials: string;
+} {
+  if (author.type === "agent") {
+    const name = author.name ?? "agent";
+    const initials = name.replace(/[^a-z0-9]/gi, "").slice(0, 2) || "ai";
+    return { name, role: "agent", kind: "agent", initials };
+  }
+  return { name: "you", role: null, kind: "you", initials: "Y" };
+}
+
+/** Compact relative time ("just now", "24m", "3h", "2d") from an ISO timestamp. */
+function relativeTime(ts: string): string {
+  const then = new Date(ts).getTime();
+  if (Number.isNaN(then)) return "";
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 45) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString();
 }

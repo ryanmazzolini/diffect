@@ -9,6 +9,7 @@ import "@git-diff-view/react/styles/diff-view.css";
 import type { DiffFile, DiffHunk, RepoDiff, Side, Thread } from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import { api } from "../api.js";
+import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { CommentForm } from "./CommentForm.js";
 import { FullFilePreview } from "./FullFilePreview.js";
@@ -29,10 +30,8 @@ interface Props {
   viewed: Set<string>;
   /** Side-by-side rendering when true, inline (unified) when false. */
   split: boolean;
-  onToggleSplit: () => void;
   /** Wrap long lines when true; scroll horizontally when false. */
   wrap: boolean;
-  onToggleWrap: () => void;
   theme: Theme;
   onToggleViewed: (path: string) => void;
   /** A tracked file outside the current diff selected from the All files sidebar. */
@@ -52,9 +51,7 @@ export const DiffView = memo(function DiffView({
   editors,
   viewed,
   split,
-  onToggleSplit,
   wrap,
-  onToggleWrap,
   theme,
   onToggleViewed,
   previewFile,
@@ -82,38 +79,12 @@ export const DiffView = memo(function DiffView({
         [file, ts.filter((t) => t.line !== null)] as [string, Thread[]],
     )
     .filter(([, ts]) => ts.length > 0);
-  const totalAdd = files.reduce((n, f) => n + f.additions, 0);
-  const totalDel = files.reduce((n, f) => n + f.deletions, 0);
   const mode = split ? DiffModeEnum.Split : DiffModeEnum.Unified;
   const showingPreview =
     previewFile !== null && !files.some((f) => f.path === previewFile || f.oldPath === previewFile);
 
   return (
     <div className="diff">
-      <div className="diff-summary">
-        <span className="diff-summary-files">
-          {files.length} {files.length === 1 ? "file" : "files"} changed
-        </span>
-        <DiffStat additions={totalAdd} deletions={totalDel} />
-        <button
-          type="button"
-          className="ghost view-toggle"
-          aria-pressed={split}
-          title={split ? "Switch to unified view" : "Switch to split (side-by-side) view"}
-          onClick={onToggleSplit}
-        >
-          {split ? "Unified" : "Split"}
-        </button>
-        <button
-          type="button"
-          className="ghost wrap-toggle"
-          aria-pressed={!wrap}
-          title={wrap ? "Stop wrapping long lines (scroll horizontally)" : "Wrap long lines"}
-          onClick={onToggleWrap}
-        >
-          {wrap ? "No wrap" : "Wrap"}
-        </button>
-      </div>
       {showingPreview ? (
         <FullFilePreview
           repo={repo}
@@ -248,6 +219,13 @@ const FileDiff = memo(function FileDiff({
     return f;
   }, [file]);
   const extendData = useMemo(() => buildExtendData(threads), [threads]);
+  // Click-to-collapse the diff body; seeded from "viewed" so viewed files start
+  // collapsed. Marking a file viewed/unviewed (here or anywhere) drives the
+  // collapse via the effect; clicking the header still toggles it independently.
+  const [collapsed, setCollapsed] = useState(viewed);
+  useEffect(() => {
+    setCollapsed(viewed);
+  }, [viewed]);
 
   // Existing threads, rendered persistently under their anchor line.
   const renderExtendLine = useCallback(
@@ -305,23 +283,47 @@ const FileDiff = memo(function FileDiff({
     [repo, worktree, file.path, onChanged],
   );
 
+  const threadCount = threads.length;
+  const slash = file.path.lastIndexOf("/");
+  const dir = slash >= 0 ? file.path.slice(0, slash + 1) : "";
+  const base = slash >= 0 ? file.path.slice(slash + 1) : file.path;
+
   return (
     <div className={`file${viewed ? " viewed" : ""}`} id={`file-${file.path}`}>
-      <div className="file-header">
-        <span className={`status status-${file.status}`}>{file.status}</span>
-        <span className="file-path">{file.path}</span>
-        <DiffStat additions={file.additions} deletions={file.deletions} />
-        <label className="viewed-toggle" title="Mark this file viewed (collapses it)">
-          <input
-            type="checkbox"
-            aria-label="Viewed"
-            checked={viewed}
-            onChange={() => onToggleViewed(file.path)}
-          />
-          Viewed
-        </label>
+      <div className={`file-header${collapsed ? " collapsed" : ""}`}>
+        <button
+          type="button"
+          className="fh-main"
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand this file" : "Collapse this file"}
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          <Icon name="chevron-down" size={12} className="fh-chev" />
+          <span className={`status status-${file.status}`}>{file.status}</span>
+          <span className="file-path">
+            {dir && <span className="fp-dir">{dir}</span>}
+            {base}
+          </span>
+          <DiffStat additions={file.additions} deletions={file.deletions} />
+          {threadCount > 0 && (
+            <span className="fh-threads">
+              {threadCount} thread{threadCount === 1 ? "" : "s"}
+            </span>
+          )}
+        </button>
+        <div className="right">
+          <label className="viewed-toggle" title="Mark this file viewed (collapses it)">
+            <input
+              type="checkbox"
+              aria-label="Viewed"
+              checked={viewed}
+              onChange={() => onToggleViewed(file.path)}
+            />
+            Viewed
+          </label>
+        </div>
       </div>
-      {!viewed && (
+      {!collapsed && (
         <DiffViewWithMultiSelect<Thread[]>
           diffFile={diffFile}
           extendData={extendData}
