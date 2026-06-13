@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, readlink } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import type { FileContent, ReviewTarget } from "@diffect/shared";
 import { containedPath } from "../path-safe.js";
 import { resolveWorkBase } from "./diff.js";
@@ -85,6 +86,16 @@ async function readSource(
       // `path` is client-supplied; confine the read to the repo.
       const abs = containedPath(repoRoot, path);
       if (!abs) return null;
+      // git stores a symlink's *target path string* as its blob, not the target
+      // file's bytes — so mirror that here, else the worktree side disagrees with
+      // the blob the diff was computed from. containedPath proved the path
+      // resolves in-repo, so lstat-ing the unresolved path is safe.
+      const link = resolve(repoRoot, path);
+      try {
+        if ((await lstat(link)).isSymbolicLink()) return await readlink(link);
+      } catch {
+        // not a symlink / vanished — fall through to a normal file read
+      }
       try {
         const content = await readFile(abs, "utf8");
         return content.includes("\0") ? null : content; // skip binary
@@ -94,14 +105,19 @@ async function readSource(
         return (e as NodeJS.ErrnoException).code === "ENOENT" ? "" : null;
       }
     }
-    // The blob specs below start with a 40-hex SHA or ":", never "-", and the
-    // path is tree-relative (git rejects ".." escapes), so they need no extra
-    // flag guarding. Use git (not gitTry) so blob content is not trimmed.
+    // The blob specs below start with a 40-hex SHA or ":", never "-". git itself
+    // rejects "..": and absolute specs, but assert the containment invariant up
+    // front (defense in depth) so blob reads match the worktree side's guard.
     case "index":
-      return showBlob(repoRoot, `:${path}`);
+      return blobInTree(path) ? showBlob(repoRoot, `:${path}`) : null;
     case "rev":
-      return showBlob(repoRoot, `${source.rev}:${path}`);
+      return blobInTree(path) ? showBlob(repoRoot, `${source.rev}:${path}`) : null;
   }
+}
+
+/** A repo-relative blob path must not be absolute or contain a ".." segment. */
+function blobInTree(path: string): boolean {
+  return !isAbsolute(path) && !path.split("/").includes("..");
 }
 
 async function showBlob(repoRoot: string, spec: string): Promise<string | null> {
