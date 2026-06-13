@@ -7,6 +7,7 @@ import {
 } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view.css";
 import type { DiffFile, DiffHunk, FileContent, RepoDiff, Side, Thread } from "@diffect/shared";
+import type { Theme } from "../theme.js";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
@@ -17,14 +18,6 @@ import { ThreadConversation } from "./ThreadConversation.js";
 
 // Stable empty array so memoized children don't see a fresh [] each render.
 const EMPTY_THREADS: Thread[] = [];
-
-// We pin the library's own theme to a constant and theme the diff entirely
-// through our CSS vars instead (scoped to html[data-theme]). git-diff-view
-// re-runs initSyntax() — re-highlighting every line — whenever diffViewTheme
-// changes (its effect lists it as a dep), which cost ~500ms on a large diff.
-// Highlighting is class-based (hljs classes), so the templates are
-// theme-independent; only CSS colors need to change, which is now repaint-only.
-const LIB_DIFF_THEME = "dark" as const;
 
 // Scroll-windowing: a file's (heavy) library body is only mounted while the file
 // is within this many px of the viewport, so wrap/theme/repo-switch — which all
@@ -46,6 +39,7 @@ interface Props {
   split: boolean;
   /** Wrap long lines when true; scroll horizontally when false. */
   wrap: boolean;
+  theme: Theme;
   onToggleViewed: (path: string) => void;
   /** A tracked file outside the current diff selected from the All files sidebar. */
   previewFile: string | null;
@@ -65,6 +59,7 @@ export const DiffView = memo(function DiffView({
   viewed,
   split,
   wrap,
+  theme,
   onToggleViewed,
   previewFile,
   onBackToDiff,
@@ -125,6 +120,7 @@ export const DiffView = memo(function DiffView({
             viewed={viewed.has(file.path)}
             mode={mode}
             wrap={wrap}
+            theme={theme}
             onToggleViewed={onToggleViewed}
             onChanged={onChanged}
           />
@@ -202,6 +198,7 @@ const FileDiff = memo(function FileDiff({
   viewed,
   mode,
   wrap,
+  theme,
   onToggleViewed,
   onChanged,
 }: {
@@ -214,6 +211,7 @@ const FileDiff = memo(function FileDiff({
   viewed: boolean;
   mode: DiffModeEnum;
   wrap: boolean;
+  theme: Theme;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }) {
@@ -428,7 +426,7 @@ const FileDiff = memo(function FileDiff({
               extendData={extendData}
               diffViewMode={mode}
               diffViewWrap={wrap}
-              diffViewTheme={LIB_DIFF_THEME}
+              diffViewTheme={theme}
               diffViewHighlight
               diffViewAddWidget
               enableMultiSelect

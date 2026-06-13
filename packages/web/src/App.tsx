@@ -488,6 +488,7 @@ export function App() {
             viewed={viewed}
             split={splitView}
             wrap={wrapLines}
+            theme={theme}
             onToggleViewed={toggleViewed}
             previewFile={previewFile}
             onBackToDiff={backToDiff}

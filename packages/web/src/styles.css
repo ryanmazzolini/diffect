@@ -1954,12 +1954,10 @@ button:disabled {
   --diff-add-widget-color--: var(--on-accent);
   color: var(--ink);
 }
-/* git-diff-view ships its own hljs token colors keyed on its wrapper's
-   data-theme. We pin that prop to a constant (see DiffView's LIB_DIFF_THEME) so
-   the library doesn't re-highlight every line on a theme toggle, which means
-   our own token palette must follow html[data-theme] here instead. The
+/* git-diff-view ships its own hljs token colors; override the ones we have a
+   palette for so the diff's syntax matches the rest of the app. The
    html[data-theme] prefix lifts these to (0,3,1), just past the library's
-   (0,3,0), so they win without !important. */
+   (0,3,0), so they win without !important; --hl-* already track the theme. */
 html[data-theme] .diff-tailwindcss-wrapper .hljs-keyword,
 html[data-theme] .diff-tailwindcss-wrapper .hljs-built_in,
 html[data-theme] .diff-tailwindcss-wrapper .hljs-literal,
