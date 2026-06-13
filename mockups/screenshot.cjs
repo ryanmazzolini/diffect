@@ -1,10 +1,13 @@
-const { chromium, devices } = require('/opt/node22/lib/node_modules/playwright');
 const path = require('path');
+const { chromium } = require(
+  require.resolve('@playwright/test', { paths: [path.resolve(__dirname, '../packages/e2e')] })
+);
 
 const shots = [
   { file: 'mockup-1-quiet-precision.html', name: 'm1', screens: ['inbox', 'review', 'peek', 'palette'] },
   { file: 'mockup-2-studio.html',          name: 'm2', screens: ['home', 'files', 'guide', 'sheet'] },
   { file: 'mockup-3-paper.html',           name: 'm3', screens: ['home', 'review', 'files'] },
+  { file: 'options-board.html',            name: 'board', screens: [null], fullPage: true },
   { file: 'index.html',                    name: 'index', screens: [null] },
 ];
 
@@ -28,7 +31,7 @@ const shots = [
         }
         await page.waitForTimeout(120);
         const out = path.resolve(__dirname, 'shots', `${m.name}-${s || 'page'}-${vp.label}.png`);
-        await page.screenshot({ path: out });
+        await page.screenshot({ path: out, fullPage: !!m.fullPage });
         console.log('saved', out);
       }
     }
