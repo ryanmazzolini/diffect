@@ -24,21 +24,25 @@ _Avoid_: hard-coded private-only storage, mandatory committed review state
 The append-only `.reviews/threads.jsonl` file that canonically records review thread creation, replies, resolution, dismissal, and edits.
 _Avoid_: mutable thread files as the primary store, daemon-only state, generated cache as source of truth
 
-**Review Target Spec**:
-The user-facing expression for what to review, such as `work`, `staged`, `unstaged`, `main`, `HEAD~1`, or `main..feature`.
-_Avoid_: explicit session-first workflow, PR-only review command
+**Review Scope**:
+The user-facing description of what is being reviewed, such as All local changes, Staged changes, Unstaged changes, or a base/compare branch range.
+_Avoid_: exposing `work` jargon, raw git range syntax as the primary UI, PR-only review command
 
-**work Target**:
-The default Review Target Spec for everything changed in the workspace slice, including committed-since-base, unstaged, and untracked work.
-_Avoid_: unstaged-only default, staged-only default, PR-only default
+**Review Scope Snapshot**:
+The exact Git state captured for a Review Scope at a moment in time, including enough HEAD, index, worktree, and base/compare identity to distinguish later review iterations.
+_Avoid_: line-only identity, treating all staged changes on a branch as the same review state
 
 **Review Session**:
-A durable internal review record for one review target over time, including open/resolved/outdated review threads as the diff changes.
-_Avoid_: user-managed session object, one session per file edit, Chord Workspace Review
+A durable review record that groups review scope snapshots, timeline entries, and open/closed/outdated Review Threads over time.
+_Avoid_: one session per file edit, whole-default-branch history, Chord Workspace Review
+
+**Review Target Spec**:
+An internal serialization for querying Git diffs, such as `work`, `staged`, `unstaged`, `main`, `HEAD~1`, or `main..feature`.
+_Avoid_: user-facing product language, durable review identity by itself
 
 **Review Target**:
-The normalized Git state under review, such as working tree, staged changes, unstaged changes, branch comparison, or commit range.
-_Avoid_: only branch, only pull request
+The normalized Git query state for a Review Target Spec, such as working tree, staged changes, unstaged changes, branch comparison, or commit range.
+_Avoid_: durable session identity, only branch, only pull request
 
 **Review Thread**:
 A comment conversation attached to a selected file range in a review session.
@@ -83,10 +87,11 @@ _Avoid_: status-only resolution with no explanation, separate apply log
 - The **Thread Event Log** is append-only so CLI, agents, and **diffectd** can cooperate without a database.
 - A **Review Folder** contains many **Review Sessions**.
 - **Review Folder Visibility** is chosen by the user or workspace; Diffect supports private and committed `.reviews/` folders.
-- A user opens **Diffect** with a **Review Target Spec** rather than by manually creating a **Review Session**.
-- The default **Review Target Spec** is the **work Target**.
-- A **Review Target Spec** resolves to one normalized **Review Target**.
-- A **Review Session** records durable state for one **Review Target**.
+- A user opens **Diffect** by choosing a **Review Scope** rather than by typing raw git syntax or manually creating a **Review Session**.
+- The default **Review Scope** is All local changes.
+- A **Review Scope** produces one or more **Review Scope Snapshots** as HEAD, index, or worktree state changes.
+- A **Review Session** records durable timeline state for one bounded review, including **Review Scope Snapshots** and **Review Threads**.
+- A **Review Scope Snapshot** can be translated into a **Review Target Spec** and normalized **Review Target** for diff computation.
 - A **Review Session** contains many **Review Threads**.
 - A **Review Thread** stores a **File Hash** as a staleness signal and an **Anchor Hash** as the active anchoring check.
 - A file change does not automatically invalidate every **Review Thread** in that file.
@@ -107,8 +112,9 @@ _Avoid_: status-only resolution with no explanation, separate apply log
 - `.reviews/` is canonical review state, not a cache around Chord or Diffity.
 - `.reviews/` visibility is user-chosen; do not assume it is always gitignored or always committed.
 - Whole-file hash invalidation was considered too brittle; the resolved rule is range-based anchoring with file-hash staleness detection.
-- The resolved user model is target-first, following Diffity-like specs such as `work`, `staged`, `unstaged`, and branch/range refs; review sessions are internal durable records, not the primary user concept.
-- The default review target is `work`: everything changed for the workspace slice, not only unstaged files.
+- The resolved user model is scope-first: UI should use All local changes, Staged, Unstaged, and base/compare language while raw Review Target Specs remain internal git-query serialization.
+- The default review scope is All local changes: everything changed for the workspace slice, not only unstaged files.
+- Automatic branch-wide timelines are for non-default branches; default or long-lived branches use explicit ranges or bounded Review Sessions instead of the whole branch history.
 - The canonical review-thread store is append-only `.reviews/threads.jsonl`, not mutable per-thread files or daemon memory.
 - Reviews are primary; **Guided Tours**, **AI Review Passes**, and other explanatory/agent-generated workflows are follow-up add-ons after the human review and fix loop is excellent.
 - Do not make `apply` or daemon-owned agent orchestration part of the initial model; prefer Diffity-style skills/extensions that consume Diffect review state.
