@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -84,5 +84,17 @@ describe("GET /repos/:repo/file/content", () => {
   it("400s when path is missing", async () => {
     const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
     expect((await fetch(`${base}/repos/${repo}/file/content?target=work`)).status).toBe(400);
+  });
+
+  it("returns a symlink's target path string (the git blob), not the target's content", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    await writeFile(join(dir, "target.txt"), "TARGET CONTENT\n");
+    await symlink("target.txt", join(dir, "link.txt"));
+    await git(dir, ["add", "."]);
+    await git(dir, ["commit", "-m", "add symlink"]);
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=link.txt&target=work`);
+    // git stores the link's target string as its blob; both sides must match it
+    // (the worktree side must readlink, not follow into target.txt's bytes).
+    expect(await res.json()).toEqual({ old: "target.txt", new: "target.txt" });
   });
 });
