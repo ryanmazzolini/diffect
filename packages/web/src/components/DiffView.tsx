@@ -6,7 +6,7 @@ import {
   SplitSide,
 } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view.css";
-import type { DiffFile, DiffHunk, RepoDiff, Side, Thread } from "@diffect/shared";
+import type { DiffFile, DiffHunk, FileContent, RepoDiff, Side, Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
@@ -118,6 +118,7 @@ export const DiffView = memo(function DiffView({
             key={file.path}
             repo={repo}
             worktree={worktree}
+            target={diff.target}
             file={file}
             threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
             editors={editors}
@@ -160,9 +161,17 @@ function toFullDiff(file: DiffFile): string {
   ];
   for (const hunk of file.hunks) {
     out.push(hunk.header);
-    for (const l of hunk.lines) out.push(sigil(l.type) + l.text);
+    for (const l of hunk.lines) {
+      out.push(sigil(l.type) + l.text);
+      // Round-trip git's no-trailing-newline marker so the renderer's content
+      // check lines up with the real file content on either side.
+      if (l.noNewline) out.push("\\ No newline at end of file");
+    }
   }
-  return out.join("\n");
+  // Terminate every line — git's output always ends in a newline (even after a
+  // marker), and @git-diff-view reads a diff that doesn't as an un-terminated
+  // final line, which mismatches content that does end in a newline.
+  return out.join("\n") + "\n";
 }
 
 /** Thread bucket keyed by line number, split by side — git-diff-view's extendData shape. */
@@ -186,6 +195,7 @@ const toSide = (side: SplitSide): Side => (side === SplitSide.old ? "old" : "new
 const FileDiff = memo(function FileDiff({
   repo,
   worktree,
+  target,
   file,
   threads,
   editors,
@@ -197,6 +207,7 @@ const FileDiff = memo(function FileDiff({
 }: {
   repo: string;
   worktree: string | null;
+  target: string;
   file: DiffFile;
   threads: Thread[];
   editors: string[];
@@ -206,19 +217,35 @@ const FileDiff = memo(function FileDiff({
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }) {
+  // Real old/new content for the diff's two sides, fetched lazily once the body
+  // mounts. Giving git-diff-view the content (vs. just the diff) switches it to
+  // the "merge" compose path, which (a) enables expandable collapsed context and
+  // (b) stops its dev-mode self-check from warning about a file it can't
+  // reconstruct. `null` = still loading; `"error"` = fetch failed, render
+  // diff-only as a fallback.
+  const [content, setContent] = useState<FileContent | "error" | null>(null);
+  // Re-fetch whenever the diff identity changes (new target/file/worktree).
+  useEffect(() => {
+    setContent(null);
+  }, [repo, worktree, target, file]);
+
   // Build + initialize the lib's DiffFile instance. git-diff-view parses a full
   // unified-diff string (with `diff --git`/`---`/`+++` headers) — we re-serialize
-  // our parsed hunks back into that form. No file content needed for rendering;
-  // context expansion (which would need it) is left for a follow-up.
+  // our parsed hunks back into that form — plus the full content of each side so
+  // it can expand context and validate against the real file.
   const diffFile = useMemo(() => {
+    if (content === null) return null; // wait for content before first render
+    const c = content === "error" ? null : content;
     const f = LibDiffFile.createInstance({
       oldFile: {
         fileName: file.oldPath ?? file.path,
         fileLang: langForPath(file.oldPath ?? file.path) ?? undefined,
+        content: c?.old ?? undefined,
       },
       newFile: {
         fileName: file.path,
         fileLang: langForPath(file.path) ?? undefined,
+        content: c?.new ?? undefined,
       },
       hunks: [toFullDiff(file)],
     });
@@ -226,7 +253,7 @@ const FileDiff = memo(function FileDiff({
     f.buildSplitDiffLines();
     f.buildUnifiedDiffLines();
     return f;
-  }, [file]);
+  }, [file, content]);
   const extendData = useMemo(() => buildExtendData(threads), [threads]);
   // Click-to-collapse the diff body; seeded from "viewed" so viewed files start
   // collapsed. Marking a file viewed/unviewed (here or anywhere) drives the
@@ -256,12 +283,27 @@ const FileDiff = memo(function FileDiff({
     io.observe(el);
     return () => io.disconnect();
   }, []);
+  // Fetch the file content once the body is in view (and only once per identity).
+  const mounted = !collapsed && near;
+  useEffect(() => {
+    if (!mounted || content !== null) return;
+    let live = true;
+    api
+      .fileContent(repo, { path: file.path, oldPath: file.oldPath, target, worktree })
+      .then((c) => live && setContent(c))
+      .catch(() => live && setContent("error"));
+    return () => {
+      live = false;
+    };
+  }, [mounted, content, repo, worktree, target, file.path, file.oldPath]);
+
+  // The body only renders once content has arrived and the lib instance is built.
+  const showBody = mounted && diffFile !== null;
   // Remember the real rendered height so the placeholder reserves the same space
   // when the body unmounts (keeps the scrollbar stable). ResizeObserver also
   // catches height changes from a wrap/mode toggle while mounted.
-  const mounted = !collapsed && near;
   useEffect(() => {
-    if (!mounted) return;
+    if (!showBody) return;
     const el = bodyRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
@@ -269,7 +311,7 @@ const FileDiff = memo(function FileDiff({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [mounted]);
+  }, [showBody]);
   // Placeholder/intrinsic height estimate from line count, for files that have
   // never mounted yet.
   const estHeight = useMemo(() => {
@@ -379,10 +421,10 @@ const FileDiff = memo(function FileDiff({
         </div>
       </div>
       {!collapsed &&
-        (mounted ? (
+        (showBody ? (
           <div ref={bodyRef} className="file-body">
             <DiffViewWithMultiSelect<Thread[]>
-              diffFile={diffFile}
+              diffFile={diffFile!}
               extendData={extendData}
               diffViewMode={mode}
               diffViewWrap={wrap}

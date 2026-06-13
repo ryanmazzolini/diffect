@@ -4,6 +4,7 @@ import type {
   AttachmentResponse,
   CreateThreadRequest,
   DaemonEventType,
+  FileContent,
   FileRange,
   FsListing,
   OpenRequest,
@@ -92,6 +93,21 @@ export const api = {
     if (opts.worktree) q.set("worktree", opts.worktree);
     return fetch(`/repos/${encodeURIComponent(repo)}/file?${q}`).then((r) =>
       json<FileRange>(r),
+    );
+  },
+
+  /** Full old/new content for a file under a target — lets the diff renderer show
+   *  expandable context and validate without reconstructing the file. */
+  fileContent: (
+    repo: string,
+    opts: { path: string; oldPath?: string | null; target?: string; worktree?: string | null },
+  ) => {
+    const q = new URLSearchParams({ path: opts.path });
+    if (opts.oldPath && opts.oldPath !== opts.path) q.set("oldPath", opts.oldPath);
+    if (opts.target) q.set("target", opts.target);
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    return fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`).then((r) =>
+      json<FileContent>(r),
     );
   },
 
