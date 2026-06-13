@@ -1,11 +1,11 @@
 // diffect UI interaction benchmark — paste into DevTools console on the running app.
 //
-// Measures click→next-paint latency (the lag you actually feel) for each diff
-// control, over 5 timed runs (first run dropped as warm-up). Also prints the live
-// DOM size so you can see what each toggle is reconciling.
+// Measures the lag you actually feel for each diff control. Two kinds:
+//   • toggles      → click→next-paint (synchronous re-render/relayout)
+//   • repo switch  → click→DOM-settle (async: network + full-diff remount)
 //
-// Run it on the WORST case: the diffect repo, nothing marked viewed (so all files
-// are expanded). Re-run after each fix and compare p50.
+// Run on the WORST case: the diffect repo, nothing marked viewed (all files
+// expanded). Re-run after each fix and compare the p50 column.
 (async () => {
   const nextPaint = () =>
     new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -19,15 +19,18 @@
 
   const domNodes = () => document.querySelectorAll(".diff *").length;
   const diffBodies = () => document.querySelectorAll(".diff-tailwindcss-wrapper").length;
+  const reportDom = (where) =>
+    console.log(
+      `%c[${where}] ${domNodes()} nodes under .diff · ${diffBodies()} expanded diff bodies`,
+      "font-weight:bold;color:#6a76e0",
+    );
 
-  async function bench(label, click, runs = 6) {
+  // click→next-paint, for synchronous toggles
+  async function bench(label, find, runs = 6) {
     const t = [];
     for (let i = 0; i < runs; i++) {
-      const el = click();
-      if (!el) {
-        console.warn(`${label}: control not found, skipped`);
-        return;
-      }
+      const el = find();
+      if (!el) return console.warn(`${label}: control not found, skipped`);
       const t0 = performance.now();
       el.click();
       await nextPaint();
@@ -36,26 +39,66 @@
     }
     t.shift(); // warm-up
     console.log(
-      `${label.padEnd(22)} p50=${med(t).toFixed(0).padStart(4)}ms  ` +
+      `${label.padEnd(20)} p50=${med(t).toFixed(0).padStart(4)}ms  ` +
         `min=${Math.min(...t).toFixed(0)}  max=${Math.max(...t).toFixed(0)}  ` +
         `[${t.map((x) => x.toFixed(0)).join(", ")}]`,
     );
   }
 
-  console.log(
-    `%cbaseline DOM: ${domNodes()} nodes under .diff · ${diffBodies()} expanded diff bodies`,
-    "font-weight:bold",
-  );
-  console.log("interaction           p50      spread");
+  // click→DOM-settle, for async repo/workspace switches (waits for the new diff
+  // to finish mounting: timer resets on each mutation, fires after `quiet` ms of
+  // calm, which is then subtracted back out).
+  const settle = (rootSel, quiet = 250, timeout = 8000) =>
+    new Promise((resolve) => {
+      const root = document.querySelector(rootSel);
+      if (!root) return resolve(0);
+      const start = performance.now();
+      let timer;
+      const finish = (v) => { obs.disconnect(); clearTimeout(hard); resolve(v); };
+      const obs = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => finish(performance.now() - start - quiet), quiet);
+      });
+      obs.observe(root, { childList: true, subtree: true });
+      timer = setTimeout(() => finish(0), quiet); // no mutations → ~0
+      const hard = setTimeout(() => finish(performance.now() - start), timeout);
+    });
 
-  await bench("Unified→Split", () => segBtn("Diff view mode", "Split"));
-  await bench("Split→Unified", () => segBtn("Diff view mode", "Unified"));
-  await bench("No-wrap→Wrap", () => $(".wrap-toggle"));
-  await bench("Wrap→No-wrap", () => $(".wrap-toggle"));
-  await bench("Tight→Compact", () => segBtn("Density", "Compact"));
-  await bench("Compact→Tight", () => segBtn("Density", "Tight"));
-  await bench("Theme toggle A", () => $(".theme-toggle"));
-  await bench("Theme toggle B", () => $(".theme-toggle"));
+  async function benchSwitch(label, find, runs = 5) {
+    const t = [];
+    for (let i = 0; i < runs; i++) {
+      const el = find();
+      if (!el) return console.warn(`${label}: no inactive repo to switch to, skipped`);
+      el.click();
+      t.push(await settle(".diff-pane"));
+      await sleep(400);
+    }
+    t.shift();
+    console.log(
+      `${label.padEnd(20)} p50=${med(t).toFixed(0).padStart(4)}ms  ` +
+        `min=${Math.min(...t).toFixed(0)}  max=${Math.max(...t).toFixed(0)}  ` +
+        `[${t.map((x) => x.toFixed(0)).join(", ")}]`,
+    );
+  }
 
+  reportDom("baseline");
+  console.log("%c-- toggles (click→paint) --", "color:#888");
+  await bench("Unified->Split", () => segBtn("Diff view mode", "Split"));
+  await bench("Split->Unified", () => segBtn("Diff view mode", "Unified"));
+  await bench("No-wrap->Wrap", () => $(".wrap-toggle"));
+  await bench("Wrap->No-wrap", () => $(".wrap-toggle"));
+  await bench("Tight->Compact", () => segBtn("Density", "Compact"));
+  await bench("Compact->Tight", () => segBtn("Density", "Tight"));
+  await bench("Theme A", () => $(".theme-toggle"));
+  await bench("Theme B", () => $(".theme-toggle"));
+
+  console.log("%c-- repo switch (click→settle) --", "color:#888");
+  if (document.querySelectorAll(".repo-item").length < 2) {
+    console.warn("repo switch: need >=2 repos in the sidebar to measure; skipped");
+  } else {
+    await benchSwitch("Repo switch", () => $(".repo-item:not(.active)"));
+  }
+
+  reportDom("end");
   console.log("%cdone — note the p50 column", "font-weight:bold");
 })();

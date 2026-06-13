@@ -102,3 +102,73 @@ diffect repo for the worst case. Capture baseline → apply fixes 1→4 → re-r
 
 Secondary (attribution, optional): a temporary React `<Profiler onRender>` around the
 diff subtree to confirm a fix cut *commit* duration vs. *layout* duration.
+
+---
+
+## Baseline results (measured 2026-06-13, diffect repo, all 19 files expanded)
+
+| Interaction | p50 | Verdict |
+|---|---:|---|
+| Unified↔Split | 7–8ms | ✅ already fast |
+| Density (Tight↔Compact) | 4–9ms | ✅ already fast |
+| **Wrap toggle** | **~900ms** | 🔴 #1 |
+| **Theme toggle** | **~500ms** | 🔴 #2 |
+| Repo/workspace switch | (unmeasured — added to bench.js) | ? |
+
+**The measurement refuted half the predictions, which is the point of measuring first.**
+Split/unified and density — the ones I expected to be slow (Concerns 1 & 3) — are fine.
+The CSS-var reflow worry (Concern 3) was wrong: density flips the same `:root` vars and
+is 4ms. The real costs are two *different* library-internal mechanisms, both O(mounted lines):
+
+- **Wrap ~900ms — browser wrap-relayout.** `@git-diff-view` unified view sets the
+  `<table>` to `table-fixed` + `white-space:pre-wrap; word-break:break-all` on every line
+  when `diffViewWrap` is true (`react/dist/esm/index.mjs:1499`, `:373`), and split view
+  swaps between two whole component trees `DiffSplitViewWrap`↔`DiffSplitViewNormal`
+  (`:1222`). Either way the browser re-lays-out/remounts all 6,689 lines. Mode switch is
+  fast because no-wrap uses `white-space:pre` — no wrapping computation.
+- **Theme ~500ms — JS re-highlight.** `diffViewTheme` is a dep of the effect that calls
+  `diffFile.initSyntax()` (`:1637`), so a theme toggle re-tokenizes every line. The
+  highlighter is class-based (hljs classes), so the templates are theme-independent and
+  this work is **pure waste** — colors come from CSS.
+
+### Fixes applied (round 1 — safe, no Cmd-F tradeoff)
+1. **Theme via CSS.** Pin `diffViewTheme` to a constant (`DiffView.tsx` `LIB_DIFF_THEME`)
+   so `initSyntax` never re-runs on toggle; add `html[data-theme] .diff-tailwindcss-wrapper
+   .hljs-*` token overrides (specificity 0,3,1 > the library's 0,3,0) so token colors still
+   follow our theme. Expected: theme ~500ms → repaint-only (~5ms). **Verify both themes
+   render correct token colors.**
+2. **Memo hygiene.** Hoisted `() => setPreviewFile(null)` into one stable `useCallback`
+   (`App.tsx` `backToDiff`) used by both DiffView and Sidebar — they were re-running on
+   every scroll-spy tick. Targets scroll/resize smoothness; won't show in the toggle bench.
+
+### Fixes applied (round 2 — scroll windowing)
+Root cause confirmed by the round-1 numbers: **all 154,755 diff nodes mount at once**, and
+every slow path scales with that — repo-switch is a cold mount (~2,900ms), wrap re-renders
+every line (~920ms), theme repaints every node (177ms). `content-visibility:auto` already
+skipped offscreen *paint/layout* but can't skip the *JS* of creating/re-rendering nodes or
+the style-invalidation of a `:root` var change.
+
+So each `FileDiff` now mounts its library body only while within ~1.5 viewports
+(`IntersectionObserver`, `MOUNT_MARGIN_PX`), with a height-preserving placeholder otherwise
+(`DiffView.tsx`). `near` starts false → initial render is headers + placeholders (instant
+first paint), bodies mount on the next frame. The `diffFile` instance is memoized per file,
+so re-entering a file's viewport re-renders without re-parsing. **Tradeoff (accepted):**
+native Cmd-F only finds files currently in the window.
+
+### Results (measured 2026-06-13, diffect repo, all files expanded)
+
+| Interaction | Baseline | + theme-CSS | + windowing | Speedup |
+|---|---:|---:|---:|---:|
+| Repo/workspace switch | ~2,900ms | — | **131ms** | 22× |
+| Wrap toggle | ~920ms | ~920ms | **24–27ms** | ~37× |
+| Theme toggle | ~500ms | ~177ms | **7–8ms** | ~70× |
+| Unified↔Split | 7ms | 7ms | 6–8ms | — |
+| Density | 5ms | 5ms | 7–11ms | — |
+
+All interactions now < 30ms. Mounted DOM is bounded to the visible window instead of 154k
+nodes for the whole diff.
+
+### Separate, pre-existing (not perf)
+`[@git-diff-view/core] Mismatch detected between 'oldFileContent' and 'diff' at line 114`
+fires on some pi-skills file during repo switch — a correctness issue in our `toFullDiff`
+reconstruction vs. the library's parser, unrelated to these changes. Worth a separate look.
