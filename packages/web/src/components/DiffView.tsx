@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DiffViewWithMultiSelect,
   DiffFile as LibDiffFile,
@@ -7,7 +7,6 @@ import {
 } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view.css";
 import type { DiffFile, DiffHunk, RepoDiff, Side, Thread } from "@diffect/shared";
-import type { Theme } from "../theme.js";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
@@ -18,6 +17,21 @@ import { ThreadConversation } from "./ThreadConversation.js";
 
 // Stable empty array so memoized children don't see a fresh [] each render.
 const EMPTY_THREADS: Thread[] = [];
+
+// We pin the library's own theme to a constant and theme the diff entirely
+// through our CSS vars instead (scoped to html[data-theme]). git-diff-view
+// re-runs initSyntax() — re-highlighting every line — whenever diffViewTheme
+// changes (its effect lists it as a dep), which cost ~500ms on a large diff.
+// Highlighting is class-based (hljs classes), so the templates are
+// theme-independent; only CSS colors need to change, which is now repaint-only.
+const LIB_DIFF_THEME = "dark" as const;
+
+// Scroll-windowing: a file's (heavy) library body is only mounted while the file
+// is within this many px of the viewport, so wrap/theme/repo-switch — which all
+// scale with *mounted* lines — stay O(visible) instead of O(whole diff). Far
+// offscreen files render a height-preserving placeholder instead.
+const MOUNT_MARGIN_PX = 1200;
+const EST_ROW_PX = 20; // rough diff-row height, for placeholder/intrinsic sizing
 
 interface Props {
   repo: string;
@@ -32,7 +46,6 @@ interface Props {
   split: boolean;
   /** Wrap long lines when true; scroll horizontally when false. */
   wrap: boolean;
-  theme: Theme;
   onToggleViewed: (path: string) => void;
   /** A tracked file outside the current diff selected from the All files sidebar. */
   previewFile: string | null;
@@ -52,7 +65,6 @@ export const DiffView = memo(function DiffView({
   viewed,
   split,
   wrap,
-  theme,
   onToggleViewed,
   previewFile,
   onBackToDiff,
@@ -112,7 +124,6 @@ export const DiffView = memo(function DiffView({
             viewed={viewed.has(file.path)}
             mode={mode}
             wrap={wrap}
-            theme={theme}
             onToggleViewed={onToggleViewed}
             onChanged={onChanged}
           />
@@ -181,7 +192,6 @@ const FileDiff = memo(function FileDiff({
   viewed,
   mode,
   wrap,
-  theme,
   onToggleViewed,
   onChanged,
 }: {
@@ -193,7 +203,6 @@ const FileDiff = memo(function FileDiff({
   viewed: boolean;
   mode: DiffModeEnum;
   wrap: boolean;
-  theme: Theme;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
 }) {
@@ -226,6 +235,47 @@ const FileDiff = memo(function FileDiff({
   useEffect(() => {
     setCollapsed(viewed);
   }, [viewed]);
+
+  // Scroll-windowing. `near` starts false so the initial render is just headers
+  // + placeholders (a big diff paints instantly); an IntersectionObserver then
+  // mounts the bodies in view and unmounts those scrolled far away.
+  const fileRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const measuredHeight = useRef<number | null>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = fileRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry) setNear(entry.isIntersecting);
+      },
+      { rootMargin: `${MOUNT_MARGIN_PX}px 0px` },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  // Remember the real rendered height so the placeholder reserves the same space
+  // when the body unmounts (keeps the scrollbar stable). ResizeObserver also
+  // catches height changes from a wrap/mode toggle while mounted.
+  const mounted = !collapsed && near;
+  useEffect(() => {
+    if (!mounted) return;
+    const el = bodyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (el.offsetHeight > 0) measuredHeight.current = el.offsetHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mounted]);
+  // Placeholder/intrinsic height estimate from line count, for files that have
+  // never mounted yet.
+  const estHeight = useMemo(() => {
+    const rows = file.hunks.reduce((n, h) => n + h.lines.length + 1, 0);
+    return Math.max(120, rows * EST_ROW_PX);
+  }, [file]);
 
   // Existing threads, rendered persistently under their anchor line.
   const renderExtendLine = useCallback(
@@ -289,7 +339,12 @@ const FileDiff = memo(function FileDiff({
   const base = slash >= 0 ? file.path.slice(slash + 1) : file.path;
 
   return (
-    <div className={`file${viewed ? " viewed" : ""}`} id={`file-${file.path}`}>
+    <div
+      className={`file${viewed ? " viewed" : ""}`}
+      id={`file-${file.path}`}
+      ref={fileRef}
+      style={{ containIntrinsicSize: `auto ${measuredHeight.current ?? estHeight}px` }}
+    >
       <div className={`file-header${collapsed ? " collapsed" : ""}`}>
         <button
           type="button"
@@ -323,20 +378,29 @@ const FileDiff = memo(function FileDiff({
           </label>
         </div>
       </div>
-      {!collapsed && (
-        <DiffViewWithMultiSelect<Thread[]>
-          diffFile={diffFile}
-          extendData={extendData}
-          diffViewMode={mode}
-          diffViewWrap={wrap}
-          diffViewTheme={theme}
-          diffViewHighlight
-          diffViewAddWidget
-          enableMultiSelect
-          renderExtendLine={renderExtendLine}
-          renderWidgetLine={renderWidgetLine}
-        />
-      )}
+      {!collapsed &&
+        (mounted ? (
+          <div ref={bodyRef} className="file-body">
+            <DiffViewWithMultiSelect<Thread[]>
+              diffFile={diffFile}
+              extendData={extendData}
+              diffViewMode={mode}
+              diffViewWrap={wrap}
+              diffViewTheme={LIB_DIFF_THEME}
+              diffViewHighlight
+              diffViewAddWidget
+              enableMultiSelect
+              renderExtendLine={renderExtendLine}
+              renderWidgetLine={renderWidgetLine}
+            />
+          </div>
+        ) : (
+          <div
+            className="file-body-placeholder"
+            style={{ height: measuredHeight.current ?? estHeight }}
+            aria-hidden="true"
+          />
+        ))}
     </div>
   );
 });

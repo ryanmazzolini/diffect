@@ -1969,6 +1969,47 @@ button:disabled {
   --diff-add-widget-color--: var(--on-accent);
   color: var(--ink);
 }
+/* git-diff-view ships its own hljs token colors keyed on its wrapper's
+   data-theme. We pin that prop to a constant (see DiffView's LIB_DIFF_THEME) so
+   the library doesn't re-highlight every line on a theme toggle, which means
+   our own token palette must follow html[data-theme] here instead. The
+   html[data-theme] prefix lifts these to (0,3,1), just past the library's
+   (0,3,0), so they win without !important. */
+html[data-theme] .diff-tailwindcss-wrapper .hljs-keyword,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-built_in,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-literal,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-tag,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-name,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-selector-tag {
+  color: var(--hl-keyword);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-string,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-regexp,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-number {
+  color: var(--hl-number);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-title,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-title.function_,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-section {
+  color: var(--hl-func);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-type,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-class .hljs-title,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-attr,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-attribute,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-property,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-selector-attr {
+  color: var(--hl-type);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-comment,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-quote,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-meta {
+  color: var(--muted);
+  font-style: italic;
+}
 /* Wrappers we mount around library extend/widget lines. */
 .lib-widget {
   padding: 2px 0;

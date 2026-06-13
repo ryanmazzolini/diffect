@@ -360,6 +360,10 @@ export function App() {
   );
   const editors = useMemo(() => workspace?.editors ?? EMPTY_EDITORS, [workspace]);
   const openAdd = useCallback(() => setAddOpen(true), []);
+  // One stable closure for "back to diff" so it doesn't defeat memo() on the
+  // heavy DiffView/Sidebar panels — a fresh arrow each render made them
+  // re-run on every scroll-spy active-file tick, resize commit, and filter click.
+  const backToDiff = useCallback(() => setPreviewFile(null), []);
 
   // Header/sidebar derived counts — total diffstat, viewed progress, and the
   // per-file open-thread counts the sidebar tree badges read.
@@ -462,7 +466,7 @@ export function App() {
               threadCounts={threadCounts}
               activeFile={activeFile}
               onSelectFile={selectFile}
-              onShowDiff={() => setPreviewFile(null)}
+              onShowDiff={backToDiff}
               onAddWorkspace={openAdd}
             />
             <div
@@ -484,10 +488,9 @@ export function App() {
             viewed={viewed}
             split={splitView}
             wrap={wrapLines}
-            theme={theme}
             onToggleViewed={toggleViewed}
             previewFile={previewFile}
-            onBackToDiff={() => setPreviewFile(null)}
+            onBackToDiff={backToDiff}
             onChanged={refreshThreads}
           />
         </section>
