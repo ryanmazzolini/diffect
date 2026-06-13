@@ -222,10 +222,6 @@ const FileDiff = memo(function FileDiff({
   // reconstruct. `null` = still loading; `"error"` = fetch failed, render
   // diff-only as a fallback.
   const [content, setContent] = useState<FileContent | "error" | null>(null);
-  // Re-fetch whenever the diff identity changes (new target/file/worktree).
-  useEffect(() => {
-    setContent(null);
-  }, [repo, worktree, target, file]);
 
   // Build + initialize the lib's DiffFile instance. git-diff-view parses a full
   // unified-diff string (with `diff --git`/`---`/`+++` headers) — we re-serialize
@@ -268,12 +264,22 @@ const FileDiff = memo(function FileDiff({
   const bodyRef = useRef<HTMLDivElement>(null);
   const measuredHeight = useRef<number | null>(null);
   const [near, setNear] = useState(false);
+  // Reset cached content + measured height when the diff identity changes (new
+  // target/file/worktree). FileDiff is keyed by path, so a target switch reuses
+  // the instance — without this, the next diff would briefly show the previous
+  // file's body or reserve its (wrong) placeholder height. Keyed on scalars so
+  // an unrelated new-but-equal `file` reference can't trigger a needless refetch.
+  useEffect(() => {
+    setContent(null);
+    measuredHeight.current = null;
+  }, [repo, worktree, target, file.path, file.oldPath]);
   useEffect(() => {
     const el = fileRef.current;
     if (!el) return;
     const io = new IntersectionObserver(
       (entries) => {
-        const entry = entries[0];
+        // The observer may coalesce entries for the target; the last is current.
+        const entry = entries[entries.length - 1];
         if (entry) setNear(entry.isIntersecting);
       },
       { rootMargin: `${MOUNT_MARGIN_PX}px 0px` },
@@ -281,10 +287,12 @@ const FileDiff = memo(function FileDiff({
     io.observe(el);
     return () => io.disconnect();
   }, []);
-  // Fetch the file content once the body is in view (and only once per identity).
+  // Prefetch content as soon as the file is near the viewport — even while it's
+  // still collapsed — so expanding a viewed file is instant instead of a
+  // blank-then-pop. Fetches once per identity (content reset clears it).
   const mounted = !collapsed && near;
   useEffect(() => {
-    if (!mounted || content !== null) return;
+    if (!near || content !== null) return;
     let live = true;
     api
       .fileContent(repo, { path: file.path, oldPath: file.oldPath, target, worktree })
@@ -293,7 +301,7 @@ const FileDiff = memo(function FileDiff({
     return () => {
       live = false;
     };
-  }, [mounted, content, repo, worktree, target, file.path, file.oldPath]);
+  }, [near, content, repo, worktree, target, file.path, file.oldPath]);
 
   // The body only renders once content has arrived and the lib instance is built.
   const showBody = mounted && diffFile !== null;
