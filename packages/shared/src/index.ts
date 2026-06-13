@@ -27,6 +27,13 @@ export interface DiffLine {
   /** 1-based line number on the new side, null for deleted lines. */
   new: number | null;
   text: string;
+  /**
+   * True when git emitted a `\ No newline at end of file` marker after this line
+   * (the file it belongs to has no trailing newline). Preserved so a serialized
+   * diff round-trips exactly — without it the renderer reads every EOF line as
+   * un-terminated and mismatches real file content.
+   */
+  noNewline?: boolean;
 }
 
 export interface DiffHunk {
@@ -129,6 +136,18 @@ export interface FileRange {
   /** 1-based line number of the first returned line. */
   from: number;
   lines: string[];
+}
+
+/**
+ * Full old/new content for a file under a target — the exact two blobs the diff
+ * was computed from (GET /repos/:repo/file/content). Lets the diff renderer show
+ * expandable collapsed context and validate without reconstructing the file.
+ * A side is `""` when it is legitimately empty (added → old, deleted → new) and
+ * `null` when unreadable/binary (the client then falls back to diff-only render).
+ */
+export interface FileContent {
+  old: string | null;
+  new: string | null;
 }
 
 export interface AttachmentResponse {

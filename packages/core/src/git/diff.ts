@@ -146,9 +146,10 @@ async function syntheticAddedFile(
     return null; // disappeared or unreadable
   }
   if (content.includes("\0")) return null; // skip binary
+  const endsWithNewline = content.endsWith("\n");
   const rawLines = content.split("\n");
   // A trailing newline yields a final empty element; drop it for line counting.
-  if (rawLines.length > 0 && rawLines[rawLines.length - 1] === "") {
+  if (endsWithNewline && rawLines[rawLines.length - 1] === "") {
     rawLines.pop();
   }
   const lines: DiffLine[] = rawLines.map((text, i) => ({
@@ -157,6 +158,9 @@ async function syntheticAddedFile(
     new: i + 1,
     text,
   }));
+  // Mirror git: a file with no trailing newline carries the marker on its last line.
+  const last = lines[lines.length - 1];
+  if (last && content && !endsWithNewline) last.noNewline = true;
   const hunk: DiffHunk = {
     header: `@@ -0,0 +1,${lines.length} @@`,
     oldStart: 0,
@@ -283,7 +287,11 @@ export function parseUnifiedDiff(raw: string): DiffFile[] {
         text: line.slice(1),
       });
     } else if (line.startsWith("\\")) {
-      // "\ No newline at end of file" — ignore for line accounting.
+      // "\ No newline at end of file" applies to the line just emitted; record it
+      // so toFullDiff can round-trip the marker. Without it the renderer treats
+      // every EOF line as un-terminated and its content check mismatches.
+      const last = hunk.lines[hunk.lines.length - 1];
+      if (last) last.noNewline = true;
       continue;
     }
   }

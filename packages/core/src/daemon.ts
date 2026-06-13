@@ -12,6 +12,7 @@ import type {
   WorkspaceEntry,
   WorkspaceMutationRequest,
 } from "@diffect/shared";
+import { readTargetFileContent } from "./git/content.js";
 import { resolveWorkBase } from "./git/diff.js";
 import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
@@ -178,6 +179,7 @@ async function handle(
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
+  if (await fileContentRoute(ctx, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
   if (await attachmentRoutes(ctx, req, res, method, path)) return;
@@ -430,6 +432,40 @@ async function repoRoutes(
     return true;
   }
   return false;
+}
+
+/**
+ * `GET /repos/:repo/file/content?path=&oldPath=&target=&worktree=` — full old/new
+ * content for the diff's two sides under a target. Lets the client render
+ * expandable collapsed context and the diff library validate without
+ * reconstructing the file (which otherwise warns in dev for any normal diff).
+ */
+async function fileContentRoute(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  const m = /^\/repos\/(.+)\/file\/content$/.exec(path);
+  if (!(method === "GET" && m)) return false;
+  const q = url.searchParams;
+  const treeRoot = resolveRepoTreeOr404(
+    ctx,
+    res,
+    decodeURIComponent(m[1]!),
+    q.get("worktree"),
+  );
+  if (!treeRoot) return true;
+  const file = q.get("path");
+  if (!file) {
+    sendJson(res, 400, { error: "path required" });
+    return true;
+  }
+  const target = normalizeTarget(q.get("target"));
+  const content = await readTargetFileContent(treeRoot, target, file, q.get("oldPath") || file);
+  sendJson(res, 200, content);
+  return true;
 }
 
 /** `GET /repos/:repo/file?path=&side=&from=&to=` — lines for unfolding context. */

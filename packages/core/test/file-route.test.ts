@@ -59,3 +59,30 @@ describe("GET /repos/:repo/file", () => {
     ).toBe(400);
   });
 });
+
+describe("GET /repos/:repo/file/content", () => {
+  it("returns full old and new content for a work-target change", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    // base committed f.txt = L1..L5; make an unstaged edit so old !== new.
+    await writeFile(join(dir, "f.txt"), "L1\nL2x\nL3\nL4\nL5\n");
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=f.txt&target=work`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      old: "L1\nL2\nL3\nL4\nL5\n",
+      new: "L1\nL2x\nL3\nL4\nL5\n",
+    });
+  });
+
+  it("returns an empty (not null) old side for an added file", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    await writeFile(join(dir, "added.txt"), "fresh\n");
+    await git(dir, ["add", "added.txt"]);
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=added.txt&target=work`);
+    expect(await res.json()).toEqual({ old: "", new: "fresh\n" });
+  });
+
+  it("400s when path is missing", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    expect((await fetch(`${base}/repos/${repo}/file/content?target=work`)).status).toBe(400);
+  });
+});
