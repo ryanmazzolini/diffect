@@ -18,6 +18,11 @@ import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, readSideLines } from "./reviews/anchors.js";
 import {
+  resolveScope,
+  sessionIdForScope,
+  snapshotIdForState,
+} from "./reviews/scope.js";
+import {
   addComment,
   createThread,
   deleteThread,
@@ -268,11 +273,14 @@ async function threadCollectionRoutes(
     const status = rawStatus === "resolved" ? "closed" : rawStatus;
     const repoFilter = url.searchParams.get("repo");
     const worktreeFilter = url.searchParams.get("worktree");
+    const sessionFilter = url.searchParams.get("session");
     let threads = await loadRefreshedThreads(ctx.ws);
     if (status) threads = threads.filter((t) => t.status === status);
     if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
     if (worktreeFilter)
       threads = threads.filter((t) => t.worktree === worktreeFilter);
+    if (sessionFilter)
+      threads = threads.filter((t) => t.sessionId === sessionFilter);
     sendJson(res, 200, threads);
     return true;
   }
@@ -292,14 +300,28 @@ async function createThreadRoute(
     sendJson(res, 400, { error: "body is required" });
     return true;
   }
-  const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
-  if (!target) return true;
-  const { repo, treeRoot } = target;
-  const base = await resolveWorkBase(treeRoot);
-  const anchor = await buildAnchor(treeRoot, base, body);
+  const resolved = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
+  if (!resolved) return true;
+  const { repo, treeRoot } = resolved;
+  // Bind the thread to the changeset it was filed under: resolve the scope
+  // (target spec → base/head + session) server-side, anchor against the scope's
+  // base, and persist both so the comment belongs to the branch/scope, not the
+  // worktree directory.
+  const scope = await resolveScope(
+    treeRoot,
+    normalizeTarget(body.target),
+    body.worktree ?? null,
+  );
+  const anchor = await buildAnchor(treeRoot, scope.baseSha, body);
+  // Record which snapshot (iteration) of the scope the comment was filed against.
+  const snapshotId = await snapshotIdForState(treeRoot, scope);
   // The store is keyed by the repo's PRIMARY root so all worktrees share one log
   // (the worktree name lives on the thread); treeRoot is only for anchoring.
-  const thread = await createThread(repo.root, { ...body, anchor }, ctx.now());
+  const thread = await createThread(
+    repo.root,
+    { ...body, anchor, scope, sessionId: sessionIdForScope(scope), snapshotId },
+    ctx.now(),
+  );
   sendJson(res, 201, thread);
   return true;
 }
@@ -383,7 +405,20 @@ async function repoRoutes(
     if (!treeRoot) return true;
     const target = normalizeTarget(url.searchParams.get("target"));
     const diff = await computeTargetDiff(treeRoot, target);
-    sendJson(res, 200, { ...diff, repo: repoName, worktree });
+    // Stamp the resolved scope/session so the client can bind and filter threads
+    // to the current review without resolving git refs itself.
+    const scope = await resolveScope(treeRoot, target, worktree);
+    sendJson(res, 200, {
+      ...diff,
+      repo: repoName,
+      worktree,
+      scope,
+      sessionId: sessionIdForScope(scope),
+      // The live snapshot the client compares each thread's snapshotId against to
+      // flag threads filed in an earlier iteration of this scope. Omit (not null)
+      // when none can be computed (unborn HEAD), matching the optional field.
+      currentSnapshotId: (await snapshotIdForState(treeRoot, scope)) ?? undefined,
+    });
     return true;
   }
 

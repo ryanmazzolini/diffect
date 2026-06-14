@@ -1,6 +1,6 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   addComment,
@@ -205,6 +205,121 @@ describe("event log", () => {
       body: "ok",
     };
     expect(replay([good])).toHaveLength(1);
+  });
+
+  it("keeps a legacy v1 thread (no scope) and drops a future-version event", async () => {
+    // A pre-scope (v1) thread.created carries no scope/sessionId. The bump to v2
+    // must NOT drop it — replay puts it in the unscoped/legacy bucket. A
+    // future-version event is still ignored so an older reader can't misread it.
+    const v1 = {
+      v: 1,
+      type: "thread.created",
+      id: "th_legacy",
+      ts: T0,
+      repo: "r",
+      worktree: null,
+      file: "a",
+      side: "new",
+      line: 1,
+      endLine: null,
+      anchor: null,
+      severity: null,
+      author: { type: "user" },
+      body: "legacy",
+    };
+    const future = { ...v1, v: THREAD_SCHEMA_VERSION + 1, id: "th_future" };
+    const path = threadsLogPath(dir);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      `${JSON.stringify(v1)}\n${JSON.stringify(future)}\n`,
+      "utf8",
+    );
+
+    const loaded = await loadThreads(dir);
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.id).toBe("th_legacy");
+    expect(loaded[0]!.scope).toBeNull();
+    expect(loaded[0]!.sessionId).toBeNull();
+  });
+
+  it("stamps scope/sessionId on a v2 thread and round-trips them", async () => {
+    const scope = {
+      target: "main..feature",
+      kind: "range" as const,
+      baseRef: "main",
+      headRef: "feature",
+      baseSha: "deadbeef",
+      branch: "feature",
+    };
+    const created = await createThread(
+      dir,
+      {
+        repo: "r",
+        file: "a",
+        line: 1,
+        body: "scoped",
+        scope,
+        sessionId: "sess_abc",
+        snapshotId: "snap_abc",
+      },
+      T0,
+    );
+    expect(created.scope).toEqual(scope);
+    expect(created.sessionId).toBe("sess_abc");
+    expect(created.snapshotId).toBe("snap_abc");
+
+    const [loaded] = await loadThreads(dir);
+    expect(loaded!.scope).toEqual(scope);
+    expect(loaded!.sessionId).toBe("sess_abc");
+    expect(loaded!.snapshotId).toBe("snap_abc");
+  });
+
+  it("coerces a sessionId with no scope to unscoped (else it's invisible everywhere)", async () => {
+    // A sessionId without a scope matches neither a session view nor the unscoped
+    // bucket (which keys on sessionId === null), so it would never render. Both the
+    // write path (createThread) and the read path (replay) must drop the orphaned id.
+    const created = await createThread(
+      dir,
+      {
+        repo: "r",
+        file: "a",
+        line: 1,
+        body: "orphan",
+        sessionId: "sess_orphan",
+        snapshotId: "snap_orphan",
+      },
+      T0,
+    );
+    expect(created.scope).toBeNull();
+    expect(created.sessionId).toBeNull();
+    // A snapshot id is meaningful only inside a scope, so it's coerced too.
+    expect(created.snapshotId).toBeNull();
+
+    // And a log written before the guard (sessionId set, scope absent) is sanitized
+    // on read rather than vanishing.
+    const orphan = {
+      v: THREAD_SCHEMA_VERSION,
+      type: "thread.created" as const,
+      id: "th_orphan",
+      ts: T0,
+      repo: "r",
+      worktree: null,
+      file: "a",
+      side: "new" as const,
+      line: 1,
+      endLine: null,
+      anchor: null,
+      severity: null,
+      sessionId: "sess_orphan",
+      snapshotId: "snap_orphan",
+      author: { type: "user" as const },
+      body: "orphan",
+    };
+    const [replayed] = replay([orphan]);
+    expect(replayed!.scope).toBeNull();
+    expect(replayed!.sessionId).toBeNull();
+    expect(replayed!.snapshotId).toBeNull();
   });
 
   it("applies a mutation that appears before its thread.created (merge reorder)", () => {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
+import { useCurrentSnapshot } from "../currentSnapshot.js";
 import { useDraft } from "../useDraft.js";
 import { Markdown } from "./Markdown.js";
 import { MarkdownEditor } from "./MarkdownEditor.js";
@@ -24,6 +25,16 @@ export function ThreadConversation({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bodyOpen, setBodyOpen] = useState(true);
+
+  // Filed in an earlier iteration of this review: the thread's snapshot predates
+  // the diff on screen. Purely informational — distinct from `anchorState`
+  // "outdated" (the code moved/vanished). When either id is missing we can't make
+  // the claim, so we stay silent.
+  const currentSnapshotId = useCurrentSnapshot();
+  const earlierIteration =
+    !!thread.snapshotId &&
+    !!currentSnapshotId &&
+    thread.snapshotId !== currentSnapshotId;
 
   const run = async (op: () => Promise<unknown>) => {
     setBusy(true);
@@ -59,6 +70,14 @@ export function ThreadConversation({
             title="The commented code moved or was removed; this thread is outdated but kept for review."
           >
             outdated
+          </span>
+        )}
+        {earlierIteration && (
+          <span
+            className="iteration-badge"
+            title="Filed in an earlier iteration of this review. Still tracked and current — shown for context only."
+          >
+            earlier iteration
           </span>
         )}
         <span className="thread-state">

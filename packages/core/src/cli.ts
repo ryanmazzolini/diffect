@@ -12,7 +12,11 @@ import {
   loadRefreshedThreads,
 } from "./reviews/refresh.js";
 import { buildAnchor } from "./reviews/anchors.js";
-import { resolveWorkBase } from "./git/diff.js";
+import {
+  resolveScope,
+  sessionIdForScope,
+  snapshotIdForState,
+} from "./reviews/scope.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { discoverWorkspace, resolveRepoRoot } from "./workspace.js";
 import { gitTry } from "./git/exec.js";
@@ -212,9 +216,14 @@ async function cmdComment(argv: string[]): Promise<number> {
   const endLine = flags.options.has("end-line")
     ? positiveInt(flags.options.get("end-line")!, "--end-line")
     : null;
-  // Anchor against the file content at creation so the thread can survive edits.
-  const base = await resolveWorkBase(treeRoot);
-  const anchor = await buildAnchor(treeRoot, base, { file, side, line, endLine });
+  // Bind the comment to the changeset it was filed under (--target, default
+  // "work") and anchor against that scope's base so the thread survives edits.
+  const scope = await resolveScope(
+    treeRoot,
+    normalizeTarget(flags.options.get("target")),
+    worktree,
+  );
+  const anchor = await buildAnchor(treeRoot, scope.baseSha, { file, side, line, endLine });
   const thread = await createThread(
     storeRoot,
     {
@@ -226,6 +235,9 @@ async function cmdComment(argv: string[]): Promise<number> {
       endLine,
       severity: (flags.options.get("severity") as Severity) ?? null,
       anchor,
+      scope,
+      sessionId: sessionIdForScope(scope),
+      snapshotId: await snapshotIdForState(treeRoot, scope),
       author: authorFrom(flags),
       body,
     },
@@ -239,7 +251,13 @@ async function cmdGeneral(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const body = flags.options.get("body");
   if (!body) fail("--body is required");
-  const { repo, worktree, storeRoot } = await resolveTarget(flags);
+  const { repo, worktree, treeRoot, storeRoot } = await resolveTarget(flags);
+  // General (non-line) threads still belong to a review scope/session.
+  const scope = await resolveScope(
+    treeRoot,
+    normalizeTarget(flags.options.get("target")),
+    worktree,
+  );
   const thread = await createThread(
     storeRoot,
     {
@@ -248,6 +266,9 @@ async function cmdGeneral(argv: string[]): Promise<number> {
       file: null,
       side: null,
       line: null,
+      scope,
+      sessionId: sessionIdForScope(scope),
+      snapshotId: await snapshotIdForState(treeRoot, scope),
       author: authorFrom(flags),
       body,
     },

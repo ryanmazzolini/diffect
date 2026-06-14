@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
+  MIN_THREAD_SCHEMA_VERSION,
   THREAD_EVENT_TYPES,
   THREAD_SCHEMA_VERSION,
   type AddCommentRequest,
@@ -52,6 +53,14 @@ export async function createThread(
     endLine: req.endLine ?? null,
     anchor: req.anchor ?? null,
     severity: req.severity ?? null,
+    // Bind sessionId to scope: a sessionId with no scope matches neither a session
+    // view nor the unscoped bucket (which keys on sessionId === null), so it would
+    // be invisible everywhere. Coerce that bad combo to fully unscoped.
+    scope: req.scope ?? null,
+    sessionId: req.scope ? (req.sessionId ?? null) : null,
+    // The snapshot is meaningful only within a scope, so bind it the same way:
+    // no scope ⇒ no snapshot (a snapshot id with no scope is invisible everywhere).
+    snapshotId: req.scope ? (req.snapshotId ?? null) : null,
     author: req.author ?? { type: "user" },
     body: req.body,
   };
@@ -196,9 +205,15 @@ function parseEvent(line: string): ThreadEvent | null {
   }
   if (!obj || typeof obj !== "object") return null;
   const e = obj as { type?: unknown; v?: unknown };
-  // Schema-version gate: ignore events from a future/unknown schema rather than
-  // misinterpreting them.
-  if (e.v !== THREAD_SCHEMA_VERSION) return null;
+  // Schema-version gate: accept the known range [MIN, CURRENT] so older events
+  // (e.g. v1 threads predating scope binding) still replay, but ignore events
+  // from a future/unknown schema rather than misinterpreting them.
+  if (
+    typeof e.v !== "number" ||
+    e.v < MIN_THREAD_SCHEMA_VERSION ||
+    e.v > THREAD_SCHEMA_VERSION
+  )
+    return null;
   if (typeof e.type !== "string") return null;
   if (!THREAD_EVENT_TYPES.includes(e.type as ThreadEvent["type"])) return null;
   return obj as ThreadEvent;
@@ -235,6 +250,15 @@ export function replay(events: ThreadEvent[]): Thread[] {
       severity: e.severity,
       status: "open",
       anchorState: "active",
+      // Legacy (v1) created events carry no scope/session — default to the
+      // unscoped bucket rather than dropping the thread (ADR migration rule).
+      // A sessionId with no scope is invisible in every view, so bind them: no
+      // scope ⇒ unscoped, regardless of any stored sessionId.
+      scope: e.scope ?? null,
+      sessionId: e.scope ? (e.sessionId ?? null) : null,
+      // Pre-Slice-3 (and unscoped) events carry no snapshot — default to null,
+      // bound to scope exactly like sessionId so an orphaned id can't survive.
+      snapshotId: e.scope ? (e.snapshotId ?? null) : null,
       comments: [
         { id: genCommentId(e.id, 0), author: e.author, body: e.body, ts: e.ts },
       ],

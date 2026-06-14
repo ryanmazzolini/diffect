@@ -28,6 +28,17 @@ export async function resolveWorkBase(repoRoot: string): Promise<string | null> 
   return await gitTry(repoRoot, ["rev-parse", "HEAD"]);
 }
 
+/**
+ * The branch currently checked out in a worktree, or null when HEAD is detached.
+ * `symbolic-ref --short HEAD` prints the short branch name and exits non-zero
+ * (→ gitTry null) on a detached HEAD, so a detached checkout reads as "no branch".
+ */
+export async function resolveCurrentBranch(
+  repoRoot: string,
+): Promise<string | null> {
+  return await gitTry(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+}
+
 export async function resolveDefaultBranch(
   repoRoot: string,
 ): Promise<string | null> {

@@ -96,6 +96,7 @@ export const DiffView = memo(function DiffView({
         <FullFilePreview
           repo={repo}
           worktree={worktree}
+          target={diff.target}
           file={previewFile}
           threads={threadsByFile.get(previewFile) ?? EMPTY_THREADS}
           editors={editors}
@@ -365,6 +366,7 @@ const FileDiff = memo(function FileDiff({
           <CommentForm
             repo={repo}
             worktree={worktree}
+            target={target}
             file={file.path}
             side={toSide(side)}
             line={start}
@@ -378,7 +380,7 @@ const FileDiff = memo(function FileDiff({
         </div>
       );
     },
-    [repo, worktree, file.path, onChanged],
+    [repo, worktree, target, file.path, onChanged],
   );
 
   const threadCount = threads.length;

@@ -4,6 +4,9 @@ import type {
   DiffFile,
   RefList,
   RepoDiff,
+  RepoSummary,
+  ReviewSession,
+  ReviewTargetKind,
   Thread,
   ThreadStatus,
   WorkspaceEntry,
@@ -15,6 +18,7 @@ import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { getStoredDensity, setDensity, type Density } from "./density.js";
 import { getStored, setStored } from "./storage.js";
 import { orderedDiffFiles } from "./fileTree.js";
+import { CurrentSnapshotContext } from "./currentSnapshot.js";
 import { usePaneLayout } from "./usePaneLayout.js";
 import { useResizable } from "./useResizable.js";
 import { DiffView } from "./components/DiffView.js";
@@ -28,12 +32,44 @@ const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 // Stable empty references so memoized children don't re-render on the null paths.
 const EMPTY_FILES: DiffFile[] = [];
 const EMPTY_EDITORS: string[] = [];
+const EMPTY_SESSIONS: ReviewSession[] = [];
+// The session-count map key standing in for legacy (pre-scope, sessionId === null)
+// threads, which share the dedicated unscoped bucket rather than any one session.
+const LEGACY_KEY = "__legacy__";
+// Kinds whose session identity is worktree/branch-independent, so a scope stored
+// on a thread round-trips to the same diff-route id no matter what's checked out
+// now. `work`/`ref` resolve `headRef` from the LIVE branch (reviews/scope.ts), so
+// a session reconstructed for a branch no longer checked out would re-stamp a
+// *different* id on selection — orphaning itself. We therefore only reconstruct
+// these stable kinds from thread scopes; live `work` sessions come from the server
+// (one per checked-out worktree), and the active diff is always selectable on its own.
+const STABLE_KINDS: ReadonlySet<ReviewTargetKind> = new Set([
+  "range",
+  "staged",
+  "unstaged",
+]);
 
 export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [repo, setRepo] = useState<string | null>(null);
   const [worktree, setWorktree] = useState<string | null>(null);
   const [target, setTarget] = useState("work");
+  // The unscoped/legacy bucket is open: the thread pane shows pre-scope threads
+  // (sessionId === null) instead of the active session's. A flag, not a magic
+  // target, so it never collides with a real review scope.
+  const [showUnscoped, setShowUnscoped] = useState(false);
+  // Optimistic session highlight: the id we *expect* the diff route to stamp for
+  // the entry the user just clicked, shown until the real diff settles. Fix 1
+  // guarantees every selectable entry round-trips, so it never lingers on a
+  // mismatch; `refreshDiff` retires it on settle — success OR error — so an
+  // errored diff route can't strand the highlight on a session that won't load.
+  const [pendingSession, setPendingSession] = useState<string | null>(null);
+  // Bumped on every sidebar selection to force a diff reload even when the
+  // resulting (worktree, target) equals the current one. Without it, re-selecting
+  // the active session is a state no-op: no fetch fires, so the optimistic
+  // `pendingSession` set below never gets a settle to retire it — and a session
+  // whose diff previously errored could never be retried by re-clicking its row.
+  const [reselectTick, setReselectTick] = useState(0);
   const [diff, setDiff] = useState<RepoDiff | null>(null);
   const [refs, setRefs] = useState<RefList | null>(null);
   const [allFiles, setAllFiles] = useState<string[]>([]);
@@ -191,11 +227,20 @@ export function App() {
       if (seq === diffSeq.current) {
         setDiff(next);
         setError(null);
+        // Selection settled — retire the optimistic highlight (now == diff.sessionId).
+        setPendingSession(null);
       }
     } catch (e) {
-      if (seq === diffSeq.current) setError(String(e));
+      if (seq === diffSeq.current) {
+        setError(String(e));
+        // The selection settled with an error (e.g. a reconstructed range whose
+        // base ref was deleted → 500, or a removed worktree → 404). Retire the
+        // optimistic highlight too, or it would pin the sidebar + thread filter to
+        // a session whose diff never loads, with no self-recovery on re-click.
+        setPendingSession(null);
+      }
     }
-  }, [repo, worktree, target]);
+  }, [repo, worktree, target, reselectTick]);
 
   const refreshWorkspace = useCallback(() => {
     api
@@ -220,10 +265,43 @@ export function App() {
     refreshThreads();
   }, [refreshWorkspace, loadWorkspaces, refreshThreads]);
 
-  // Reset the worktree selection when switching repos.
+  // Switching repos lands on its primary `work` session with the unscoped bucket
+  // closed — a range/staged target is repo-specific and meaningless elsewhere.
   useEffect(() => {
     setWorktree(null);
+    setTarget("work");
+    setShowUnscoped(false);
+    setPendingSession(null);
   }, [repo]);
+
+  // Picking a target in the Topbar navigates to a real diff/session, so it must
+  // also leave the unscoped bucket (which overrides the thread filter). We can't
+  // predict the resulting session id from the target alone, so drop any optimistic
+  // highlight and let the landing diff settle it.
+  const changeTarget = useCallback((next: string) => {
+    setShowUnscoped(false);
+    setPendingSession(null);
+    setTarget(next);
+  }, []);
+
+  // Selecting a sidebar review entry sets its checkout + target together so the
+  // diff route re-resolves to that session; we optimistically highlight its id so
+  // the sidebar + thread filter switch instantly instead of flashing the previous
+  // session until the async diff lands. Legacy selection only flips the bucket
+  // flag — unscoped threads have no single diff to show.
+  const selectSession = useCallback((s: ReviewSession) => {
+    setShowUnscoped(false);
+    setPendingSession(s.id);
+    setWorktree(s.worktree);
+    setTarget(s.scope.target);
+    // Force a reload even if (worktree, target) are unchanged, so the optimistic
+    // highlight always has a settle to retire it and a failed session can retry.
+    setReselectTick((n) => n + 1);
+  }, []);
+  const selectLegacy = useCallback(() => {
+    setPendingSession(null);
+    setShowUnscoped(true);
+  }, []);
 
   useEffect(() => {
     setPreviewFile(null);
@@ -316,6 +394,24 @@ export function App() {
   // during the reconnect gap.
   const refreshers = useRef({ refreshThreads, refreshDiff, refreshWorkspace, loadWorkspaces });
   refreshers.current = { refreshThreads, refreshDiff, refreshWorkspace, loadWorkspaces };
+  // A branch checkout writes the working tree (→ diff.changed) without a
+  // workspace.changed, so the sidebar's session labels go stale unless we
+  // re-derive them. But re-deriving re-shells git over *every* repo + worktree,
+  // and diff.changed is debounced only 120ms server-side with no client debounce —
+  // a burst of edits would spawn a git storm. So coalesce the workspace refresh
+  // to a trailing debounce; the diff itself still refreshes immediately below.
+  const workspaceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshWorkspaceSoon = useCallback(() => {
+    if (workspaceTimer.current) clearTimeout(workspaceTimer.current);
+    workspaceTimer.current = setTimeout(() => {
+      workspaceTimer.current = null;
+      refreshers.current.refreshWorkspace();
+      refreshers.current.loadWorkspaces();
+    }, 750);
+  }, []);
+  useEffect(() => () => {
+    if (workspaceTimer.current) clearTimeout(workspaceTimer.current);
+  }, []);
   useEffect(() => {
     return api.subscribe((type) => {
       const r = refreshers.current;
@@ -324,24 +420,130 @@ export function App() {
         setLive("Review threads updated");
       } else if (type === DAEMON_EVENTS.diffChanged) {
         r.refreshDiff();
+        refreshWorkspaceSoon();
         setLive("Diff updated");
       } else if (type === DAEMON_EVENTS.workspaceChanged) {
+        // An explicit workspace change is rarer and structural — refresh now.
         r.refreshWorkspace();
         r.loadWorkspaces();
         setLive("Workspaces updated");
       }
     });
-  }, []);
+  }, [refreshWorkspaceSoon]);
 
   // Derived view state, memoized so the heavy panels (diff/sidebar/threads) only
   // re-render when their own inputs change — not on every scroll-spy active-file
   // update, resize commit, or unrelated state change.
+  // The session resolved for the current (repo, worktree, target); threads bind
+  // to it so comments follow the changeset, not the worktree directory. While a
+  // selection is in flight we honor the optimistic `pendingSession` so the
+  // highlight + thread filter switch instantly (Fix 1 guarantees it round-trips);
+  // the unscoped bucket overrides everything, so its threads aren't a session.
+  const currentSession =
+    !showUnscoped && pendingSession ? pendingSession : (diff?.sessionId ?? null);
+
+  // The sidebar renders sessions off the `entries` (workspaces) feed, so resolve
+  // the active repo from the SAME source to keep server-session ids consistent.
+  const activeRepo = useMemo<RepoSummary | null>(
+    () => entries.flatMap((e) => e.repos).find((r) => r.name === repo) ?? null,
+    [entries, repo],
+  );
+  const serverSessions = activeRepo?.sessions ?? EMPTY_SESSIONS;
+
+  // The active diff's own session, stabilized so a benign refetch re-creating the
+  // RepoDiff (and a fresh `scope` object) doesn't churn the sidebar's session memo.
+  // The session id is sha256(kind+baseRef+headRef), so an equal id guarantees an
+  // equal symbolic scope; only `baseSha` (commit drift) and `target` (the raw
+  // spec, e.g. `a..b` vs `a...b`) can differ for one id. baseSha is unused by the
+  // label or navigation, but `target` drives re-selection (selectSession →
+  // setTarget), so we re-key the cache on it too — keeping identity stable while
+  // (id, worktree, target) hold, and refreshing the scope when any of them move.
+  const diffSessionId = diff?.sessionId ?? null;
+  const diffSessionRef = useRef<ReviewSession | null>(null);
+  if (diffSessionId && diff?.scope) {
+    const cur = diffSessionRef.current;
+    if (
+      !cur ||
+      cur.id !== diffSessionId ||
+      cur.worktree !== worktree ||
+      cur.scope.target !== diff.scope.target
+    ) {
+      diffSessionRef.current = { id: diffSessionId, scope: diff.scope, worktree };
+    }
+  } else if (diffSessionRef.current) {
+    diffSessionRef.current = null;
+  }
+  const diffSession = diffSessionRef.current;
+
+  // The set of worktree names currently checked out, used to drop a thread's
+  // stored worktree if it has since been removed (selecting it would otherwise
+  // 404 the diff route, which keeps a truthy worktree). Stable kinds round-trip
+  // to the same id regardless of worktree, so falling back to the primary keeps
+  // the thread reachable.
+  const liveWorktrees = useMemo(
+    () => new Set((activeRepo?.worktrees ?? []).map((w) => w.name)),
+    [activeRepo],
+  );
+
+  // Sessions not server-derived but still reachable: reconstructed from threads'
+  // stored scopes (so a range/staged review you've commented on stays a sidebar
+  // entry after you navigate away), plus the active diff's own scope (so a fresh
+  // review with no threads yet is selectable). Only *stable* kinds are
+  // reconstructed — `work`/`ref` ids depend on the live branch, so a stored one
+  // for a branch no longer checked out can't round-trip (see STABLE_KINDS). The
+  // active diff is exempt only because it IS the live resolution (its id is
+  // whatever the route just stamped), so selecting it re-stamps the same id.
+  // Tradeoff (Decision #3): a `work`/`ref` review you commented on but aren't
+  // currently viewing has no sidebar entry until you re-target it — its threads
+  // aren't lost (still in the log, counted), just not surfaced as a session.
+  // All deduped by id against the server set and each other.
+  const extraSessions = useMemo<ReviewSession[]>(() => {
+    if (!repo) return EMPTY_SESSIONS;
+    const serverIds = new Set(serverSessions.map((s) => s.id));
+    const byId = new Map<string, ReviewSession>();
+    for (const t of threads) {
+      if (t.repo !== repo || t.sessionId === null || t.scope === null) continue;
+      if (!STABLE_KINDS.has(t.scope.kind)) continue;
+      if (serverIds.has(t.sessionId) || byId.has(t.sessionId)) continue;
+      const worktree =
+        t.worktree !== null && !liveWorktrees.has(t.worktree) ? null : t.worktree;
+      byId.set(t.sessionId, { id: t.sessionId, scope: t.scope, worktree });
+    }
+    if (
+      diffSession &&
+      !serverIds.has(diffSession.id) &&
+      !byId.has(diffSession.id)
+    ) {
+      byId.set(diffSession.id, diffSession);
+    }
+    return byId.size ? [...byId.values()] : EMPTY_SESSIONS;
+  }, [repo, threads, serverSessions, diffSession, liveWorktrees]);
+
+  // Thread count per session id (and the legacy bucket) over ALL the repo's
+  // threads — the sidebar badge reads "how many comments live under this review",
+  // independent of which session is currently shown.
+  const sessionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of threads) {
+      if (t.repo !== repo) continue;
+      const key = t.sessionId ?? LEGACY_KEY;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [threads, repo]);
+  const legacyCount = sessionCounts.get(LEGACY_KEY) ?? 0;
+
   const scopedThreads = useMemo(
     () =>
-      threads.filter(
-        (t) => t.repo === repo && (worktree === null || t.worktree === worktree),
-      ),
-    [threads, repo, worktree],
+      threads.filter((t) => {
+        if (t.repo !== repo) return false;
+        // The unscoped bucket shows pre-scope (v1) threads and nothing else;
+        // session views show their own session and never the legacy threads.
+        if (showUnscoped) return t.sessionId === null;
+        if (t.sessionId === null) return false;
+        return t.sessionId === currentSession;
+      }),
+    [threads, repo, showUnscoped, currentSession],
   );
   const byStatus = useMemo(
     () =>
@@ -433,7 +635,7 @@ export function App() {
         repo={repo}
         worktree={worktree}
         target={target}
-        onTarget={setTarget}
+        onTarget={changeTarget}
         refs={refs}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -457,9 +659,14 @@ export function App() {
             <Sidebar
               entries={entries}
               repo={repo}
-              worktree={worktree}
+              currentSession={currentSession}
+              showUnscoped={showUnscoped}
+              extraSessions={extraSessions}
+              sessionCounts={sessionCounts}
+              legacyCount={legacyCount}
               onSelectRepo={setRepo}
-              onSelectWorktree={setWorktree}
+              onSelectSession={selectSession}
+              onSelectLegacy={selectLegacy}
               files={sidebarFiles}
               allFiles={allFiles}
               viewed={viewed}
@@ -476,6 +683,7 @@ export function App() {
             />
           </>
         )}
+        <CurrentSnapshotContext.Provider value={diff?.currentSnapshotId ?? null}>
         <main className="layout" style={{ gridTemplateColumns: paneColumns }}>
         <section className="diff-pane" ref={diffPaneRef}>
           <DiffView
@@ -516,6 +724,19 @@ export function App() {
               </button>
             ))}
           </div>
+          {!showUnscoped && scopedThreads.length === 0 && legacyCount > 0 && (
+            <button
+              type="button"
+              className="unscoped-hint"
+              onClick={selectLegacy}
+            >
+              <Icon name="git-branch" size={14} />
+              <span>
+                {legacyCount} unscoped comment{legacyCount === 1 ? "" : "s"} from
+                before reviews were branch-scoped — view them
+              </span>
+            </button>
+          )}
           <ThreadList
             threads={byStatus}
             editors={editors}
@@ -525,6 +746,7 @@ export function App() {
         </aside>
         )}
         </main>
+        </CurrentSnapshotContext.Provider>
       </div>
     </div>
   );

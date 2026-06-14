@@ -3,7 +3,16 @@
 // the file store from drifting apart.
 
 /** Current schema version for the threads.jsonl event log. */
-export const THREAD_SCHEMA_VERSION = 1 as const;
+export const THREAD_SCHEMA_VERSION = 2 as const;
+
+/**
+ * The oldest event-log schema version replay still understands. v1 threads
+ * predate scope binding (Slice 1) — they replay into the unscoped/legacy bucket
+ * (scope/sessionId null) rather than being dropped. Replay accepts the inclusive
+ * range [MIN, CURRENT]; a future version (> CURRENT) is still ignored so a newer
+ * writer's events aren't misinterpreted by an older reader.
+ */
+export const MIN_THREAD_SCHEMA_VERSION = 1 as const;
 
 /**
  * Server-sent event types the daemon broadcasts over `GET /events` and the
@@ -71,6 +80,20 @@ export interface RepoDiff {
   repo?: string;
   worktree?: string | null;
   target: string;
+  /**
+   * The resolved scope + session for this (repo, worktree, target), stamped by
+   * the daemon so the client can bind/filter threads to the current session
+   * without resolving git refs itself. Absent on the raw git-layer result.
+   */
+  scope?: ReviewScope;
+  sessionId?: string;
+  /**
+   * Fingerprint of the current point-in-time git state for this (repo, worktree,
+   * target) — the live snapshot. The client compares a thread's `snapshotId`
+   * against this to mark it as filed in an *earlier iteration*. Absent on the raw
+   * git-layer result (stamped by the daemon, which can read git state).
+   */
+  currentSnapshotId?: string;
   files: DiffFile[];
 }
 
@@ -97,9 +120,65 @@ export interface ReviewTarget {
   threeDot?: boolean;
 }
 
+/**
+ * The review scope a thread is filed under: the normalized target plus the
+ * base/head a comment belongs to. Persisted on each thread (Slice 1) so a
+ * comment binds to the *changeset* it was made against — not just the worktree
+ * directory — and stays addressable as commits advance.
+ *
+ * `baseRef`/`headRef` are *symbolic* (branch names, "HEAD", "index", …) so the
+ * derived `sessionId` is stable while commits move; `baseSha` is the resolved
+ * commit the anchor's "old" side reads from, which may legitimately be null
+ * (e.g. a repo with no commits yet).
+ */
+export interface ReviewScope {
+  /** The raw target spec the thread was filed under (e.g. "work", "main..feat"). */
+  target: string;
+  kind: ReviewTargetKind;
+  /** Symbolic base ref for session identity (stable as commits advance). */
+  baseRef: string;
+  /** Symbolic head ref for session identity. */
+  headRef: string;
+  /** Resolved base commit SHA the anchor's "old" side reads from, when one exists. */
+  baseSha: string | null;
+  /** Branch checked out in the worktree when the thread was filed (display aid). */
+  branch: string | null;
+}
+
 export interface WorktreeSummary {
   name: string;
   root: string;
+  /**
+   * The checkout's current branch (`symbolic-ref --short HEAD`), or null when
+   * detached. Surfaced so the UI can label which branch a worktree is on and
+   * derive a review session for it.
+   */
+  branch: string | null;
+}
+
+/**
+ * A review session surfaced as a primary sidebar entry: a (repo, checkout,
+ * target) resolved into a stable session identity. The whole `scope` is carried
+ * so the UI can label the entry (branch / range / local) and re-select it
+ * without resolving any git refs itself; `id` equals `sessionIdForScope(scope)`,
+ * the join key against `Thread.sessionId`.
+ *
+ * Server-derived sessions — one `work` session per checked-out worktree — ride
+ * on `RepoSummary.sessions`. The client also reconstructs sessions from existing
+ * threads' scopes (so a range/staged review you've commented on stays a reachable
+ * entry) and from the active diff; all three share this one shape, deduped by `id`.
+ */
+export interface ReviewSession {
+  /** Stable id; equals `sessionIdForScope(scope)` and `Thread.sessionId`. */
+  id: string;
+  /** The scope this session reviews — its target spec, base/head, and branch. */
+  scope: ReviewScope;
+  /**
+   * Checkout to select with this session: null for the primary worktree, else
+   * the URL-safe worktree name. MUST match how `id` was derived (the daemon
+   * resolves the primary as worktree=null) so the diff route re-stamps the same id.
+   */
+  worktree: string | null;
 }
 
 /** Branches, tags, and recent commits for the compare picker (GET /repos/:repo/refs). */
@@ -196,6 +275,12 @@ export interface RepoSummary {
   defaultBranch: string | null;
   /** Checkouts of this repo; length > 1 is an A/B group. */
   worktrees: WorktreeSummary[];
+  /**
+   * Auto-derived review sessions — one `work` session per checked-out worktree,
+   * deduped by id — surfaced as the sidebar's primary review entries. The client
+   * augments these with sessions reconstructed from existing threads' scopes.
+   */
+  sessions: ReviewSession[];
 }
 
 export interface WorkspaceInfo {
@@ -273,6 +358,23 @@ export interface Thread {
   status: ThreadStatus;
   /** Re-anchoring state computed against the current diff; "active" until Slice 3. */
   anchorState: AnchorState;
+  /**
+   * The review scope (target + base/head) the thread was filed under, or null
+   * for legacy (pre-scope, v1) threads — the unscoped bucket.
+   */
+  scope: ReviewScope | null;
+  /**
+   * Stable id of the review session this thread belongs to, derived from the
+   * scope's symbolic identity. null for legacy threads.
+   */
+  sessionId: string | null;
+  /**
+   * Fingerprint of the point-in-time git state (snapshot) the thread was filed
+   * against — which *iteration* of the scope it belongs to. null for threads
+   * filed before Slice 3 (and when no snapshot could be computed). Informational
+   * only: "outdated" is `anchorState`, not snapshot mismatch.
+   */
+  snapshotId: string | null;
   comments: Comment[];
   createdAt: string;
   updatedAt: string;
@@ -296,6 +398,14 @@ export interface ThreadCreatedEvent extends BaseEvent {
   endLine: number | null;
   anchor: ThreadAnchor | null;
   severity: Severity | null;
+  /** Scope/session the thread was filed under. Absent on legacy (v1) events;
+   * a v2 writer always stamps them (null only when no scope could be resolved). */
+  scope?: ReviewScope | null;
+  sessionId?: string | null;
+  /** Snapshot (iteration) the thread was filed against. Absent on pre-Slice-3
+   * events; rides as a plain optional field — no schema bump, since an older
+   * reader simply ignores it and replay defaults it to null. */
+  snapshotId?: string | null;
   author: Author;
   body: string;
 }
@@ -367,6 +477,20 @@ export interface CreateThreadRequest {
   line?: number | null;
   endLine?: number | null;
   severity?: Severity | null;
+  /**
+   * The review target spec the comment is filed under (e.g. "work", "staged",
+   * "main..feat"). The daemon/CLI resolves it server-side into the authoritative
+   * `scope`; the client never resolves git refs itself. Defaults to "work".
+   */
+  target?: string | null;
+  /** Resolved scope; set by the daemon/CLI after resolving `target` — not by the
+   * client. Anything a client sends here is overwritten. */
+  scope?: ReviewScope | null;
+  /** Resolved session id; set alongside `scope` by the daemon/CLI. */
+  sessionId?: string | null;
+  /** Snapshot (iteration) id; computed and set alongside `scope` by the
+   * daemon/CLI, never by the client. */
+  snapshotId?: string | null;
   /** Precomputed durable anchor; the daemon/CLI fills this from file content. */
   anchor?: ThreadAnchor | null;
   author?: Author;

@@ -6,7 +6,13 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import type { DiffFile, RepoSummary, WorkspaceEntry } from "@diffect/shared";
+import type {
+  DiffFile,
+  RepoSummary,
+  ReviewScope,
+  ReviewSession,
+  WorkspaceEntry,
+} from "@diffect/shared";
 import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
 import {
@@ -20,9 +26,19 @@ import {
 interface Props {
   entries: WorkspaceEntry[];
   repo: string;
-  worktree: string | null;
+  /** Id of the session the active diff resolved to — drives the entry highlight. */
+  currentSession: string | null;
+  /** The unscoped/legacy bucket is open; no session entry is highlighted. */
+  showUnscoped: boolean;
+  /** Sessions reachable beyond the server-derived set (reconstructed/ad-hoc). */
+  extraSessions: ReviewSession[];
+  /** Thread count per session id, plus the legacy bucket under `__legacy__`. */
+  sessionCounts: Map<string, number>;
+  /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
+  legacyCount: number;
   onSelectRepo: (repo: string) => void;
-  onSelectWorktree: (worktree: string | null) => void;
+  onSelectSession: (session: ReviewSession) => void;
+  onSelectLegacy: () => void;
   files: DiffFile[];
   allFiles: string[];
   viewed: Set<string>;
@@ -32,6 +48,42 @@ interface Props {
   onSelectFile: (path: string) => void;
   onShowDiff: () => void;
   onAddWorkspace: () => void;
+}
+
+const LEGACY_KEY = "__legacy__";
+const EMPTY_SESSIONS: ReviewSession[] = [];
+
+/**
+ * Human label for a review session, derived from its scope so the client never
+ * duplicates the server's ref-resolution. Work on a feature branch reads as the
+ * branch; on the default branch it's local-state work (base === head); ranges
+ * and refs read as `base..head`; index/worktree scopes name themselves.
+ */
+function sessionLabel(scope: ReviewScope): string {
+  switch (scope.kind) {
+    case "work":
+      if (scope.branch) {
+        return scope.baseRef === scope.headRef
+          ? `${scope.branch} (local)`
+          : scope.branch;
+      }
+      return `${scope.headRef.replace(/^wt:/, "")} (detached)`;
+    case "staged":
+      return "Staged changes";
+    case "unstaged":
+      return "Unstaged changes";
+    case "ref":
+    case "range":
+      return `${scope.baseRef}..${scope.headRef}`;
+  }
+}
+
+/** Secondary muted line: a work session's PR-like base, else nothing. */
+function sessionDetail(scope: ReviewScope): string | null {
+  if (scope.kind === "work" && scope.branch && scope.baseRef !== scope.headRef) {
+    return `vs ${scope.baseRef}`;
+  }
+  return null;
 }
 
 function basename(p: string): string {
@@ -52,14 +104,19 @@ function allFileEntries(paths: string[], changed: DiffFile[]): FileTreeEntry[] {
   return [...byPath.values()];
 }
 
-/** Left navigation: workspaces → repos → worktrees, plus the changed-file tree.
- * Memoized so a diff/thread change doesn't re-render the whole nav. */
+/** Left navigation: workspaces → repos → review sessions, plus the changed-file
+ * tree. Memoized so a diff/thread change doesn't re-render the whole nav. */
 export const Sidebar = memo(function Sidebar({
   entries,
   repo,
-  worktree,
+  currentSession,
+  showUnscoped,
+  extraSessions,
+  sessionCounts,
+  legacyCount,
   onSelectRepo,
-  onSelectWorktree,
+  onSelectSession,
+  onSelectLegacy,
   files,
   allFiles,
   viewed,
@@ -105,9 +162,14 @@ export const Sidebar = memo(function Sidebar({
               key={r.name}
               repo={r}
               active={r.name === repo}
-              worktree={worktree}
+              currentSession={currentSession}
+              showUnscoped={showUnscoped}
+              extraSessions={r.name === repo ? extraSessions : EMPTY_SESSIONS}
+              sessionCounts={sessionCounts}
+              legacyCount={legacyCount}
               onSelectRepo={onSelectRepo}
-              onSelectWorktree={onSelectWorktree}
+              onSelectSession={onSelectSession}
+              onSelectLegacy={onSelectLegacy}
             />
           ))}
         </div>
@@ -172,7 +234,7 @@ export const Sidebar = memo(function Sidebar({
               the memoized tree re-initialize for the right file set. */}
           {viewMode === "tree" ? (
             <FileTree
-              key={`${repo}:${fileMode}`}
+              key={`${repo}:${fileMode}:${currentSession ?? ""}`}
               repo={repo}
               entries={treeEntries}
               viewed={viewed}
@@ -514,16 +576,44 @@ function statusIcon(status: TreeFileStatus): IconName {
 function RepoItem({
   repo,
   active,
-  worktree,
+  currentSession,
+  showUnscoped,
+  extraSessions,
+  sessionCounts,
+  legacyCount,
   onSelectRepo,
-  onSelectWorktree,
+  onSelectSession,
+  onSelectLegacy,
 }: {
   repo: RepoSummary;
   active: boolean;
-  worktree: string | null;
+  currentSession: string | null;
+  showUnscoped: boolean;
+  extraSessions: ReviewSession[];
+  sessionCounts: Map<string, number>;
+  legacyCount: number;
   onSelectRepo: (repo: string) => void;
-  onSelectWorktree: (worktree: string | null) => void;
+  onSelectSession: (session: ReviewSession) => void;
+  onSelectLegacy: () => void;
 }) {
+  // The branch of the primary checkout — what "this repo" is on. Shown as a muted
+  // subtitle so a repo whose sole session is implicit (no list rendered) still
+  // surfaces its branch on the repo row itself.
+  const primaryBranch =
+    repo.worktrees.find((w) => w.root === repo.root)?.branch ??
+    repo.worktrees[0]?.branch ??
+    null;
+
+  // Server-derived sessions first (the stable per-worktree work reviews), then
+  // any reconstructed/ad-hoc ones, deduped so a stale server feed can't double a
+  // reconstructed entry. A lone session needs no list — the repo row is it; the
+  // list appears once there's a real choice (multiple sessions or legacy threads).
+  const sessions = useMemo(() => {
+    const seen = new Set(repo.sessions.map((s) => s.id));
+    return [...repo.sessions, ...extraSessions.filter((s) => !seen.has(s.id))];
+  }, [repo.sessions, extraSessions]);
+  const showSessions = active && (sessions.length > 1 || legacyCount > 0);
+
   return (
     <div>
       <button
@@ -531,45 +621,69 @@ function RepoItem({
         className={`repo-item ${active ? "active" : ""}`}
         onClick={() => onSelectRepo(repo.name)}
       >
-        {repo.name}
+        <span className="repo-name">{repo.name}</span>
+        {primaryBranch && (
+          <span className="repo-branch" title={`On branch ${primaryBranch}`}>
+            <Icon name="git-branch" size={11} className="repo-branch-icon" />
+            {primaryBranch}
+          </span>
+        )}
       </button>
-      {active && repo.worktrees.length > 1 && (
-        <div className="worktree-list">
-          <WorktreeItem
-            name="all worktrees"
-            active={worktree === null}
-            onClick={() => onSelectWorktree(null)}
-          />
-          {repo.worktrees.map((w) => (
-            <WorktreeItem
-              key={w.name}
-              name={w.name}
-              active={worktree === w.name}
-              onClick={() => onSelectWorktree(w.name)}
+      {showSessions && (
+        <div className="session-list">
+          {sessions.map((s) => (
+            <SessionItem
+              key={s.id}
+              label={sessionLabel(s.scope)}
+              detail={sessionDetail(s.scope)}
+              count={sessionCounts.get(s.id) ?? 0}
+              active={!showUnscoped && s.id === currentSession}
+              onClick={() => onSelectSession(s)}
             />
           ))}
+          {legacyCount > 0 && (
+            <SessionItem
+              label="Unscoped"
+              detail="pre-scope comments"
+              count={legacyCount}
+              active={showUnscoped}
+              onClick={onSelectLegacy}
+            />
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function WorktreeItem({
-  name,
+function SessionItem({
+  label,
+  detail,
+  count,
   active,
   onClick,
 }: {
-  name: string;
+  label: string;
+  detail: string | null;
+  count: number;
   active: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      className={`wt-item ${active ? "active" : ""}`}
+      className={`session-item ${active ? "active" : ""}`}
       onClick={onClick}
+      title={detail ? `${label} — ${detail}` : label}
     >
-      {name}
+      <Icon name="git-branch" size={11} className="session-icon" />
+      <span className="session-name">{label}</span>
+      {detail && <span className="session-detail">{detail}</span>}
+      {count > 0 && (
+        <span className="session-count" title={`${count} comment${count === 1 ? "" : "s"}`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }

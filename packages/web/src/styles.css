@@ -816,8 +816,10 @@ body {
   white-space: nowrap;
 }
 .repo-item,
-.wt-item {
-  display: block;
+.session-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -827,28 +829,88 @@ body {
   padding: 3px 8px;
   border-radius: var(--r);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   transition: background var(--motion), color var(--motion);
 }
+.repo-name,
+.session-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* The branch label rides on the right, muted, and yields its space to the name
+ * before truncating itself. */
+.repo-branch {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.repo-branch-icon {
+  flex: none;
+  opacity: 0.8;
+}
 .repo-item:hover,
-.wt-item:hover {
+.session-item:hover {
   background: var(--bg);
 }
 .repo-item.active,
-.wt-item.active {
+.session-item.active {
   /* Soft rounded tint, no left accent bar (which read as harsh). Normal text
    * colour keeps contrast — accent-on-tint and white-on-accent both fail AA. */
   background: var(--nav-sel);
   color: var(--text);
   font-weight: 600;
 }
-.worktree-list {
+/* Review sessions: the sidebar's primary review entries, nested under the repo. */
+.session-list {
   padding-left: 12px;
 }
-.wt-item {
+.session-item {
   font-size: 12px;
   color: var(--muted);
+  align-items: center;
+}
+.session-icon {
+  flex: none;
+  opacity: 0.7;
+}
+/* Muted secondary (a work session's PR-like base) sits beside the name and
+ * truncates before it. */
+.session-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.85;
+}
+/* Comment-count pill, pinned right. */
+.session-count {
+  margin-left: auto;
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+.session-item.active .session-count {
+  background: var(--panel);
+  color: var(--text);
 }
 /* Diff | All-files scope toggle — a single spanning segmented control. */
 .file-mode-toggle {
@@ -1834,6 +1896,18 @@ button:disabled {
   border-left: 3px solid var(--suggestion);
 }
 
+/* Earlier-iteration marker: a thread filed against an older snapshot of the same
+   review. Deliberately quiet (muted, lowercase, no card accent) — it's context,
+   not a warning like the outdated/stale flag above. */
+.iteration-badge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+}
+
 /* Status filter bar */
 .filter-bar {
   display: flex;
@@ -1864,6 +1938,34 @@ button:disabled {
   color: var(--text);
   border-color: var(--border-strong);
   font-weight: 600;
+}
+
+/* Nudge shown when a scoped review is empty but pre-scope comments exist —
+   a non-racy opt-in to the unscoped bucket (we never auto-flip the view). */
+.unscoped-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion);
+}
+.unscoped-hint:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.unscoped-hint svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 /* Thread conversation controls — sit at the foot of the strip. */

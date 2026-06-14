@@ -9,6 +9,9 @@ const SEVERITIES: Severity[] = ["must-fix", "suggestion", "nit", "question"];
 interface Props {
   repo: string;
   worktree: string | null;
+  /** The review target spec the comment is filed under (e.g. "work",
+   * "main..feat"); the daemon resolves it to the durable scope/session. */
+  target: string;
   file: string;
   side: Side;
   line: number;
@@ -21,6 +24,7 @@ interface Props {
 export function CommentForm({
   repo,
   worktree,
+  target,
   file,
   side,
   line,
@@ -46,6 +50,7 @@ export function CommentForm({
       await api.createThread({
         repo,
         worktree,
+        target,
         file,
         side,
         line,
