@@ -49,6 +49,11 @@ interface Props {
   showUnscoped: boolean;
   /** Sessions reachable beyond the server-derived set (reconstructed/ad-hoc). */
   extraSessions: ReviewSession[];
+  /** Sessions archived for the active repo (durable + optimistic), routed to a
+   *  collapsed Archived group instead of the active list. */
+  archivedSessions: ReviewSession[];
+  /** Ids of archived sessions — excluded from the active session list. */
+  archivedIds: Set<string>;
   /** Thread count per session id, plus the legacy bucket under `__legacy__`. */
   sessionCounts: Map<string, number>;
   /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
@@ -58,6 +63,7 @@ interface Props {
   snapshotGroups: SnapshotGroup[];
   onSelectRepo: (repo: string) => void;
   onSelectSession: (session: ReviewSession) => void;
+  onReviveSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
   files: DiffFile[];
   allFiles: string[];
@@ -73,6 +79,10 @@ interface Props {
 const LEGACY_KEY = "__legacy__";
 const EMPTY_SESSIONS: ReviewSession[] = [];
 const EMPTY_GROUPS: SnapshotGroup[] = [];
+// Session ids aren't repo-qualified (sha256 of kind+baseRef+headRef), so two
+// repos on the same branch names can share one. The archived-id filter is only
+// meaningful for the active repo, so non-active repos get an empty set.
+const EMPTY_IDS: Set<string> = new Set();
 
 /**
  * Human label for a review session, derived from its scope so the client never
@@ -133,11 +143,14 @@ export const Sidebar = memo(function Sidebar({
   currentSession,
   showUnscoped,
   extraSessions,
+  archivedSessions,
+  archivedIds,
   sessionCounts,
   legacyCount,
   snapshotGroups,
   onSelectRepo,
   onSelectSession,
+  onReviveSession,
   onSelectLegacy,
   files,
   allFiles,
@@ -187,11 +200,14 @@ export const Sidebar = memo(function Sidebar({
               currentSession={currentSession}
               showUnscoped={showUnscoped}
               extraSessions={r.name === repo ? extraSessions : EMPTY_SESSIONS}
+              archivedSessions={r.name === repo ? archivedSessions : EMPTY_SESSIONS}
+              archivedIds={r.name === repo ? archivedIds : EMPTY_IDS}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
               snapshotGroups={r.name === repo ? snapshotGroups : EMPTY_GROUPS}
               onSelectRepo={onSelectRepo}
               onSelectSession={onSelectSession}
+              onReviveSession={onReviveSession}
               onSelectLegacy={onSelectLegacy}
             />
           ))}
@@ -602,11 +618,14 @@ function RepoItem({
   currentSession,
   showUnscoped,
   extraSessions,
+  archivedSessions,
+  archivedIds,
   sessionCounts,
   legacyCount,
   snapshotGroups,
   onSelectRepo,
   onSelectSession,
+  onReviveSession,
   onSelectLegacy,
 }: {
   repo: RepoSummary;
@@ -614,11 +633,14 @@ function RepoItem({
   currentSession: string | null;
   showUnscoped: boolean;
   extraSessions: ReviewSession[];
+  archivedSessions: ReviewSession[];
+  archivedIds: Set<string>;
   sessionCounts: Map<string, number>;
   legacyCount: number;
   snapshotGroups: SnapshotGroup[];
   onSelectRepo: (repo: string) => void;
   onSelectSession: (session: ReviewSession) => void;
+  onReviveSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
 }) {
   // The branch of the primary checkout — what "this repo" is on. Shown as a muted
@@ -631,13 +653,22 @@ function RepoItem({
 
   // Server-derived sessions first (the stable per-worktree work reviews), then
   // any reconstructed/ad-hoc ones, deduped so a stale server feed can't double a
-  // reconstructed entry. A lone session needs no list — the repo row is it; the
-  // list appears once there's a real choice (multiple sessions or legacy threads).
+  // reconstructed entry, and with archived ids removed — the archive overlay wins
+  // the bucket, routing them to the Archived group instead of the active list. A
+  // lone session needs no list — the repo row is it; the list appears once there's
+  // a real choice (multiple sessions, legacy threads, or anything archived).
   const sessions = useMemo(() => {
-    const seen = new Set(repo.sessions.map((s) => s.id));
-    return [...repo.sessions, ...extraSessions.filter((s) => !seen.has(s.id))];
-  }, [repo.sessions, extraSessions]);
-  const showSessions = active && (sessions.length > 1 || legacyCount > 0);
+    const seen = new Set<string>();
+    const out: ReviewSession[] = [];
+    for (const s of [...repo.sessions, ...extraSessions]) {
+      if (archivedIds.has(s.id) || seen.has(s.id)) continue;
+      seen.add(s.id);
+      out.push(s);
+    }
+    return out;
+  }, [repo.sessions, extraSessions, archivedIds]);
+  const showSessions =
+    active && (sessions.length > 1 || legacyCount > 0 || archivedSessions.length > 0);
 
   return (
     <div>
@@ -685,8 +716,64 @@ function RepoItem({
               onClick={onSelectLegacy}
             />
           )}
+          {archivedSessions.length > 0 && (
+            <ArchivedGroup
+              sessions={archivedSessions}
+              sessionCounts={sessionCounts}
+              onRevive={onReviveSession}
+            />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Collapsed disclosure of a repo's archived (completed) reviews. Default-closed
+ * so finished work stays out of the way; expands to one SessionItem per archived
+ * session, each with a Revive action. Archived rows are not navigable — an
+ * off-checkout `work` session would re-stamp a different id if selected (its id
+ * tracks the live branch) — so Revive (which POSTs the stored scope, server
+ * re-derives the id) is the only action.
+ */
+function ArchivedGroup({
+  sessions,
+  sessionCounts,
+  onRevive,
+}: {
+  sessions: ReviewSession[];
+  sessionCounts: Map<string, number>;
+  onRevive: (session: ReviewSession) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="archived-group">
+      <button
+        type="button"
+        className="archived-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon
+          name={open ? "chevron-down" : "chevron-right"}
+          size={12}
+          className="archived-chevron"
+        />
+        <span className="archived-label">Archived</span>
+        <span className="archived-count">{sessions.length}</span>
+      </button>
+      {open &&
+        sessions.map((s) => (
+          <SessionItem
+            key={s.id}
+            label={sessionLabel(s.scope)}
+            detail={sessionDetail(s.scope)}
+            count={sessionCounts.get(s.id) ?? 0}
+            active={false}
+            onRevive={() => onRevive(s)}
+          />
+        ))}
     </div>
   );
 }
@@ -697,28 +784,63 @@ function SessionItem({
   count,
   active,
   onClick,
+  onRevive,
 }: {
   label: string;
   detail: string | null;
   count: number;
   active: boolean;
-  onClick: () => void;
+  onClick?: () => void;
+  /** When set, this is an archived row: rendered static (not navigable) with a
+   *  Revive action instead of a row click. */
+  onRevive?: () => void;
 }) {
+  const title = detail ? `${label} — ${detail}` : label;
+  const head = (
+    <>
+      <Icon name="git-branch" size={11} className="session-icon" />
+      <span className="session-name">{label}</span>
+      {detail && <span className="session-detail">{detail}</span>}
+    </>
+  );
+  const countPill = count > 0 && (
+    <span className="session-count" title={`${count} comment${count === 1 ? "" : "s"}`}>
+      {count}
+    </span>
+  );
+
+  // Archived rows can't nest a Revive button inside a row button (invalid HTML),
+  // and aren't navigable anyway, so they render as a static div. The count + Revive
+  // ride in a right-pinned cluster so the action sits at the edge with or without a
+  // count.
+  if (onRevive) {
+    return (
+      <div className="session-item archived" title={title}>
+        {head}
+        <span className="archived-actions">
+          {countPill}
+          <button
+            type="button"
+            className="session-revive"
+            onClick={onRevive}
+            title="Revive this review"
+          >
+            Revive
+          </button>
+        </span>
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"
       className={`session-item ${active ? "active" : ""}`}
       onClick={onClick}
-      title={detail ? `${label} — ${detail}` : label}
+      title={title}
     >
-      <Icon name="git-branch" size={11} className="session-icon" />
-      <span className="session-name">{label}</span>
-      {detail && <span className="session-detail">{detail}</span>}
-      {count > 0 && (
-        <span className="session-count" title={`${count} comment${count === 1 ? "" : "s"}`}>
-          {count}
-        </span>
-      )}
+      {head}
+      {countPill}
     </button>
   );
 }

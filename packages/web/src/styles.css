@@ -959,6 +959,91 @@ body {
 .timeline-row .session-count {
   margin-left: auto;
 }
+/* Archived (completed) reviews: a default-collapsed disclosure at the foot of the
+   session list — finished work stays reachable but out of the way. */
+.archived-group {
+  margin-top: 2px;
+}
+.archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 8px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  border-radius: var(--r);
+  transition: background var(--motion), color var(--motion);
+}
+.archived-toggle:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.archived-chevron {
+  flex: none;
+  opacity: 0.7;
+}
+.archived-label {
+  flex: 0 1 auto;
+}
+.archived-count {
+  margin-left: auto;
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+/* Archived session rows: dimmed and non-interactive (the Revive action aside). */
+.session-item.archived {
+  cursor: default;
+  opacity: 0.85;
+}
+.session-item.archived:hover {
+  background: transparent;
+}
+.session-item.archived .session-name {
+  color: var(--muted);
+}
+.archived-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.archived-actions .session-count {
+  margin-left: 0;
+}
+.session-revive {
+  flex: none;
+  padding: 1px 8px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion),
+    color var(--motion);
+}
+.session-revive:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
 /* Diff | All-files scope toggle — a single spanning segmented control. */
 .file-mode-toggle {
   display: flex;

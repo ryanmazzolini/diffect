@@ -124,13 +124,14 @@ export function App() {
   );
   const [addOpen, setAddOpen] = useState(false);
   const [viewed, setViewed] = useState<Set<string>>(new Set());
-  // Optimistic archive/revive overrides keyed by session id (true = archived,
-  // false = revived), applied over the server's archivedSessions until the SSE
-  // refetch catches up. Lets the banner/sidebar react instantly, and rolls back
-  // on a failed POST.
-  const [archiveOverrides, setArchiveOverrides] = useState<Map<string, boolean>>(
-    () => new Map(),
-  );
+  // Optimistic archive/revive overrides keyed by session id, applied over the
+  // server's archivedSessions until the SSE refetch catches up. Lets the
+  // banner/sidebar react instantly, and rolls back on a failed POST. The session
+  // is carried so an optimistically-archived id can render in the Archived group
+  // (with its scope) before the durable event round-trips.
+  const [archiveOverrides, setArchiveOverrides] = useState<
+    Map<string, { archived: boolean; session: ReviewSession }>
+  >(() => new Map());
   const [dismissedComplete, setDismissedComplete] = useState<Set<string>>(
     loadDismissedComplete,
   );
@@ -335,7 +336,9 @@ export function App() {
   const setArchived = useCallback(
     async (session: ReviewSession, archived: boolean) => {
       if (!repo) return;
-      setArchiveOverrides((prev) => new Map(prev).set(session.id, archived));
+      setArchiveOverrides((prev) =>
+        new Map(prev).set(session.id, { archived, session }),
+      );
       try {
         await api.archiveSession(repo, { scope: session.scope, archived });
       } catch (e) {
@@ -348,6 +351,12 @@ export function App() {
       }
     },
     [repo],
+  );
+  const reviveSession = useCallback(
+    (session: ReviewSession) => {
+      void setArchived(session, false);
+    },
+    [setArchived],
   );
   const dismissComplete = useCallback((id: string) => {
     setDismissedComplete((prev) => {
@@ -539,20 +548,27 @@ export function App() {
     [activeRepo],
   );
 
-  // The durable archived-session set (from the per-repo log, on the workspace
-  // summary) with optimistic overrides applied on top. Drives both the "complete"
-  // suggestion (an archived session never re-suggests) and the sidebar's Archived
-  // group routing (Slice 4.4).
-  const archivedSet = useMemo(() => {
-    const set = new Set(
-      (activeRepo?.archivedSessions ?? EMPTY_ARCHIVED).map((a) => a.sessionId),
-    );
-    for (const [id, archived] of archiveOverrides) {
-      if (archived) set.add(id);
-      else set.delete(id);
+  // The archived-session list: the durable set (from the per-repo log, on the
+  // workspace summary, carrying each session's scope) with optimistic overrides
+  // folded in. Off-checkout sessions live here by their stored id/scope — never
+  // re-derived, since re-derivation needs the live branch, which may have moved.
+  // Drives the "complete" suggestion (an archived session never re-suggests) and
+  // the sidebar's Archived group.
+  const archivedSessions = useMemo<ReviewSession[]>(() => {
+    const byId = new Map<string, ReviewSession>();
+    for (const a of activeRepo?.archivedSessions ?? EMPTY_ARCHIVED) {
+      byId.set(a.sessionId, { id: a.sessionId, scope: a.scope, worktree: null });
     }
-    return set;
+    for (const [id, ov] of archiveOverrides) {
+      if (ov.archived) byId.set(id, ov.session);
+      else byId.delete(id);
+    }
+    return byId.size ? [...byId.values()] : EMPTY_SESSIONS;
   }, [activeRepo, archiveOverrides]);
+  const archivedSet = useMemo(
+    () => new Set(archivedSessions.map((s) => s.id)),
+    [archivedSessions],
+  );
   // Retire optimistic overrides the server view has caught up to, so a later
   // server-side flip (e.g. a teammate revives) isn't masked by a stale local pin.
   useEffect(() => {
@@ -563,8 +579,8 @@ export function App() {
       if (prev.size === 0) return prev;
       let changed = false;
       const next = new Map(prev);
-      for (const [id, archived] of prev) {
-        if (serverArchived.has(id) === archived) {
+      for (const [id, ov] of prev) {
+        if (serverArchived.has(id) === ov.archived) {
           next.delete(id);
           changed = true;
         }
@@ -815,11 +831,14 @@ export function App() {
               currentSession={currentSession}
               showUnscoped={showUnscoped}
               extraSessions={extraSessions}
+              archivedSessions={archivedSessions}
+              archivedIds={archivedSet}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
               snapshotGroups={snapshotGroups}
               onSelectRepo={setRepo}
               onSelectSession={selectSession}
+              onReviveSession={reviveSession}
               onSelectLegacy={selectLegacy}
               files={sidebarFiles}
               allFiles={allFiles}
