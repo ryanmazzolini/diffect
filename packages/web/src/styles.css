@@ -2015,6 +2015,53 @@ button:disabled {
   margin-top: 1px;
 }
 
+/* "Looks complete" suggestion — shown in the thread pane when every comment in
+   the active review is resolved. Suggest + confirm: archiving happens only on the
+   explicit Mark-complete click; the × dismisses the suggestion for this session
+   (a local UI preference, not the durable archive fact). The success colour tints
+   the icon/edge to read as a positive state; the action reuses the primary look. */
+.complete-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success);
+  border-radius: var(--r);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.complete-icon {
+  flex: none;
+  color: var(--success);
+}
+.complete-msg {
+  flex: 1 1 auto;
+  color: var(--text);
+}
+.complete-action {
+  flex: none;
+  padding: 4px 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion);
+}
+.complete-action:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+.complete-dismiss {
+  flex: none;
+}
+
 /* Thread conversation controls — sit at the foot of the strip. */
 .thread-actions {
   display: flex;

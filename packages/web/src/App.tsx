@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
+  ArchivedSession,
   DiffFile,
   RefList,
   RepoDiff,
@@ -33,6 +34,19 @@ const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 const EMPTY_FILES: DiffFile[] = [];
 const EMPTY_EDITORS: string[] = [];
 const EMPTY_SESSIONS: ReviewSession[] = [];
+const EMPTY_ARCHIVED: ArchivedSession[] = [];
+// Per-session dismissal of the "looks complete" suggestion. This is a UI
+// preference (correctly browser-local), unlike the archive *fact* itself, which
+// is a durable shared event in the per-repo log.
+const COMPLETE_DISMISS_KEY = "diffect-complete-dismissed";
+function loadDismissedComplete(): Set<string> {
+  try {
+    const raw = getStored(COMPLETE_DISMISS_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
 // The session-count map key standing in for legacy (pre-scope, sessionId === null)
 // threads, which share the dedicated unscoped bucket rather than any one session.
 const LEGACY_KEY = "__legacy__";
@@ -110,6 +124,16 @@ export function App() {
   );
   const [addOpen, setAddOpen] = useState(false);
   const [viewed, setViewed] = useState<Set<string>>(new Set());
+  // Optimistic archive/revive overrides keyed by session id (true = archived,
+  // false = revived), applied over the server's archivedSessions until the SSE
+  // refetch catches up. Lets the banner/sidebar react instantly, and rolls back
+  // on a failed POST.
+  const [archiveOverrides, setArchiveOverrides] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
+  const [dismissedComplete, setDismissedComplete] = useState<Set<string>>(
+    loadDismissedComplete,
+  );
   const diffPaneRef = useRef<HTMLElement>(null);
   const workbenchRef = useRef<HTMLDivElement>(null);
 
@@ -303,6 +327,36 @@ export function App() {
     setShowUnscoped(true);
   }, []);
 
+  // Archive (`archived: true`) or revive (`archived: false`) a session. Optimistic:
+  // record the override so the banner/sidebar flip immediately, POST the scope (the
+  // server re-derives the id), and roll the override back if the write fails. The
+  // SSE `workspace.changed` broadcast refetches the durable set, which the
+  // reconciler below then folds in, retiring the override.
+  const setArchived = useCallback(
+    async (session: ReviewSession, archived: boolean) => {
+      if (!repo) return;
+      setArchiveOverrides((prev) => new Map(prev).set(session.id, archived));
+      try {
+        await api.archiveSession(repo, { scope: session.scope, archived });
+      } catch (e) {
+        setError(String(e));
+        setArchiveOverrides((prev) => {
+          const next = new Map(prev);
+          next.delete(session.id);
+          return next;
+        });
+      }
+    },
+    [repo],
+  );
+  const dismissComplete = useCallback((id: string) => {
+    setDismissedComplete((prev) => {
+      const next = new Set(prev).add(id);
+      setStored(COMPLETE_DISMISS_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     setPreviewFile(null);
   }, [repo, worktree, target]);
@@ -485,6 +539,40 @@ export function App() {
     [activeRepo],
   );
 
+  // The durable archived-session set (from the per-repo log, on the workspace
+  // summary) with optimistic overrides applied on top. Drives both the "complete"
+  // suggestion (an archived session never re-suggests) and the sidebar's Archived
+  // group routing (Slice 4.4).
+  const archivedSet = useMemo(() => {
+    const set = new Set(
+      (activeRepo?.archivedSessions ?? EMPTY_ARCHIVED).map((a) => a.sessionId),
+    );
+    for (const [id, archived] of archiveOverrides) {
+      if (archived) set.add(id);
+      else set.delete(id);
+    }
+    return set;
+  }, [activeRepo, archiveOverrides]);
+  // Retire optimistic overrides the server view has caught up to, so a later
+  // server-side flip (e.g. a teammate revives) isn't masked by a stale local pin.
+  useEffect(() => {
+    const serverArchived = new Set(
+      (activeRepo?.archivedSessions ?? EMPTY_ARCHIVED).map((a) => a.sessionId),
+    );
+    setArchiveOverrides((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Map(prev);
+      for (const [id, archived] of prev) {
+        if (serverArchived.has(id) === archived) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeRepo]);
+
   // Sessions not server-derived but still reachable: reconstructed from threads'
   // stored scopes (so a range/staged review you've commented on stays a sidebar
   // entry after you navigate away), plus the active diff's own scope (so a fresh
@@ -532,6 +620,39 @@ export function App() {
     return counts;
   }, [threads, repo]);
   const legacyCount = sessionCounts.get(LEGACY_KEY) ?? 0;
+
+  // Open-thread count per session — the open-only sibling of `sessionCounts`. The
+  // "looks complete" suggestion fires when a session has comments but none open,
+  // so it needs the open tally kept apart from the total.
+  const openCountsBySession = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of threads) {
+      if (t.repo !== repo || t.status !== "open") continue;
+      const key = t.sessionId ?? LEGACY_KEY;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [threads, repo]);
+
+  // The settled session the user is looking at — the one "Mark complete" would
+  // archive. Only the diff's own settled session qualifies: not mid-selection (the
+  // threads on screen still belong to the previous session) and not the unscoped
+  // bucket (not a session; its null scope the server refuses anyway). It carries
+  // the scope the archive POST needs.
+  const completableSession =
+    !showUnscoped && !pendingSession ? diffSession : null;
+  // Detection keyed on review *activity*, not tree state (plan/critic fix #1): this
+  // review collected at least one comment, every one is now resolved, it isn't
+  // already archived, and its suggestion hasn't been dismissed.
+  const sessionDone =
+    completableSession !== null &&
+    (sessionCounts.get(completableSession.id) ?? 0) > 0 &&
+    (openCountsBySession.get(completableSession.id) ?? 0) === 0 &&
+    !archivedSet.has(completableSession.id) &&
+    !dismissedComplete.has(completableSession.id);
+  const markComplete = useCallback(() => {
+    if (completableSession) void setArchived(completableSession, true);
+  }, [completableSession, setArchived]);
 
   const scopedThreads = useMemo(
     () =>
@@ -757,6 +878,30 @@ export function App() {
               </button>
             ))}
           </div>
+          {sessionDone && completableSession && (
+            <div className="complete-banner" role="status">
+              <Icon name="check" size={14} className="complete-icon" />
+              <span className="complete-msg">
+                Every comment here is resolved — this review looks complete.
+              </span>
+              <button
+                type="button"
+                className="complete-action"
+                onClick={markComplete}
+              >
+                Mark complete
+              </button>
+              <button
+                type="button"
+                className="icon-btn complete-dismiss"
+                aria-label="Dismiss suggestion"
+                title="Dismiss"
+                onClick={() => dismissComplete(completableSession.id)}
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+          )}
           {!showUnscoped && scopedThreads.length === 0 && legacyCount > 0 && (
             <button
               type="button"
