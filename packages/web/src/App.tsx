@@ -24,7 +24,7 @@ import { useResizable } from "./useResizable.js";
 import { DiffView } from "./components/DiffView.js";
 import { ThreadList } from "./components/ThreadList.js";
 import { Topbar } from "./components/Topbar.js";
-import { Sidebar } from "./components/Sidebar.js";
+import { Sidebar, type SnapshotGroup } from "./components/Sidebar.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 
 type StatusFilter = ThreadStatus | "all";
@@ -545,6 +545,38 @@ export function App() {
       }),
     [threads, repo, showUnscoped, currentSession],
   );
+  // Iterations of the active session, derived purely from the threads on screen:
+  // one group per distinct snapshot a thread was filed against, plus the live
+  // snapshot if no thread sits on it yet. Ordered by first-comment time so the
+  // oldest iteration is "Iteration 1"; the live one is flagged "Current". This is
+  // an informational timeline — there is no persisted snapshot history to read.
+  const snapshotGroups = useMemo<SnapshotGroup[]>(() => {
+    const byId = new Map<string, { id: string; count: number; firstAt: string }>();
+    for (const t of scopedThreads) {
+      if (t.snapshotId === null) continue;
+      const g = byId.get(t.snapshotId);
+      if (!g) byId.set(t.snapshotId, { id: t.snapshotId, count: 1, firstAt: t.createdAt });
+      else {
+        g.count++;
+        if (t.createdAt < g.firstAt) g.firstAt = t.createdAt;
+      }
+    }
+    const live = diff?.currentSnapshotId ?? null;
+    if (live && !byId.has(live)) byId.set(live, { id: live, count: 0, firstAt: "" });
+    const ordered = [...byId.values()].sort((a, b) => {
+      if (a.firstAt === b.firstAt) return 0;
+      if (!a.firstAt) return 1; // live with no threads yet sorts last
+      if (!b.firstAt) return -1;
+      return a.firstAt < b.firstAt ? -1 : 1;
+    });
+    return ordered.map((g, i) => ({
+      id: g.id,
+      count: g.count,
+      ordinal: i + 1,
+      firstAt: g.firstAt || null,
+      isCurrent: g.id === live,
+    }));
+  }, [scopedThreads, diff?.currentSnapshotId]);
   const byStatus = useMemo(
     () =>
       filter === "all"
@@ -664,6 +696,7 @@ export function App() {
               extraSessions={extraSessions}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
+              snapshotGroups={snapshotGroups}
               onSelectRepo={setRepo}
               onSelectSession={selectSession}
               onSelectLegacy={selectLegacy}

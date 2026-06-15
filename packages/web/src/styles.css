@@ -912,6 +912,53 @@ body {
   background: var(--panel);
   color: var(--text);
 }
+/* Iteration timeline under the active session: a static, non-interactive list of
+ * the snapshots its comments were filed against. Indented past the session row's
+ * icon so the dots line up under the label, not the branch glyph. */
+.session-timeline {
+  list-style: none;
+  margin: 1px 0 4px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.timeline-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.timeline-dot {
+  flex: none;
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border);
+}
+.timeline-row.current .timeline-dot {
+  background: var(--accent);
+}
+.timeline-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.timeline-row.current .timeline-label {
+  color: var(--text);
+  font-weight: 600;
+}
+.timeline-when {
+  flex: none;
+  color: var(--faint);
+}
+.timeline-row .session-count {
+  margin-left: auto;
+}
 /* Diff | All-files scope toggle — a single spanning segmented control. */
 .file-mode-toggle {
   display: flex;

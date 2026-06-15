@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   useEffect,
   useMemo,
@@ -15,6 +16,7 @@ import type {
 } from "@diffect/shared";
 import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
+import { relativeTime } from "../relativeTime.js";
 import {
   buildPathTree,
   type FileTreeEntry,
@@ -22,6 +24,21 @@ import {
   type TreeFileStatus,
   type TreeNode,
 } from "../fileTree.js";
+
+/**
+ * One iteration in a session's timeline: a distinct git snapshot that threads
+ * were filed against. Derived client-side from the active session's threads plus
+ * the live snapshot — there is no persisted snapshot history. `ordinal` is the
+ * 1-based age order, `firstAt` the earliest comment time (null for the live
+ * snapshot when no thread sits on it yet), `isCurrent` flags the live one.
+ */
+export interface SnapshotGroup {
+  id: string;
+  count: number;
+  ordinal: number;
+  firstAt: string | null;
+  isCurrent: boolean;
+}
 
 interface Props {
   entries: WorkspaceEntry[];
@@ -36,6 +53,9 @@ interface Props {
   sessionCounts: Map<string, number>;
   /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
   legacyCount: number;
+  /** Iterations of the active session, newest knowledge of the live snapshot
+   * included; rendered as a static timeline under the active session entry. */
+  snapshotGroups: SnapshotGroup[];
   onSelectRepo: (repo: string) => void;
   onSelectSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
@@ -52,6 +72,7 @@ interface Props {
 
 const LEGACY_KEY = "__legacy__";
 const EMPTY_SESSIONS: ReviewSession[] = [];
+const EMPTY_GROUPS: SnapshotGroup[] = [];
 
 /**
  * Human label for a review session, derived from its scope so the client never
@@ -114,6 +135,7 @@ export const Sidebar = memo(function Sidebar({
   extraSessions,
   sessionCounts,
   legacyCount,
+  snapshotGroups,
   onSelectRepo,
   onSelectSession,
   onSelectLegacy,
@@ -167,6 +189,7 @@ export const Sidebar = memo(function Sidebar({
               extraSessions={r.name === repo ? extraSessions : EMPTY_SESSIONS}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
+              snapshotGroups={r.name === repo ? snapshotGroups : EMPTY_GROUPS}
               onSelectRepo={onSelectRepo}
               onSelectSession={onSelectSession}
               onSelectLegacy={onSelectLegacy}
@@ -581,6 +604,7 @@ function RepoItem({
   extraSessions,
   sessionCounts,
   legacyCount,
+  snapshotGroups,
   onSelectRepo,
   onSelectSession,
   onSelectLegacy,
@@ -592,6 +616,7 @@ function RepoItem({
   extraSessions: ReviewSession[];
   sessionCounts: Map<string, number>;
   legacyCount: number;
+  snapshotGroups: SnapshotGroup[];
   onSelectRepo: (repo: string) => void;
   onSelectSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
@@ -631,16 +656,26 @@ function RepoItem({
       </button>
       {showSessions && (
         <div className="session-list">
-          {sessions.map((s) => (
-            <SessionItem
-              key={s.id}
-              label={sessionLabel(s.scope)}
-              detail={sessionDetail(s.scope)}
-              count={sessionCounts.get(s.id) ?? 0}
-              active={!showUnscoped && s.id === currentSession}
-              onClick={() => onSelectSession(s)}
-            />
-          ))}
+          {sessions.map((s) => {
+            const sessionActive = !showUnscoped && s.id === currentSession;
+            return (
+              <Fragment key={s.id}>
+                <SessionItem
+                  label={sessionLabel(s.scope)}
+                  detail={sessionDetail(s.scope)}
+                  count={sessionCounts.get(s.id) ?? 0}
+                  active={sessionActive}
+                  onClick={() => onSelectSession(s)}
+                />
+                {/* The iteration timeline only earns its space once a session has
+                    more than one snapshot; a single-iteration session is just the
+                    entry itself. */}
+                {sessionActive && snapshotGroups.length > 1 && (
+                  <SessionTimeline groups={snapshotGroups} />
+                )}
+              </Fragment>
+            );
+          })}
           {legacyCount > 0 && (
             <SessionItem
               label="Unscoped"
@@ -685,5 +720,39 @@ function SessionItem({
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * Static iteration timeline for the active session: one row per snapshot the
+ * session's threads were filed against, oldest first, the live snapshot marked
+ * "Current". Informational only — rows are not interactive; the marker on each
+ * thread card is what tells a comment apart from the current iteration.
+ */
+function SessionTimeline({ groups }: { groups: SnapshotGroup[] }) {
+  return (
+    <ul className="session-timeline" aria-label="Review iterations">
+      {groups.map((g) => (
+        <li
+          key={g.id}
+          className={`timeline-row${g.isCurrent ? " current" : ""}`}
+          title={g.isCurrent ? "The iteration on screen now" : `Iteration ${g.ordinal}`}
+        >
+          <span className="timeline-dot" aria-hidden="true" />
+          <span className="timeline-label">
+            {g.isCurrent ? "Current" : `Iteration ${g.ordinal}`}
+          </span>
+          {g.firstAt && <span className="timeline-when">{relativeTime(g.firstAt)}</span>}
+          {g.count > 0 && (
+            <span
+              className="session-count"
+              title={`${g.count} comment${g.count === 1 ? "" : "s"} filed here`}
+            >
+              {g.count}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

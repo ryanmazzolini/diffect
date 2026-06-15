@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { useCurrentSnapshot } from "../currentSnapshot.js";
+import { relativeTime } from "../relativeTime.js";
 import { useDraft } from "../useDraft.js";
 import { Markdown } from "./Markdown.js";
 import { MarkdownEditor } from "./MarkdownEditor.js";
@@ -215,19 +216,4 @@ function authorView(author: { type: string; name?: string | null }): {
     return { name, role: "agent", kind: "agent", initials };
   }
   return { name: "you", role: null, kind: "you", initials: "Y" };
-}
-
-/** Compact relative time ("just now", "24m", "3h", "2d") from an ISO timestamp. */
-function relativeTime(ts: string): string {
-  const then = new Date(ts).getTime();
-  if (Number.isNaN(then)) return "";
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 45) return "just now";
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString();
 }
