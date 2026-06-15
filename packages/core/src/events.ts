@@ -99,6 +99,17 @@ export class EventHub {
     return () => this.clients.delete(res);
   }
 
+  /**
+   * Fan out an event that isn't driven by a filesystem watch. A session
+   * archive/revive writes to the thread log (so the fs watch fires
+   * `threadChanged`), but the archived-session list rides on the workspace
+   * summary, which the client refetches only on `workspaceChanged` — so the
+   * route must announce that explicitly. Debounced like watch-driven events.
+   */
+  notify(type: DaemonEventType): void {
+    this.emit(type);
+  }
+
   /** Debounced fan-out: collapse a burst of fs events into one notification. */
   private emit(type: DaemonEventType): void {
     const existing = this.timers.get(type);
