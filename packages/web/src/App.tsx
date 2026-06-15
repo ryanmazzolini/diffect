@@ -128,9 +128,12 @@ export function App() {
   // server's archivedSessions until the SSE refetch catches up. Lets the
   // banner/sidebar react instantly, and rolls back on a failed POST. The session
   // is carried so an optimistically-archived id can render in the Archived group
-  // (with its scope) before the durable event round-trips.
+  // (with its scope) before the durable event round-trips. The origin `repo` is
+  // carried too: session ids aren't repo-qualified, so an override is only ever
+  // applied/reconciled while that repo is active — switching repos mid-flight
+  // must not leak the pin into another repo's Archived group.
   const [archiveOverrides, setArchiveOverrides] = useState<
-    Map<string, { archived: boolean; session: ReviewSession }>
+    Map<string, { archived: boolean; session: ReviewSession; repo: string }>
   >(() => new Map());
   const [dismissedComplete, setDismissedComplete] = useState<Set<string>>(
     loadDismissedComplete,
@@ -337,7 +340,7 @@ export function App() {
     async (session: ReviewSession, archived: boolean) => {
       if (!repo) return;
       setArchiveOverrides((prev) =>
-        new Map(prev).set(session.id, { archived, session }),
+        new Map(prev).set(session.id, { archived, session, repo }),
       );
       try {
         await api.archiveSession(repo, { scope: session.scope, archived });
@@ -560,11 +563,12 @@ export function App() {
       byId.set(a.sessionId, { id: a.sessionId, scope: a.scope, worktree: null });
     }
     for (const [id, ov] of archiveOverrides) {
+      if (ov.repo !== repo) continue; // a foreign repo's pin never shows here
       if (ov.archived) byId.set(id, ov.session);
       else byId.delete(id);
     }
     return byId.size ? [...byId.values()] : EMPTY_SESSIONS;
-  }, [activeRepo, archiveOverrides]);
+  }, [activeRepo, archiveOverrides, repo]);
   const archivedSet = useMemo(
     () => new Set(archivedSessions.map((s) => s.id)),
     [archivedSessions],
@@ -580,6 +584,10 @@ export function App() {
       let changed = false;
       const next = new Map(prev);
       for (const [id, ov] of prev) {
+        // Only reconcile against the repo this override came from — serverArchived
+        // is the active repo's set, so a foreign pin would always "disagree" and be
+        // wrongly dropped (or kept). It retires when the user returns to its repo.
+        if (ov.repo !== repo) continue;
         if (serverArchived.has(id) === ov.archived) {
           next.delete(id);
           changed = true;
@@ -587,7 +595,7 @@ export function App() {
       }
       return changed ? next : prev;
     });
-  }, [activeRepo]);
+  }, [activeRepo, repo]);
 
   // Sessions not server-derived but still reachable: reconstructed from threads'
   // stored scopes (so a range/staged review you've commented on stays a sidebar
