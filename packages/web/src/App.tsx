@@ -28,11 +28,34 @@ const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 const EMPTY_FILES: DiffFile[] = [];
 const EMPTY_EDITORS: string[] = [];
 
+const DEFAULT_TARGET = "work";
+interface DeepLinkSelection {
+  repo: string | null;
+  worktree: string | null;
+  target: string;
+}
+function cleanQueryValue(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+function readInitialDeepLink(): DeepLinkSelection {
+  if (typeof window === "undefined") {
+    return { repo: null, worktree: null, target: DEFAULT_TARGET };
+  }
+  const q = new URLSearchParams(window.location.search);
+  return {
+    repo: cleanQueryValue(q.get("repo")),
+    worktree: cleanQueryValue(q.get("worktree")),
+    target: cleanQueryValue(q.get("target")) ?? DEFAULT_TARGET,
+  };
+}
+
 export function App() {
+  const [initialDeepLink] = useState(readInitialDeepLink);
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
-  const [repo, setRepo] = useState<string | null>(null);
-  const [worktree, setWorktree] = useState<string | null>(null);
-  const [target, setTarget] = useState("work");
+  const [repo, setRepo] = useState<string | null>(initialDeepLink.repo);
+  const [worktree, setWorktree] = useState<string | null>(initialDeepLink.worktree);
+  const [target, setTarget] = useState(initialDeepLink.target);
   const [diff, setDiff] = useState<RepoDiff | null>(null);
   const [refs, setRefs] = useState<RefList | null>(null);
   const [allFiles, setAllFiles] = useState<string[]>([]);
@@ -213,9 +236,16 @@ export function App() {
     refreshThreads();
   }, [refreshWorkspace, loadWorkspaces, refreshThreads]);
 
-  // Reset the worktree selection when switching repos.
+  // Reset the worktree/target selection when switching repos, but keep the
+  // initial URL selection intact for /diffect deep links.
+  const firstRepoEffect = useRef(true);
   useEffect(() => {
+    if (firstRepoEffect.current) {
+      firstRepoEffect.current = false;
+      return;
+    }
     setWorktree(null);
+    setTarget(DEFAULT_TARGET);
   }, [repo]);
 
   useEffect(() => {

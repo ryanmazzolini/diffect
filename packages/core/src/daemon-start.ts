@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "./daemon.js";
+import { clearDaemonMarker, writeDaemonMarker } from "./store/daemon-marker.js";
 import { addWorkspaceToRegistry } from "./store/registry.js";
 
 export interface DaemonArgs {
@@ -128,6 +129,12 @@ export async function runDaemon(
   });
   const { port } = server.address() as AddressInfo;
   const url = formatUrl(args.host, port);
+  await writeDaemonMarker(url).catch((err) =>
+    stderr.write(`diffectd: could not write daemon marker: ${err?.message ?? err}\n`),
+  );
+  server.on("close", () => {
+    void clearDaemonMarker(url).catch(() => {});
+  });
   const where = webRoot ? "browser + API" : "API only";
   stdout.write(`DIFFECTD_READY ${url}\n`);
   stdout.write(

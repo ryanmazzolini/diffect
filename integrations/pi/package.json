@@ -1,0 +1,12 @@
+{
+  "name": "diffect-pi",
+  "private": true,
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./diffect.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
