@@ -63,11 +63,34 @@ const STABLE_KINDS: ReadonlySet<ReviewTargetKind> = new Set([
   "unstaged",
 ]);
 
+const DEFAULT_TARGET = "work";
+interface DeepLinkSelection {
+  repo: string | null;
+  worktree: string | null;
+  target: string;
+}
+function cleanQueryValue(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+function readInitialDeepLink(): DeepLinkSelection {
+  if (typeof window === "undefined") {
+    return { repo: null, worktree: null, target: DEFAULT_TARGET };
+  }
+  const q = new URLSearchParams(window.location.search);
+  return {
+    repo: cleanQueryValue(q.get("repo")),
+    worktree: cleanQueryValue(q.get("worktree")),
+    target: cleanQueryValue(q.get("target")) ?? DEFAULT_TARGET,
+  };
+}
+
 export function App() {
+  const [initialDeepLink] = useState(readInitialDeepLink);
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
-  const [repo, setRepo] = useState<string | null>(null);
-  const [worktree, setWorktree] = useState<string | null>(null);
-  const [target, setTarget] = useState("work");
+  const [repo, setRepo] = useState<string | null>(initialDeepLink.repo);
+  const [worktree, setWorktree] = useState<string | null>(initialDeepLink.worktree);
+  const [target, setTarget] = useState(initialDeepLink.target);
   // The unscoped/legacy bucket is open: the thread pane shows pre-scope threads
   // (sessionId === null) instead of the active session's. A flag, not a magic
   // target, so it never collides with a real review scope.
@@ -295,9 +318,14 @@ export function App() {
 
   // Switching repos lands on its primary `work` session with the unscoped bucket
   // closed — a range/staged target is repo-specific and meaningless elsewhere.
+  const firstRepoEffect = useRef(true);
   useEffect(() => {
+    if (firstRepoEffect.current) {
+      firstRepoEffect.current = false;
+      return;
+    }
     setWorktree(null);
-    setTarget("work");
+    setTarget(DEFAULT_TARGET);
     setShowUnscoped(false);
     setPendingSession(null);
   }, [repo]);

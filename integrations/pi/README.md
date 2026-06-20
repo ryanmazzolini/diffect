@@ -1,62 +1,71 @@
-# Diffect ⇄ agent integration (pi / Claude / Codex)
+# Diffect ⇄ pi
 
-Diffect's review state is an append-only event log at `<workspace>/.reviews/threads.jsonl`.
-The `diffect` CLI reads and writes it directly, so an agent can participate in a
-review **whether or not the `diffectd` daemon is running** — no API, database, or
-daemon orchestration required.
+Diffect review state is a local append-only event log under
+`$XDG_CONFIG_HOME/diffect/` (default `~/.config/diffect/`). The CLI, daemon, UI,
+and agents are equal peers over those files.
 
-This is the *first* agent-integration model: the agent runs normal `diffect`
-commands. There is intentionally **no** built-in "apply" loop or daemon-owned
-autonomous fixing — the coding agent owns implementation; Diffect just exposes
-review state and stable commands.
+## Slash command
 
-## The loop
+Install this local pi package, then `/reload` and use:
 
-1. **List open feedback** the human (or another agent) left:
-   ```sh
-   diffect list --status open --json
-   ```
-   Each thread has a stable `id`, a `file`/`line` (or `null` for general
-   threads), a `severity`, and an ordered `comments` array. An `anchorState` of
-   `"stale"` means the code under the comment moved or was removed — surface it,
-   don't ignore it.
+```text
+/diffect
+```
 
-2. **Make the fix** in the working tree (your normal editing tools).
+It finds the current git repo, reuses the running `diffectd` from
+`~/.config/diffect/daemon.json` when present (including the Tauri app's ephemeral
+port), otherwise starts one, registers the repo as a workspace, and opens Diffect
+at:
 
-3. **Reply to the thread** explaining what you did, authored as an agent:
-   ```sh
-   diffect reply <thread-id> --agent pi --body "Batched the N+1 via a dataloader."
-   ```
+```text
+/?repo=<repo>&worktree=<worktree>&target=work
+```
 
-4. **Resolve** (closes the thread):
-   ```sh
-   diffect resolve <thread-id> --agent pi --summary "Fixed in this change."
-   ```
-   Always pass a `--summary` — a status change with no explanation is lost
-   context. Diffect records it as a trailing comment on the thread.
+Use `/diffect staged`, `/diffect unstaged`, or `/diffect main..feature` to open a
+specific review target. It tries the desktop app first:
 
-5. **Raise your own findings** as normal review threads (no separate "AI findings"
-   store — they show up in the same inbox as human comments, distinguished only by
-   the author chip):
-   ```sh
-   diffect comment --file src/api.ts --line 42 --severity must-fix \
-                   --agent pi --body "This dereferences a possibly-null user."
-   diffect general --agent pi --body "Overall: consider extracting the auth guard."
-   ```
+- `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set
+- the local dev binary at `packages/desktop/src-tauri/target/{debug,release}/diffect-desktop`
+- `diffect-desktop` on `PATH`
+- macOS app lookup (`open -b app.diffect.desktop`, then `open -a Diffect`)
 
-## Output contract
+The desktop app's single-instance hook focuses/navigates the existing window. If
+none of those work, it falls back to the browser.
 
-Every mutating command prints the resulting thread as pretty JSON on stdout, so
-you can parse the new `id`/`status` programmatically. `diffect list --json` and
-`diffect diff --json` are stable, machine-readable surfaces meant for skills and
-extensions — prefer them over scraping human output.
+For global use:
 
-## Notes
+```sh
+pi install /path/to/diffect/integrations/pi
+```
 
-- `--agent NAME` sets `author.type:"agent"` with that name. Omit it and the
-  comment is authored as the user.
-- `--repo` defaults to the single repo in the workspace; pass it explicitly in a
-  multi-repo workspace (Slice 4).
-- The CLI resolves the workspace by walking up from the current directory to the
-  nearest `.reviews/` folder, then falling back to the git root. Run it from
-  inside the workspace.
+Put `diffect`/`diffectd` on `PATH` or run it from a built Diffect checkout.
+
+## Agent tools
+
+The extension also registers minimal tools:
+
+```text
+diffect_open
+diffect_list_feedback
+diffect_comment
+diffect_reply
+diffect_resolve
+```
+
+The normal loop stays boring:
+
+```sh
+diffect list --status open --json
+# fix code
+diffect reply <thread-id> --agent pi --body "Fixed by ..."
+diffect resolve <thread-id> --agent pi --summary "Fixed in this change."
+```
+
+Agents can create their own normal comments too:
+
+```sh
+diffect comment --file src/api.ts --line 42 --severity must-fix \
+  --agent pi --body "This dereferences a possibly-null user."
+```
+
+No apply daemon, no cloud runner, no separate AI findings store.

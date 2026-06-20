@@ -191,31 +191,50 @@ fn is_loopback(url: &Url) -> bool {
     }
 }
 
+fn requested_loopback_url(args: &[String]) -> Option<Url> {
+    args.iter()
+        .skip(1)
+        .filter_map(|arg| arg.parse::<Url>().ok())
+        .find(is_loopback)
+}
+
+fn focus_window(handle: &AppHandle, requested: Option<Url>) {
+    if let Some(w) = handle.get_webview_window("main") {
+        if let Some(url) = requested {
+            let _ = w.navigate(url);
+        }
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 fn main() {
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // A second launch focuses the existing window instead of racing
-            // a second daemon into the same store.
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.set_focus();
-            }
+            // a second daemon into the same store. If pi passed a loopback URL,
+            // navigate the app there instead of opening a browser.
+            focus_window(app, requested_loopback_url(&argv));
         }))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Escape hatch for UI development: point the window at an
             // existing origin (Vite dev server or a manual daemon) instead
             // of spawning one.
-            let url = match std::env::var("DIFFECT_DESKTOP_URL") {
-                Ok(u) if !u.is_empty() => u,
-                _ => {
-                    let launch = resolve_daemon(app.handle())?;
-                    let (child, url) = spawn_daemon(&launch)?;
-                    let daemon = Arc::new(Mutex::new(Some(child)));
-                    app.manage(Daemon(daemon.clone()));
-                    watch_daemon(app.handle().clone(), launch, daemon);
-                    url
-                }
+            let argv: Vec<String> = std::env::args().collect();
+            let url = match requested_loopback_url(&argv) {
+                Some(url) => url.to_string(),
+                None => match std::env::var("DIFFECT_DESKTOP_URL") {
+                    Ok(u) if !u.is_empty() => u,
+                    _ => {
+                        let launch = resolve_daemon(app.handle())?;
+                        let (child, url) = spawn_daemon(&launch)?;
+                        let daemon = Arc::new(Mutex::new(Some(child)));
+                        app.manage(Daemon(daemon.clone()));
+                        watch_daemon(app.handle().clone(), launch, daemon);
+                        url
+                    }
+                },
             };
             let url: Url = url.parse()?;
             // The app's own origins stay in the webview: any loopback port
