@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -13,15 +13,23 @@ const MAX_OUTPUT = 50_000;
 
 type Command = { command: string; args: string[] };
 type RepoLocation = { repo: string; worktree: string | null };
+type ReviewWorkspace = { workspaceRoot: string; anchorRoot: string | null };
+type SessionLike = {
+  sessionManager?: {
+    getBranch?: () => unknown[];
+    getEntries?: () => unknown[];
+  };
+};
+type CwdContext = SessionLike & { cwd: string };
 
 export default function diffectExtension(pi: ExtensionAPI) {
   pi.registerCommand("diffect", {
     description: "Open the current repo in Diffect",
     handler: async (args, ctx) => {
       try {
-        const target = args.trim() || DEFAULT_TARGET;
-        const { url } = await diffectUrl(pi, ctx.cwd, target);
-        await openUrl(pi, ctx.cwd, url);
+        const parsed = parseCommandArgs(args, ctx.cwd);
+        const { url, workspaceRoot } = await diffectUrl(pi, ctx, parsed.target, parsed.workspace);
+        await openUrl(pi, workspaceRoot, url);
         ctx.ui.notify(`Diffect: ${url}`, "info");
       } catch (err) {
         ctx.ui.notify(`Diffect failed: ${messageOf(err)}`, "error");
@@ -36,12 +44,19 @@ export default function diffectExtension(pi: ExtensionAPI) {
     promptSnippet: "Open the current repo in Diffect's local review UI",
     parameters: Type.Object({
       target: Type.Optional(Type.String({ description: "Review target, default: work" })),
+      workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
       open: Type.Optional(Type.Boolean({ description: "Also ask the OS to open the URL" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const { url, repoRoot } = await diffectUrl(pi, ctx.cwd, params.target ?? DEFAULT_TARGET, signal);
-      if (params.open) await openUrl(pi, ctx.cwd, url, signal);
-      return textResult(url, { url, repoRoot });
+      const { url, workspaceRoot, repoRoot } = await diffectUrl(
+        pi,
+        ctx,
+        params.target ?? DEFAULT_TARGET,
+        params.workspace,
+        signal,
+      );
+      if (params.open) await openUrl(pi, workspaceRoot, url, signal);
+      return textResult(url, { url, workspaceRoot, repoRoot });
     },
   });
 
@@ -57,13 +72,14 @@ export default function diffectExtension(pi: ExtensionAPI) {
       status: Type.Optional(Type.String({ description: "open, closed, or all; default: open" })),
       repo: Type.Optional(Type.String()),
       worktree: Type.Optional(Type.String()),
+      workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const args = ["list", "--json"];
       if (params.status && params.status !== "all") args.push("--status", params.status);
       if (params.repo) args.push("--repo", params.repo);
       if (params.worktree) args.push("--worktree", params.worktree);
-      return runDiffectTool(pi, ctx.cwd, args, signal);
+      return runDiffectTool(pi, ctx, args, signal, params.workspace);
     },
   });
 
@@ -79,7 +95,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
     async execute(_id, params, signal, _onUpdate, ctx) {
       return runDiffectTool(
         pi,
-        ctx.cwd,
+        ctx,
         ["reply", params.id, "--agent", params.agent ?? "pi", "--body", params.body],
         signal,
       );
@@ -98,7 +114,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
     async execute(_id, params, signal, _onUpdate, ctx) {
       return runDiffectTool(
         pi,
-        ctx.cwd,
+        ctx,
         ["resolve", params.id, "--agent", params.agent ?? "pi", "--summary", params.summary],
         signal,
       );
@@ -137,7 +153,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
       ];
       if (params.endLine !== undefined) args.push("--end-line", String(params.endLine));
       if (params.severity) args.push("--severity", params.severity);
-      return runDiffectTool(pi, ctx.cwd, args, signal);
+      return runDiffectTool(pi, ctx, args, signal);
     },
   });
 }
