@@ -4,9 +4,14 @@ import { test, expect } from "@playwright/test";
 test("target picker applies local modes, compare refs, and commit search", async ({ page }) => {
   await page.goto("/");
 
-  const all = page.getByRole("button", { name: "All local changes", exact: true });
-  const staged = page.getByRole("button", { name: "Staged changes", exact: true });
-  const unstaged = page.getByRole("button", { name: "Unstaged changes", exact: true });
+  // Scope to the Topbar's local-mode segmented control: selecting a target also
+  // surfaces that review as a sidebar session-item with the SAME accessible name
+  // (e.g. "Staged changes"), so an unscoped getByRole would be ambiguous once the
+  // diff settles. `.local-targets` is the picker group, never the sidebar.
+  const modes = page.locator(".local-targets");
+  const all = modes.getByRole("button", { name: "All local changes", exact: true });
+  const staged = modes.getByRole("button", { name: "Staged changes", exact: true });
+  const unstaged = modes.getByRole("button", { name: "Unstaged changes", exact: true });
 
   await expect(all).toHaveAttribute("aria-pressed", "true");
 

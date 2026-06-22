@@ -4,6 +4,14 @@ import { gitTry } from "./exec.js";
 const lines = (s: string | null): string[] =>
   (s ?? "").split("\n").filter(Boolean);
 
+/**
+ * Keep only true remote-tracking branches: drop each remote's symbolic
+ * `<remote>/HEAD` pointer (it just mirrors another branch and isn't a distinct
+ * compare point). A short name always contains the remote prefix slash.
+ */
+const isRemoteBranch = (name: string): boolean =>
+  name.includes("/") && !name.endsWith("/HEAD");
+
 const DEFAULT_SEARCH_LIMIT = 12;
 const MAX_SEARCH_LIMIT = 50;
 
@@ -29,13 +37,21 @@ export async function listRefs(repoRoot: string): Promise<RefList> {
       "refs/tags",
     ]),
   );
+  const remotes = lines(
+    await gitTry(repoRoot, [
+      "for-each-ref",
+      "--format=%(refname:short)",
+      "--sort=-committerdate",
+      "refs/remotes",
+    ]),
+  ).filter(isRemoteBranch);
   const commits = lines(
     await gitTry(repoRoot, ["log", "-30", "--format=%h\t%s"]),
   ).map((l) => {
     const tab = l.indexOf("\t");
     return { sha: l.slice(0, tab), subject: l.slice(tab + 1) };
   });
-  return { branches, tags, commits };
+  return { branches, tags, remotes, commits };
 }
 
 /**
@@ -50,22 +66,31 @@ export async function searchRefs(
 ): Promise<RefSearchResults> {
   const q = query.trim();
   const capped = clampLimit(limit);
-  const [branches, tags, commits] = await Promise.all([
+  const [branches, remotes, tags, commits] = await Promise.all([
     searchNamedRefs(repoRoot, "branch", q, capped),
+    searchNamedRefs(repoRoot, "remote", q, capped),
     searchNamedRefs(repoRoot, "tag", q, capped),
     searchCommits(repoRoot, q, capped),
   ]);
-  return { query: q, branches, tags, commits };
+  return { query: q, branches, remotes, tags, commits };
 }
+
+const NAMED_REF_SPEC: Record<
+  "branch" | "tag" | "remote",
+  { namespace: string; sort: string }
+> = {
+  branch: { namespace: "refs/heads", sort: "--sort=-committerdate" },
+  remote: { namespace: "refs/remotes", sort: "--sort=-committerdate" },
+  tag: { namespace: "refs/tags", sort: "--sort=-creatordate" },
+};
 
 async function searchNamedRefs(
   repoRoot: string,
-  kind: "branch" | "tag",
+  kind: "branch" | "tag" | "remote",
   query: string,
   limit: number,
 ): Promise<RefSearchOption[]> {
-  const namespace = kind === "branch" ? "refs/heads" : "refs/tags";
-  const sort = kind === "branch" ? "--sort=-committerdate" : "--sort=-creatordate";
+  const { namespace, sort } = NAMED_REF_SPEC[kind];
   const refs = lines(
     await gitTry(repoRoot, [
       "for-each-ref",
@@ -73,13 +98,15 @@ async function searchNamedRefs(
       sort,
       namespace,
     ]),
-  );
+  ).filter((name) => kind !== "remote" || isRemoteBranch(name));
   const needle = query.toLowerCase();
   return refs
     .filter((name) => needle === "" || name.toLowerCase().includes(needle))
     .slice(0, limit)
     .map((name) => ({
       kind,
+      // Branches/remotes resolve as-is; tags are namespaced to avoid colliding
+      // with a same-named branch when handed to git.
       value: kind === "tag" ? `tags/${name}` : name,
       label: name,
     }));

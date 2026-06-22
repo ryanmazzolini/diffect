@@ -8,11 +8,15 @@ import {
   UnknownThreadError,
 } from "./reviews/event-log.js";
 import {
-  findRepoRootForThread,
+  findStoreForThread,
   loadRefreshedThreads,
 } from "./reviews/refresh.js";
 import { buildAnchor } from "./reviews/anchors.js";
-import { resolveWorkBase } from "./git/diff.js";
+import {
+  resolveScope,
+  sessionIdForScope,
+  snapshotIdForState,
+} from "./reviews/scope.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { discoverWorkspace, resolveRepoRoot } from "./workspace.js";
 import { gitTry } from "./git/exec.js";
@@ -33,11 +37,11 @@ async function resolveWorkspaceRoot(start: string): Promise<string> {
  * Resolve which repo's central store owns a thread id (for reply/resolve/dismiss,
  * which carry only an id). Discovers the workspace from cwd, then scans repos.
  */
-async function requireThreadRepoRoot(id: string): Promise<string> {
+async function requireThreadStore(id: string) {
   const ws = await discoverWorkspace(await resolveWorkspaceRoot(process.cwd()));
-  const repoRoot = await findRepoRootForThread(ws, id);
-  if (!repoRoot) fail(`unknown thread: ${id}`);
-  return repoRoot;
+  const store = await findStoreForThread(ws, id);
+  if (!store) fail(`unknown thread: ${id}`);
+  return store;
 }
 
 interface Flags {
@@ -165,7 +169,7 @@ async function cmdList(argv: string[]): Promise<number> {
     return 0;
   }
   for (const t of threads) {
-    const loc = t.file ? `${t.file}:${t.line ?? "?"}` : "(general)";
+    const loc = t.file ? `${t.file}:${t.line ?? "?"}` : `(${t.targetLevel})`;
     const sev = t.severity ? `[${t.severity}] ` : "";
     const stale = t.anchorState === "stale" ? " (stale)" : "";
     const first = t.comments[0]?.body.split("\n")[0] ?? "";
@@ -212,9 +216,14 @@ async function cmdComment(argv: string[]): Promise<number> {
   const endLine = flags.options.has("end-line")
     ? positiveInt(flags.options.get("end-line")!, "--end-line")
     : null;
-  // Anchor against the file content at creation so the thread can survive edits.
-  const base = await resolveWorkBase(treeRoot);
-  const anchor = await buildAnchor(treeRoot, base, { file, side, line, endLine });
+  // Bind the comment to the changeset it was filed under (--target, default
+  // "work") and anchor against that scope's base so the thread survives edits.
+  const scope = await resolveScope(
+    treeRoot,
+    normalizeTarget(flags.options.get("target")),
+    worktree,
+  );
+  const anchor = await buildAnchor(treeRoot, scope.baseSha, { file, side, line, endLine });
   const thread = await createThread(
     storeRoot,
     {
@@ -226,6 +235,9 @@ async function cmdComment(argv: string[]): Promise<number> {
       endLine,
       severity: (flags.options.get("severity") as Severity) ?? null,
       anchor,
+      scope,
+      sessionId: sessionIdForScope(scope),
+      snapshotId: await snapshotIdForState(treeRoot, scope),
       author: authorFrom(flags),
       body,
     },
@@ -239,7 +251,13 @@ async function cmdGeneral(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const body = flags.options.get("body");
   if (!body) fail("--body is required");
-  const { repo, worktree, storeRoot } = await resolveTarget(flags);
+  const { repo, worktree, treeRoot, storeRoot } = await resolveTarget(flags);
+  // General (non-line) threads still belong to a review scope/session.
+  const scope = await resolveScope(
+    treeRoot,
+    normalizeTarget(flags.options.get("target")),
+    worktree,
+  );
   const thread = await createThread(
     storeRoot,
     {
@@ -248,6 +266,9 @@ async function cmdGeneral(argv: string[]): Promise<number> {
       file: null,
       side: null,
       line: null,
+      scope,
+      sessionId: sessionIdForScope(scope),
+      snapshotId: await snapshotIdForState(treeRoot, scope),
       author: authorFrom(flags),
       body,
     },
@@ -263,8 +284,8 @@ async function cmdReply(argv: string[]): Promise<number> {
   const body = flags.options.get("body");
   if (!id) fail('usage: diffect reply <thread-id> --body "…"');
   if (!body) fail("--body is required");
-  const repoRoot = await requireThreadRepoRoot(id);
-  await mutate(() => addComment(repoRoot, id, { author: authorFrom(flags), body }, now()));
+  const store = await requireThreadStore(id);
+  await mutate(() => addComment(store, id, { author: authorFrom(flags), body }, now()));
   return 0;
 }
 
@@ -272,10 +293,10 @@ async function cmdResolve(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const id = flags.positionals[0];
   if (!id) fail('usage: diffect resolve <thread-id> [--summary "…"]');
-  const repoRoot = await requireThreadRepoRoot(id);
+  const store = await requireThreadStore(id);
   await mutate(() =>
     resolveThread(
-      repoRoot,
+      store,
       id,
       { author: authorFrom(flags), summary: flags.options.get("summary") ?? null },
       now(),

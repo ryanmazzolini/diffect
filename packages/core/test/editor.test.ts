@@ -1,20 +1,43 @@
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Stub the child_process spawn at the system boundary so the editor "launch"
+// never shells out to a real editor — running the suite must not pop open the
+// developer's VS Code. We assert the path guards and the exact argv instead.
+vi.mock("node:child_process", () => ({
+  // promisify(execFile) appends the callback as the last argument, so resolve
+  // whatever trails the call rather than assuming a fixed arity.
+  execFile: vi.fn((...args: unknown[]) => {
+    const cb = args[args.length - 1];
+    if (typeof cb === "function") {
+      (cb as (e: null, o: { stdout: string; stderr: string }) => void)(null, {
+        stdout: "",
+        stderr: "",
+      });
+    }
+  }),
+}));
+
+import { execFile } from "node:child_process";
 import { openInEditor, PathEscapeError, UnknownEditorError } from "../src/editor.js";
 
 describe("openInEditor guards", () => {
-  it("rejects an unsupported editor", async () => {
+  beforeEach(() => vi.mocked(execFile).mockClear());
+
+  it("rejects an unsupported editor (never spawns)", async () => {
     await expect(openInEditor("/repo", "a.txt", 1, "nano")).rejects.toBeInstanceOf(
       UnknownEditorError,
     );
+    expect(execFile).not.toHaveBeenCalled();
   });
 
-  it("rejects a path that escapes the repo root via ..", async () => {
+  it("rejects a path that escapes the repo root via .. (never spawns)", async () => {
     await expect(
       openInEditor("/repo", "../../etc/passwd", 1, "code"),
     ).rejects.toBeInstanceOf(PathEscapeError);
+    expect(execFile).not.toHaveBeenCalled();
   });
 
   describe("with a real repo dir", () => {
@@ -26,22 +49,24 @@ describe("openInEditor guards", () => {
       await rm(dir, { recursive: true, force: true });
     });
 
-    it("rejects an in-repo symlink that resolves outside the repo", async () => {
+    it("rejects an in-repo symlink that resolves outside the repo (never spawns)", async () => {
       // `escape` -> the OS temp root (outside the repo). Opening escape/x must
       // not reach outside the repo.
       await symlink(tmpdir(), join(dir, "escape"));
       await expect(
         openInEditor(dir, "escape/passwd", 1, "code"),
       ).rejects.toBeInstanceOf(PathEscapeError);
+      expect(execFile).not.toHaveBeenCalled();
     });
 
-    it("allows a normal in-repo file (rejected only by missing editor binary)", async () => {
+    it("opens a valid in-repo file via argv (no shell, no real editor launched)", async () => {
       await writeFile(join(dir, "a.txt"), "x\n");
-      // The path guard must pass; the call then fails only if `code` isn't
-      // installed (ENOENT), which is NOT a PathEscapeError.
-      await expect(openInEditor(dir, "a.txt", 2, "code")).rejects.not.toBeInstanceOf(
-        PathEscapeError,
-      );
+      // The path guard passes, so it resolves; the spawn is stubbed, so the only
+      // observable effect is the argv it would have launched.
+      await expect(openInEditor(dir, "a.txt", 2, "code")).resolves.toBeUndefined();
+      const [cmd, args] = vi.mocked(execFile).mock.calls[0]!;
+      expect(cmd).toBe("code");
+      expect(args).toEqual(["-g", expect.stringMatching(/a\.txt:2$/)]);
     });
   });
 });

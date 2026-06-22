@@ -1,27 +1,21 @@
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import MarkdownPreview from "@uiw/react-markdown-preview/nohighlight";
+import rehypeSanitize from "rehype-sanitize";
 
-/**
- * Render trusted-ish markdown safely. react-markdown builds React elements (no
- * innerHTML) and does not render embedded raw HTML by default, so comment bodies
- * — which may be authored by agents — can't inject markup, and non-safe URL
- * schemes (javascript:, data:) are stripped. remark-gfm adds task lists, tables,
- * and strikethrough so the toolbar's output renders. Links open in a new tab.
- */
+const REHYPE_PLUGINS = [rehypeSanitize];
+
+/** Render comment markdown through one sanitized preview path. */
 export function Markdown({ children }: { children: string }) {
   return (
     <div className="markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+      <MarkdownPreview
+        source={children}
+        rehypePlugins={REHYPE_PLUGINS}
         components={{
-          // Drop react-markdown's `node` prop so it doesn't leak onto the DOM.
           a: ({ node, ...props }) => (
             <a {...props} target="_blank" rel="noreferrer noopener" />
           ),
         }}
-      >
-        {children}
-      </ReactMarkdown>
+      />
     </div>
   );
 }

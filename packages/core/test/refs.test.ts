@@ -29,6 +29,7 @@ describe("listRefs", () => {
     const refs = await listRefs(dir);
     expect(refs.branches.sort()).toEqual(["feature", "main"]);
     expect(refs.tags).toEqual(["v1"]);
+    expect(refs.remotes).toEqual([]);
     expect(refs.commits).toHaveLength(1);
     expect(refs.commits[0]!.subject).toBe("first commit");
     expect(refs.commits[0]!.sha).toMatch(/^[0-9a-f]+$/);
@@ -67,5 +68,42 @@ describe("listRefs", () => {
     expect(existsSync(victim)).toBe(true);
     const { readFile } = await import("node:fs/promises");
     expect(await readFile(victim, "utf8")).toBe("important");
+  });
+});
+
+describe("remote-tracking refs", () => {
+  // update-ref / symbolic-ref fabricate the exact refs a `git fetch` would
+  // create, without standing up a second repo: two remote branches plus the
+  // symbolic origin/HEAD that aliases the default branch.
+  async function fabricateOrigin(): Promise<void> {
+    const { stdout } = await git(dir, ["rev-parse", "HEAD"]);
+    const sha = stdout.trim();
+    await git(dir, ["update-ref", "refs/remotes/origin/main", sha]);
+    await git(dir, ["update-ref", "refs/remotes/origin/feature", sha]);
+    await git(dir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+  }
+
+  it("lists remote-tracking branches and drops the symbolic origin/HEAD", async () => {
+    await fabricateOrigin();
+    const refs = await listRefs(dir);
+    expect(refs.remotes.sort()).toEqual(["origin/feature", "origin/main"]);
+    expect(refs.remotes).not.toContain("origin/HEAD");
+  });
+
+  it("searches remotes under their own group, keeping bare names as values", async () => {
+    await fabricateOrigin();
+    // "origin" matches origin/HEAD too — the result must exclude it so a symbolic
+    // alias never becomes a selectable compare point.
+    const matches = await searchRefs(dir, "origin", 5);
+    expect(matches.remotes.map((r) => r.label).sort()).toEqual([
+      "origin/feature",
+      "origin/main",
+    ]);
+    expect(matches.remotes.some((r) => r.value.endsWith("/HEAD"))).toBe(false);
+    expect(matches.remotes.find((r) => r.label === "origin/main")).toMatchObject({
+      kind: "remote",
+      value: "origin/main",
+      label: "origin/main",
+    });
   });
 });

@@ -31,10 +31,10 @@ test("comments on a line through the add-widget", async ({ page }) => {
 
   // Renders back inline (renderExtendLine) and in the thread pane.
   await expect(
-    page.locator(".inline-thread .body", { hasText: "comment via git-diff-view" }).first(),
+    page.locator(".inline-thread .c-text", { hasText: "comment via git-diff-view" }).first(),
   ).toBeVisible();
   await expect(
-    page.locator(".thread-list .body, .thread-pane", { hasText: "comment via git-diff-view" }).first(),
+    page.locator(".thread-pane", { hasText: "comment via git-diff-view" }).first(),
   ).toBeVisible();
 });
 
@@ -62,25 +62,28 @@ test("toggles line wrapping", async ({ page }) => {
   await expect(page.locator(".unified-diff-view-normal").first()).toBeVisible(); // persisted
 });
 
-test("keeps the diff action bar sticky while scrolling", async ({ page }) => {
+test("keeps the diff view controls reachable while scrolling", async ({ page }) => {
   await page.goto("/");
   await page.waitForSelector("tbody.diff-table-body tr");
 
-  const pane = page.locator(".diff-pane");
-  const summary = page.locator(".diff-summary");
-  const paneBox = await pane.boundingBox();
-  const before = await summary.boundingBox();
-  expect(paneBox).not.toBeNull();
+  // The view-mode + wrap controls live in the fixed topbar, not a per-pane action
+  // bar, so the diff pane scrolls internally beneath them and they stay reachable.
+  const header = page.locator(".rheader");
+  const viewSeg = page.getByRole("group", { name: "Diff view mode" });
+  const wrap = page.locator(".wrap-toggle");
+  await expect(viewSeg).toBeVisible();
+  await expect(wrap).toBeVisible();
+  const before = await header.boundingBox();
   expect(before).not.toBeNull();
-  expect(Math.abs((before?.y ?? 0) - (paneBox?.y ?? 0))).toBeLessThanOrEqual(1);
 
-  await pane.evaluate((el) => {
+  await page.locator(".diff-pane").evaluate((el) => {
     el.scrollTop = 700;
   });
 
-  const after = await summary.boundingBox();
+  // The header doesn't move when the diff scrolls — the controls remain pinned.
+  const after = await header.boundingBox();
   expect(after).not.toBeNull();
-  expect(Math.abs((after?.y ?? 0) - (paneBox?.y ?? 0))).toBeLessThanOrEqual(1);
-  await expect(page.locator(".view-toggle")).toBeVisible();
-  await expect(page.locator(".wrap-toggle")).toBeVisible();
+  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
+  await expect(viewSeg).toBeVisible();
+  await expect(wrap).toBeVisible();
 });

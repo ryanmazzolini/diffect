@@ -13,6 +13,9 @@ const MAX_LINES = 2000;
 interface Props {
   repo: string;
   worktree: string | null;
+  /** Review target spec a comment here is filed under (resolved to a scope by
+   * the daemon). Threads on out-of-diff files still bind to the current review. */
+  target: string;
   file: string;
   threads: Thread[];
   editors: string[];
@@ -24,6 +27,7 @@ interface Props {
 export function FullFilePreview({
   repo,
   worktree,
+  target,
   file,
   threads,
   editors,
@@ -114,6 +118,7 @@ export function FullFilePreview({
                         <CommentForm
                           repo={repo}
                           worktree={worktree}
+                          target={target}
                           file={file}
                           side={form.side}
                           line={form.start}

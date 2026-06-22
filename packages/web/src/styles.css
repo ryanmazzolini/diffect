@@ -6,97 +6,192 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  /* Linear-tight radii: small, consistent, never pill-shaped on chrome. */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-pill: 999px;
+  --r: 6px;
   --z-sticky: 10;
   --z-modal: 100;
   --z-toast: 200;
+
+  /* One quick, eased motion curve shared by every transition (Linear feel). */
+  --motion: 0.11s cubic-bezier(0.25, 0.6, 0.3, 1);
+  --motion-slow: 0.16s cubic-bezier(0.25, 0.6, 0.3, 1);
+
+  /* Density-driven sizes — "tight" is the default; [data-density="compact"]
+   * (set on <html>) scales them down for the ultra-compact mode. */
+  --ui: 13px;
+  --row-h: 28px;
+  --diff-size: 12px;
+  --diff-lh: 1.6;
+  --rail-pad: 5px 8px;
+}
+
+html[data-density="compact"] {
+  --ui: 12px;
+  --row-h: 23px;
+  --diff-size: 11px;
+  --diff-lh: 1.5;
+  --rail-pad: 3px 8px;
 }
 
 :root,
 [data-theme="dark"] {
-  --bg: #0d1117;
-  --bg-elev: #161b22;
-  --border: #30363d;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --add-bg: #122117;
-  --add-line: #2ea04326;
-  --del-bg: #2d1214;
-  --del-line: #f8514926;
-  --accent: #2f81f7;
-  --accent-strong: #1f6feb;
-  --must-fix: #f85149;
-  --suggestion: #d29922;
-  --nit: #8b949e;
-  --question: #a371f7;
+  /* Graphite dark — flat, neutral, one indigo accent (Linear). */
+  --bg: #0e0f12;
+  --bg-elev: #16171b;
+  --panel: #16171b;
+  --panel-2: #1c1d22;
+  --active: #25262c; /* neutral "you are here" fill */
+  --border: #26272c;
+  --border-strong: #34353b;
+  --text: #e7e8ea;
+  --ink: #e7e8ea;
+  --muted: #8c8e95;
+  --faint: #80838a;
+  --add-bg: #11231a;
+  --add-line: #2ea04322;
+  --add-ink: #5fc07c;
+  --del-bg: #271619;
+  --del-line: #f8514922;
+  --del-ink: #e0716c;
+  --accent: #6a76e0;
+  --accent-strong: #5e6ad2;
+  --accent-ink: #aab2f0;
+  --accent-soft: rgba(106, 118, 224, 0.16);
+  --must-fix: #f0716a;
+  --suggestion: #e0a23a;
+  --nit: #8c8e95;
+  --question: #8a92e8;
   --success: #3fb950;
-  --hunk-bg: #1c2333;
+  --target: #2a2410; /* commented-line highlight */
+  --range-select: #d29922;
+  --range-select-border: var(--accent);
+  --hunk-bg: #1c1d22;
   --on-accent: #ffffff;
-  --hl-keyword: #ff7b72;
-  --hl-string: #a5d6ff;
-  --hl-number: #79c0ff;
-  --hl-func: #d2a8ff;
-  --hl-type: #ffa657;
-  --sel-bg: #388bfd40;
-  --nav-sel: #388bfd24;
+  --hl-keyword: #c792ea;
+  --hl-string: #7fd88f;
+  --hl-number: #82aaff;
+  --hl-func: #82aaff;
+  --hl-type: #5fd0c5;
+  --sel-bg: var(--accent-soft);
+  --nav-sel: var(--active);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
-  --overlay-backdrop: rgba(1, 4, 9, 0.6);
-  --diffstat-add: #3fb950;
-  --diffstat-del: #f85149;
+  /* Chrome is flat (shadow-free); shadows live only on true overlays. */
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: var(--shadow-lg);
+  --overlay-backdrop: rgba(8, 8, 11, 0.5);
+  --diffstat-add: var(--add-ink);
+  --diffstat-del: var(--del-ink);
   --diffstat-neutral: var(--border);
+  --scrollbar-track: var(--bg);
+  --scrollbar-thumb: #3a3b42;
+  --scrollbar-thumb-hover: #555761;
+  /* Module lifecycle dots — deliberately NON-indigo (amber/green/gray) so the
+   * status hue never collides with the indigo accent or comment severities. */
+  --st-progress: #e0a23a;
+  --st-ready: #3fb950;
+  --st-idle: var(--faint);
+  /* Quiet per-module wayfinding bands — low-sat, outside the status + indigo
+   * budgets, just enough to tell two stacked modules apart at a glance. */
+  --band-1: #6c7280;
+  --band-2: #80726c;
 }
 
 [data-theme="light"] {
-  --bg: #ffffff;
-  --bg-elev: #f6f8fa;
-  --border: #d0d7de;
-  --text: #1f2328;
-  --muted: #656d76;
-  --add-bg: #e6ffec;
-  --add-line: #2ea04326;
-  --del-bg: #ffebe9;
-  --del-line: #f8514926;
-  --accent: #0969da;
-  --accent-strong: #0969da;
-  --must-fix: #cf222e;
-  --suggestion: #9a6700;
-  --nit: #656d76;
-  --question: #8250df;
+  /* Zinc light — soft off-white surfaces, indigo accent (Linear). */
+  --bg: #fbfbfc;
+  --bg-elev: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f4f4f5;
+  --active: #ececef;
+  --border: #e8e8ea;
+  --border-strong: #d6d6da;
+  --text: #1a1a1e;
+  --ink: #1a1a1e;
+  --muted: #686871;
+  --faint: #737379;
+  --add-bg: #eaf6ee;
+  --add-line: #2ea04322;
+  --add-ink: #1a7f37;
+  --del-bg: #fbeeee;
+  --del-line: #f8514922;
+  --del-ink: #c4453d;
+  --accent: #5e6ad2;
+  --accent-strong: #5e6ad2;
+  --accent-ink: #4a55b8;
+  --accent-soft: #eef0fb;
+  --must-fix: #dc2626;
+  --suggestion: #d97706;
+  --nit: #a0a0a8;
+  --question: #5e6ad2;
   --success: #1a7f37;
-  --hunk-bg: #eaeef2;
+  --target: #fdf6e3;
+  --range-select: #f0c000;
+  --range-select-border: var(--accent);
+  --hunk-bg: #f4f4f5;
   --on-accent: #ffffff;
-  --hl-keyword: #cf222e;
-  --hl-string: #0a3069;
-  --hl-number: #0550ae;
-  --hl-func: #8250df;
-  --hl-type: #953800;
-  --sel-bg: #0969da26;
-  --nav-sel: #0969da1f;
-  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.12);
-  --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.15);
-  --shadow-lg: 0 12px 32px rgba(31, 35, 40, 0.2);
-  --overlay-backdrop: rgba(31, 35, 40, 0.4);
-  --diffstat-add: #2da44e;
-  --diffstat-del: #cf222e;
+  --hl-keyword: #9333ea;
+  --hl-string: #15803d;
+  --hl-number: #2563eb;
+  --hl-func: #2563eb;
+  --hl-type: #0d9488;
+  --sel-bg: var(--accent-soft);
+  --nav-sel: var(--active);
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px rgba(20, 20, 28, 0.12);
+  --shadow-lg: 0 16px 48px rgba(20, 20, 28, 0.16), 0 4px 12px rgba(20, 20, 28, 0.08);
+  --shadow-overlay: var(--shadow-lg);
+  --overlay-backdrop: rgba(20, 20, 28, 0.32);
+  --diffstat-add: var(--add-ink);
+  --diffstat-del: var(--del-ink);
   --diffstat-neutral: var(--border);
+  --scrollbar-track: #f4f4f5;
+  --scrollbar-thumb: #c5c5cc;
+  --scrollbar-thumb-hover: #9f9faa;
+  --st-progress: #d8932f;
+  --st-ready: #2fa75a;
+  --st-idle: var(--faint);
+  --band-1: #8a8f9c;
+  --band-2: #9c8f8a;
 }
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 3px solid var(--scrollbar-track);
+  border-radius: var(--radius-pill);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto,
+    sans-serif;
+  font-size: var(--ui);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  /* Theme flip eases instead of snapping. */
+  transition: background var(--motion), color var(--motion);
 }
 
 /* Honour users who ask the OS to reduce motion. */
@@ -131,12 +226,11 @@ body {
   padding: var(--space-1);
   border-radius: var(--radius-md);
   line-height: 0;
+  transition: background var(--motion), color var(--motion);
 }
 .icon-btn:hover {
   color: var(--text);
-  /* --border reads as a subtle chip on the elevated topbar/sidebar surfaces,
-   * where --bg would be near-invisible (white-on-white in light theme). */
-  background: var(--border);
+  background: var(--panel-2);
 }
 
 .app {
@@ -193,12 +287,18 @@ body {
   align-items: flex-start;
   justify-content: center;
   padding: 10vh var(--space-4) var(--space-4);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+body.modal-open {
+  overflow: hidden;
 }
 .modal {
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -268,6 +368,7 @@ body {
   padding: var(--space-1);
   max-height: 200px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 .aw-dirs .muted {
   color: var(--muted);
@@ -320,16 +421,44 @@ body {
   flex-shrink: 0;
 }
 
-.topbar {
+/* ============ Review header — Linear-clean, two airy rows ============ */
+.rheader {
+  flex: none;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.rh-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  gap: 10px;
+  padding: 0 12px;
+}
+.rh-identity {
+  height: 52px;
+}
+.rh-subbar {
+  height: 40px;
+  border-top: 1px solid var(--border);
+}
+.rh-grow {
+  flex: 1;
+  min-width: 8px;
+}
+.nowrap {
+  white-space: nowrap;
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--r);
+  background: var(--accent);
+  color: #fff;
   font-weight: 700;
+  font-size: 12px;
   letter-spacing: -0.02em;
 }
 .workspace-path {
@@ -339,7 +468,100 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 40vw;
+  max-width: 36vw;
+}
+/* N≥2 identity: the workspace folder as a crumb plus a repo count, naming the
+ * whole modules view. N=1 keeps the bare .workspace-path above, unchanged. */
+.workspace-crumb {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28vw;
+}
+.repo-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+  flex: none;
+}
+/* Total diffstat in the identity row. */
+.rdelta {
+  font-family: var(--mono);
+  font-size: 12px;
+  flex: none;
+}
+.rdelta .plus {
+  color: var(--add-ink);
+}
+.rdelta .minus {
+  color: var(--del-ink);
+}
+/* Inline meta chips on the subbar (viewed count, etc.). */
+.metaitem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  flex: none;
+}
+.metaitem .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.dot-green {
+  background: var(--success);
+}
+
+/* Segmented control — density, unified/split, tree/list, diff/all. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--panel);
+  flex: none;
+}
+.seg button {
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border);
+  padding: 4px 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background var(--motion), color var(--motion);
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.seg button.on {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 500;
+}
+.seg button:hover:not(.on) {
+  color: var(--text);
+}
+/* These segmented controls clip their children (overflow:hidden for the rounded
+ * group), which would clip a focus outline — use an inset ring instead. */
+.seg button:focus-visible,
+.file-mode:focus-visible,
+.target-mode:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 .target-chip {
   background: var(--accent);
@@ -368,31 +590,31 @@ body {
   display: flex;
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r);
   overflow: hidden;
-  background: var(--bg);
+  background: var(--panel);
 }
 .target-mode {
   border: 0;
   border-right: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  padding: 5px 9px;
+  padding: 4px 9px;
   font-size: 12px;
   cursor: pointer;
+  transition: background var(--motion), color var(--motion);
 }
 .target-mode:last-child {
   border-right: 0;
 }
-.target-mode:hover,
-.target-mode:focus-visible {
+.target-mode:hover {
   color: var(--text);
-  background: var(--bg-elev);
+  background: var(--panel-2);
 }
 .target-mode.active {
   color: var(--on-accent);
   background: var(--accent-strong);
-  font-weight: 700;
+  font-weight: 600;
 }
 .compare {
   display: flex;
@@ -434,10 +656,23 @@ body {
   width: min(430px, 90vw);
   max-height: 480px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-elev);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
   overflow: hidden;
+  transform-origin: top left;
+  animation: pop-in var(--motion) both;
+}
+/* Overlays (popovers, palettes, menus) ease in from slightly small + low. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .ref-search-input {
   border: 0;
@@ -544,8 +779,9 @@ body {
   border: none;
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--r);
   color: var(--muted);
+  transition: background var(--motion), color var(--motion);
 }
 .review-progress:hover:not(:disabled) {
   background: var(--bg);
@@ -565,7 +801,7 @@ body {
   display: block;
   height: 100%;
   background: var(--success);
-  transition: width 0.15s ease;
+  transition: width var(--motion-slow);
 }
 .review-progress-count {
   font-size: 11px;
@@ -585,6 +821,7 @@ body {
   cursor: col-resize;
   background: var(--border);
   opacity: 0.4;
+  transition: background var(--motion), opacity var(--motion);
 }
 .pane-resizer:hover {
   opacity: 1;
@@ -610,8 +847,8 @@ body {
   border-right: 1px solid var(--border);
   background: var(--bg-elev);
   overflow: auto;
-  padding: 10px 8px;
-  font-size: 13px;
+  padding: 8px 6px;
+  font-size: 12.5px;
 }
 /* Drag handle between the sidebar and the diff/thread area. */
 .sidebar-resizer {
@@ -619,6 +856,7 @@ body {
   cursor: col-resize;
   background: var(--border);
   opacity: 0.4;
+  transition: background var(--motion), opacity var(--motion);
 }
 .sidebar-resizer:hover {
   opacity: 1;
@@ -629,132 +867,999 @@ body {
   align-items: center;
   justify-content: space-between;
   text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  letter-spacing: 0.08em;
   color: var(--muted);
-  margin: 12px 4px 6px;
+  margin: 10px 4px 5px;
 }
 .sidebar-head:first-child {
   margin-top: 0;
 }
+.open-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 8px;
+}
+.open-review {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion);
+}
+.open-review:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.open-review.active {
+  background: var(--nav-sel);
+  color: var(--text);
+}
+.open-review-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.space-review .open-review-dot {
+  background: var(--border-strong);
+}
+.space-review.active .open-review-dot {
+  background: var(--accent);
+}
+.open-review-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.open-review-name,
+.open-review-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-review-name {
+  color: var(--text);
+  font-weight: 600;
+}
+.open-review-meta,
+.open-review-empty {
+  color: var(--faint);
+  font-size: 11px;
+}
+.open-review-empty {
+  padding: 3px 8px 8px;
+}
 .ws-path {
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  margin: 4px 4px 2px;
+  font-size: 10.5px;
+  color: var(--faint);
+  margin: 3px 7px 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .repo-item,
-.wt-item {
-  display: block;
+.session-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   width: 100%;
+  min-height: 28px;
   text-align: left;
   background: transparent;
   border: none;
   color: var(--text);
   cursor: pointer;
-  padding: 3px 8px;
-  border-radius: 4px;
+  padding: 3px 7px;
+  border-radius: var(--r);
+  overflow: hidden;
+  white-space: nowrap;
+  transition: background var(--motion), color var(--motion);
+}
+.repo-name,
+.session-name {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* The branch label rides on the right, muted, and yields its space to the name
+ * before truncating itself. */
+.repo-branch {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.repo-branch-icon {
+  flex: none;
+  opacity: 0.8;
 }
 .repo-item:hover,
-.wt-item:hover {
+.session-item:hover {
   background: var(--bg);
 }
 .repo-item.active,
-.wt-item.active {
+.session-item.active {
   /* Soft rounded tint, no left accent bar (which read as harsh). Normal text
    * colour keeps contrast — accent-on-tint and white-on-accent both fail AA. */
   background: var(--nav-sel);
   color: var(--text);
   font-weight: 600;
 }
-.worktree-list {
+/* Special review buckets nested under the active space (normal reviews live above). */
+.session-list {
   padding-left: 12px;
 }
-.wt-item {
+.session-item {
   font-size: 12px;
   color: var(--muted);
+  align-items: center;
 }
-.file-mode-toggle {
-  display: flex;
-  gap: 4px;
-  margin: 0 4px 8px;
+.session-icon {
+  flex: none;
+  opacity: 0.7;
 }
-.file-mode {
-  flex: 1;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+/* Muted secondary (a work session's PR-like base) sits beside the name and
+ * truncates before it. */
+.session-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.85;
+}
+/* Comment-count pill, pinned right. */
+.session-count {
+  margin-left: auto;
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
   background: var(--bg);
   color: var(--muted);
-  cursor: pointer;
-  padding: 4px 8px;
-  font-size: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
 }
-.file-mode:hover,
-.file-mode:focus-visible {
+.session-item.active .session-count {
+  background: var(--panel);
   color: var(--text);
-  background: var(--bg-elev);
 }
-.file-mode.active {
+/* Iteration timeline under the active session: a static, non-interactive list of
+ * the snapshots its comments were filed against. Indented past the session row's
+ * icon so the dots line up under the label, not the branch glyph. */
+.session-timeline {
+  list-style: none;
+  margin: 1px 0 4px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.timeline-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.timeline-dot {
+  flex: none;
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border);
+}
+.timeline-row.current .timeline-dot {
+  background: var(--accent);
+}
+.timeline-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.timeline-row.current .timeline-label {
   color: var(--text);
-  background: var(--nav-sel);
-  border-color: var(--accent);
   font-weight: 600;
 }
-
-/* Changed/all-file tree */
-.tree-dir,
-.tree-file {
+.timeline-when {
+  flex: none;
+  color: var(--faint);
+}
+.timeline-row .session-count {
+  margin-left: auto;
+}
+/* Archived (completed) reviews: a default-collapsed disclosure at the foot of the
+   session list — finished work stays reachable but out of the way. */
+.archived-group {
+  margin-top: 2px;
+}
+.archived-toggle {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
   width: 100%;
-  text-align: left;
+  padding: 3px 8px;
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
-  color: var(--text);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   cursor: pointer;
-  padding: 3px 8px;
-  font-size: 12px;
-  min-width: 0;
+  border-radius: var(--r);
+  transition: background var(--motion), color var(--motion);
 }
-.tree-dir {
+.archived-toggle:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.archived-chevron {
+  flex: none;
+  opacity: 0.7;
+}
+.archived-label {
+  flex: 0 1 auto;
+}
+.archived-count {
+  margin-left: auto;
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+/* Archived session rows: dimmed and non-interactive (the Revive action aside). */
+.session-item.archived {
+  cursor: default;
+  opacity: 0.85;
+}
+.session-item.archived:hover {
+  background: transparent;
+}
+.session-item.archived .session-name {
   color: var(--muted);
 }
-.tree-dir:hover,
-.tree-file:hover {
-  background: var(--bg);
+.archived-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
-/* Subtle active state (was a heavy full-bleed accent fill). */
-.tree-file.active {
-  background: var(--sel-bg);
-  border-left-color: var(--accent);
+.archived-actions .session-count {
+  margin-left: 0;
 }
-.tree-name {
-  font-family: var(--mono);
+.session-revive {
+  flex: none;
+  padding: 1px 8px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion),
+    color var(--motion);
+}
+.session-revive:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.connections-head {
+  margin-top: 12px;
+}
+.connections-list {
+  margin: 0 0 10px;
+}
+.connection-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 3px 7px;
+  color: var(--muted);
+  border-radius: var(--r);
+}
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.connection-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.connection-meta {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* Diff | All-files scope toggle — a single spanning segmented control. */
+.file-mode-toggle {
+  display: flex;
+  margin: 0 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--panel);
+}
+.file-mode {
+  flex: 1;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 7px;
+  font-size: 11.5px;
+  transition: background var(--motion), color var(--motion);
+}
+.file-mode:last-child {
+  border-right: 0;
+}
+.file-mode:hover:not(.active),
+.file-mode:focus-visible {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.file-mode.active {
+  color: var(--text);
+  background: var(--panel-2);
+  font-weight: 600;
+}
+/* Files toolbar: section label + Tree/List view toggle. */
+.ft-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px 8px;
+}
+.ft-toolbar .ttl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ft-toolbar .seg {
+  margin-left: auto;
+}
+.ft-toolbar .seg button {
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
+
+/* Changed/all-file tree — IDE-style nesting with hairline indent guides. */
+.tree-dir,
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  min-height: var(--row-h);
+  /* Indent by ancestor depth (set inline as --depth); files step in one more. */
+  padding: 1px 6px 1px calc(8px + var(--depth, 0) * 14px);
+  font-size: 12.5px;
+  border-radius: var(--r);
+  min-width: 0;
+  /* One vertical guide per ancestor level, confined to the indent area. */
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--border) 0 1px,
+    transparent 1px 14px
+  );
+  background-size: calc(var(--depth, 0) * 14px) 100%;
+  background-position: 11px 0;
+  background-repeat: no-repeat;
+  transition: background-color var(--motion);
+}
+.tree-dir {
+  color: var(--muted);
+  font-weight: 500;
+}
+.tree-dir:hover,
+.tree-file:hover {
+  background-color: var(--panel-2);
+}
+/* Neutral "you are here" fill — no harsh accent bar. */
+.tree-file.active {
+  background-color: var(--active);
+  color: var(--text);
+  font-weight: 500;
+}
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
 .tree-icon {
   flex-shrink: 0;
 }
+.tree-chevron {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--motion);
+}
+/* Unchanged (All-files) entries read muted until selected. */
+.tree-file.unchanged .tree-name {
+  color: var(--faint);
+  font-weight: 400;
+}
+.tree-file.unchanged.active .tree-name {
+  color: var(--text);
+}
+.tree-file.ignored,
+.file-list .lfile.ignored {
+  background-color: color-mix(in srgb, var(--muted) 10%, transparent);
+}
+.tree-file.ignored .tree-name,
+.file-list .lfile.ignored .lname,
+.tree-icon.ignored {
+  color: var(--muted);
+}
+
+/* Per-file badges on the right of a tree/list row. */
+.ft-badges {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding-left: 8px;
+}
+.ft-tcount {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 5px;
+}
+.tree-file.active .ft-tcount {
+  background: var(--panel);
+}
+.ft-ignored,
+.ignored-badge {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+.ft-viewed {
+  color: var(--success);
+  font-size: 11px;
+  line-height: 1;
+}
+.ft-unviewed {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.ft-stat {
+  font-size: 10.5px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.ft-stat .a {
+  color: var(--add-ink);
+}
+.ft-stat .d {
+  color: var(--del-ink);
+}
+
+/* Flat List view: filename + muted path. */
+.file-list .lfile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  min-height: var(--row-h);
+  padding: 1px 6px 1px 8px;
+  border-radius: var(--r);
+  min-width: 0;
+  transition: background-color var(--motion);
+}
+.file-list .lfile:hover {
+  background-color: var(--panel-2);
+}
+.file-list .lfile.active {
+  background-color: var(--active);
+  font-weight: 500;
+}
+.lname {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+  flex: none;
+}
+.lpath {
+  font: 10.5px var(--mono);
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
 .diff-pane {
   overflow: auto;
-  padding: 0 16px 16px;
+  padding: 0 0 80px;
+  background: var(--panel);
 }
 .thread-pane {
   border-left: 1px solid var(--border);
   overflow: auto;
-  padding: 16px;
+  padding: 12px;
+  background: var(--bg);
+}
+.thread-pane-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.thread-pane-actions .ghost {
+  flex: 1;
+}
+
+/* ============ Modules view (N≥2): stacked per-repo diff sections ============ */
+/* The shared scroll container for the stacked layout — mirrors .diff-pane so j/k
+ * scrolling and the scroll-spy IntersectionObserver behave identically, but it
+ * holds N repo modules instead of one bare diff. At N=1 the app renders a single
+ * .diff-pane instead, so none of this applies. */
+.modmain {
+  overflow: auto;
+  padding: 0 0 80px;
+  /* The page backdrop shows through the gap between modules, so each module
+   * reads as its own panel-colored block rather than one continuous sheet. */
+  background: var(--bg);
+}
+/* One repo's section: a sticky header over its diff body, separated from the
+ * next module by an 8px band of the page backdrop so the two stacked modules
+ * read as distinct surfaces (not a hairline, which looked like a file split). */
+.module {
+  background: var(--panel);
+  border-bottom: 8px solid var(--bg);
+}
+.module:last-child {
+  border-bottom: 0;
+}
+.module.empty {
   background: var(--bg-elev);
 }
+.module.empty > .mod-head {
+  color: var(--muted);
+}
+.module.empty .mod-name,
+.module.empty .mh-files {
+  color: var(--muted);
+}
+/* The module header parks ABOVE file headers in the sticky stack so a file's
+ * own sticky header never rides over the repo name it belongs under. Two lines:
+ * line 1 names the repo, line 2 carries the inline target picker. */
+.mod-head {
+  position: sticky;
+  top: 0;
+  z-index: calc(var(--z-sticky) + 1);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+/* Accent the scroll-focused module's header — the one currently driving the
+ * active repo (thread pane, sidebar). */
+.module.focused > .mod-head {
+  background: var(--panel-2);
+}
+/* Line 1: band spine, collapse caret, repo identity, right-aligned diffstat. */
+.mh-line1 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 14px 0 0;
+}
+/* A full-height wayfinding spine: a low-sat hue per module (m1/m2), alternating
+ * down the stack so two adjacent modules read as distinct surfaces. Independent
+ * of focus, which is shown by the header background. */
+.mod-band {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  background: var(--border-strong);
+}
+.module.m1 .mod-band {
+  background: var(--band-1);
+}
+.module.m2 .mod-band {
+  background: var(--band-2);
+}
+.mh-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--motion), transform var(--motion);
+}
+.mh-caret:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.module.collapsed .mh-caret {
+  transform: rotate(-90deg);
+}
+.mh-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+.mh-repo .fork {
+  color: var(--faint);
+  flex: none;
+}
+.mod-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The status crumb: the module's durable lifecycle state, sat between the repo
+ * name and the right-aligned stats. STATE only — neutral chrome; the colored dot
+ * is the sole hue, deliberately non-indigo (amber/green/gray), so it never
+ * competes with the accent. */
+.mh-state-wrap {
+  flex: none;
+  display: inline-flex;
+}
+.status-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font-size: 12.5px;
+}
+.sc-label {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sc-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.sc-dot.progress {
+  background: var(--st-progress);
+}
+.sc-dot.ready {
+  background: var(--st-ready);
+}
+/* Idle reads as an outline, not a fill — "a diff exists, nothing reviewed yet". */
+.sc-dot.idle {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+  border: 1.5px solid var(--st-idle);
+}
+.sc-dot.arch {
+  background: var(--st-idle);
+}
+/* The inline finish/revive affordance — a quiet ghost button, never indigo. */
+.sc-ready-action {
+  margin-left: 2px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion);
+}
+.sc-ready-action:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* The passive module rail: a compact repo navigator pinned atop the sidebar in
+ * the stacked (N≥2) layout, above the file tree. Read-only wayfinding — a colored
+ * lifecycle dot + a numberless viewed bar per repo, then a workspace rollup. Click
+ * a row to jump to that module; the rail never drives scroll-focus itself. */
+.module-rail {
+  padding: 10px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.mr-title {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px 9px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mr-collapse {
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--motion);
+}
+.mr-collapse:hover {
+  color: var(--text);
+}
+.mr-row {
+  display: block;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 7px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background var(--motion);
+}
+.mr-row:hover {
+  background: var(--panel-2);
+}
+/* Neutral "you are here" fill — calm, no hard edge, matching the rest of the app's
+ * active rows; the scroll-spy, not this rail, owns which module is active. */
+.mr-row.here {
+  background: var(--active);
+}
+.mr-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.mr-caret {
+  flex: none;
+  color: var(--faint);
+}
+.mr-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mr-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+}
+.mr-dot.idle {
+  /* Hollow ring — "not started" reads as an outline, distinct from archived's
+     solid gray. The global box-sizing:border-box keeps the 7px outer matching
+     the 6px solid dots within a pixel. */
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  background: transparent;
+  border: 1.5px solid var(--st-idle);
+}
+.mr-dot.progress {
+  background: var(--st-progress);
+}
+.mr-dot.ready {
+  background: var(--st-ready);
+}
+.mr-dot.arch {
+  background: var(--st-idle);
+}
+/* Numberless progress — a neutral fill, indented to sit under the name. */
+.mr-bar {
+  display: block;
+  height: 4px;
+  margin: 7px 0 0 19px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.mr-bar i {
+  display: block;
+  height: 100%;
+  background: var(--border-strong);
+}
+.mr-rollup {
+  margin-top: 9px;
+  padding: 11px 6px 2px;
+  border-top: 1px solid var(--border);
+}
+.rollup-label {
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Read-only proportional bar — deliberately NOT a segmented toggle. */
+.rollup-bar {
+  display: flex;
+  height: 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.rollup-bar .rb {
+  height: 100%;
+}
+.rollup-bar .rb.ready {
+  background: var(--st-ready);
+}
+.rollup-bar .rb.progress {
+  background: var(--st-progress);
+}
+.rollup-bar .rb.idle {
+  background: var(--border-strong);
+}
+.rollup-bar .rb.arch {
+  background: var(--st-idle);
+}
+.rollup-tally {
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.tally-row {
+  display: block;
+}
+.tally-row .swatch {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+.tally-row .swatch.ready {
+  background: var(--st-ready);
+}
+.tally-row .swatch.progress {
+  background: var(--st-progress);
+}
+.tally-row .swatch.idle {
+  background: var(--border-strong);
+}
+.tally-row .swatch.arch {
+  background: var(--st-idle);
+}
+
+/* Right-aligned per-module stats: diffstat, file count, viewed progress. */
+.mh-stat {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+}
+.mh-files,
+.mh-viewed {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.mh-viewed {
+  color: var(--faint);
+}
+.mod-empty {
+  font-style: italic;
+}
+/* Line 2: the inline base…compare target picker, dashed-separated from line 1.
+ * Hidden when the module is collapsed. */
+.mh-line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 5px 14px 5px 17px;
+  border-top: 1px dashed var(--border);
+  flex-wrap: wrap;
+}
+.module.collapsed .mh-line2 {
+  display: none;
+}
+/* The module picker is a touch denser than the topbar's. */
+.mh-line2 .target-picker {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* File sticky headers inside a module park just below the two-line module header
+ * (line 1 = 38px + line 2 = 40px) rather than at the container top, so both stay
+ * visible while scrolling. */
+.modmain .file-header {
+  top: 78px;
+}
+/* When a module is collapsed its line 2 is hidden, so the body (and its file
+ * headers) are gone too — no offset adjustment needed. */
 
 .loading,
 .empty,
@@ -768,25 +1873,6 @@ body {
 }
 
 /* Diff */
-/* Overall diffstat summary above the file list. */
-.diff-summary {
-  position: sticky;
-  top: 0;
-  z-index: calc(var(--z-sticky) + 1);
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: 0 -16px var(--space-4);
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  box-shadow: var(--shadow-sm);
-  font-size: 13px;
-}
-.diff-summary-files {
-  font-weight: 600;
-}
-
 /* Per-file diffstat: counts + the five-square block. */
 .diffstat {
   display: inline-flex;
@@ -820,15 +1906,9 @@ body {
   background: var(--diffstat-del);
 }
 
+/* Flat file blocks — no card border/shadow; a hairline separates them. */
 .file {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  margin-bottom: var(--space-4);
-  /* `clip` (not `hidden`) keeps the rounded corners from clipping the table
-   * while still allowing the sticky file header to stick to the .diff-pane
-   * scrollport — `overflow: hidden` would make .file its own scroll container
-   * and break sticky. */
-  overflow: clip;
+  border-bottom: 1px solid var(--border);
   /* Off-screen files skip layout/paint entirely — the browser only renders the
    * handful in view, so a large multi-file diff paints fast and resizes cheaply.
    * `auto` lets the browser remember each file's real height after first render,
@@ -843,30 +1923,93 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-elev);
+  padding: 5px 14px;
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
-  font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12.5px;
+  transition: opacity var(--motion);
+}
+.file-header.collapsed {
+  border-bottom-color: transparent;
+}
+/* Clickable title region — collapses the file's diff body. */
+.fh-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: var(--r);
+  padding: 3px 5px;
+  margin: -3px -5px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  transition: background var(--motion);
+}
+.fh-main:hover {
+  background: var(--panel-2);
+}
+.fh-chev {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--motion);
+}
+.file-header.collapsed .fh-chev {
+  transform: rotate(-90deg);
 }
 .file-path {
-  font-weight: 600;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-/* Push the diffstat to the right edge of the file header. */
-.file-header .diffstat {
+.file-path .fp-dir {
+  color: var(--faint);
+}
+.fh-threads {
+  font-size: 11px;
+  color: var(--accent-ink);
+  flex: none;
+}
+/* Right-side controls: viewed toggle, overflow. */
+.file-header .right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.fh-main .diffstat {
+  margin-left: auto;
+  flex: none;
 }
 .viewed-toggle {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 12px;
   color: var(--muted);
   cursor: pointer;
+  transition: color var(--motion);
+}
+.viewed-toggle:hover {
+  color: var(--text);
+}
+.viewed-toggle input {
+  accent-color: var(--success);
+  cursor: pointer;
 }
 .file.viewed .file-header {
-  opacity: 0.65;
+  opacity: 0.6;
+}
+.file.viewed .file-header:hover {
+  opacity: 1;
 }
 .status {
   text-transform: uppercase;
@@ -923,24 +2066,10 @@ body {
   color: var(--muted);
   padding: 2px 8px;
 }
-.unfold-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  background: transparent;
-  border: none;
-  color: var(--accent);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 12px;
-  padding: 1px 0;
-}
-.unfold-btn:hover {
-  text-decoration: underline;
-}
 .line td {
   padding: 0 8px;
   vertical-align: top;
+  transition: background var(--motion);
 }
 .ln {
   width: 1%;
@@ -1051,28 +2180,36 @@ body.pane-resizing {
   cursor: pointer;
   opacity: 0;
   line-height: 0;
+  transform: scale(0.85);
+  transition: opacity var(--motion), transform var(--motion);
 }
 /* Reveal on hover or keyboard focus (was hover-only, an invisible tab stop). */
 .line:hover .comment-btn,
 .comment-btn:focus-visible {
   opacity: 1;
+  transform: scale(1);
 }
 
-/* Collapsed (closed) inline thread marker */
+/* Collapsed (closed) inline thread marker — flat, eases its hover. */
 .thread-collapsed {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   text-align: left;
-  background: var(--bg-elev);
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 4px 10px;
   margin: 6px 0;
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
+  transition: background var(--motion), border-color var(--motion);
+}
+.thread-collapsed:hover {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
 }
 .thread-collapsed-preview {
   overflow: hidden;
@@ -1080,29 +2217,146 @@ body.pane-resizing {
   white-space: nowrap;
 }
 
-/* Inline thread + comment form */
-.inline-thread,
+/* The new-comment composer keeps only quiet chrome; the textarea does the work. */
 .comment-form {
-  background: var(--bg-elev);
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border-radius: var(--r);
+  color: var(--text);
+  padding: 8px 10px;
   margin: 4px 0;
-  font-family: -apple-system, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
   font-size: 13px;
 }
-.inline-thread .comment {
+
+/* ============ Inline thread — dense full-width strip, not a boxed card ============
+ * A left accent rule ties the conversation to its line; it spans the diff width
+ * instead of floating in a narrow card, so the space is actually used. */
+.inline-thread {
+  margin: 2px 18px 6px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  font-size: 12.5px;
+  animation: thread-in var(--motion) both;
+}
+@keyframes thread-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.inline-thread.status-closed {
+  border-left-color: var(--muted);
+  opacity: 0.85;
+}
+.thread-head {
   display: flex;
-  gap: 8px;
-  padding: 1px 0;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border);
 }
-.author {
+.thread-state {
+  font-size: 11px;
+  color: var(--faint);
+}
+.thread-head .thread-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.thread-collapse-toggle {
+  font: inherit;
+  font-size: 11.5px;
   color: var(--muted);
-  font-weight: 600;
-  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--motion), background var(--motion);
 }
-.inline-thread .body {
+.thread-collapse-toggle:hover {
   color: var(--text);
+  background: var(--panel-2);
+}
+/* Collapsible conversation body. Keep open state as block so table rows never stretch. */
+.thread-body-wrap {
+  display: block;
+  transition: grid-template-rows var(--motion-slow);
+}
+.thread-body-wrap.collapsed {
+  display: grid;
+  grid-template-rows: 0fr;
+}
+.thread-body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.t-comment {
+  padding: 6px 14px 7px;
+}
+.t-comment + .t-comment {
+  border-top: 1px solid var(--border);
+}
+.c-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+.avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+}
+.avatar-you {
+  background: var(--accent);
+}
+.avatar-agent {
+  background: #0d9488;
+}
+.c-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+.c-role {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.c-when {
+  font-size: 11px;
+  color: var(--faint);
+}
+.c-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  padding-left: 25px;
   word-break: break-word;
   min-width: 0;
 }
@@ -1112,51 +2366,70 @@ body.pane-resizing {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  --color-fg-default: var(--text);
+  --color-fg-muted: var(--muted);
+  --color-fg-subtle: var(--faint);
+  --color-canvas-default: var(--bg);
+  --color-canvas-subtle: var(--panel-2);
+  --color-border-default: var(--border);
+  --color-border-muted: var(--border);
+  --color-neutral-muted: var(--panel-2);
+  --color-accent-fg: var(--accent);
+  --color-danger-fg: var(--danger);
+  --md-editor-font-family: inherit;
+  --md-editor-background-color: var(--bg);
+  --md-editor-box-shadow-color: var(--border);
 }
-.md-tabs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.md-tablist {
-  display: flex;
-  gap: var(--space-1);
-}
-.md-tab {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-.md-tab.active {
+.md-editor .w-md-editor {
   color: var(--text);
-  border-bottom-color: var(--accent);
-}
-.md-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  margin-left: auto;
-}
-.md-tool {
-  font-size: 12px;
-  font-weight: 700;
-  min-width: 22px;
-  height: 22px;
-}
-.md-preview {
-  min-height: 56px;
-  padding: var(--space-2);
   background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 13px;
+  box-shadow: 0 0 0 1px var(--border);
+  font-family: inherit;
 }
-.md-preview .muted {
+.md-editor .w-md-editor-toolbar {
+  padding: 2px 4px;
+  border-bottom-color: var(--border);
+  background: var(--panel);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.md-editor .w-md-editor-toolbar li > button {
   color: var(--muted);
+  height: 22px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.md-editor .w-md-editor-toolbar li > button:hover,
+.md-editor .w-md-editor-toolbar li.active > button {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.md-editor .w-md-editor-toolbar-divider {
+  background: var(--border);
+}
+.md-editor .w-md-editor-content {
+  background: var(--bg);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+.md-editor .w-md-editor-text {
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+}
+.md-editor .w-md-editor-text-input {
+  color: var(--text);
+  caret-color: var(--text);
+  font-family: inherit !important;
+  resize: none;
+}
+.md-editor .w-md-editor-preview {
+  padding: 8px;
+  background: var(--bg);
+  box-shadow: inset 1px 0 0 var(--border);
+}
+.md-editor .w-md-editor-show-preview .w-md-editor-preview {
+  box-shadow: none;
 }
 .md-uploading {
   font-size: 11px;
@@ -1164,63 +2437,63 @@ body.pane-resizing {
 }
 
 /* Rendered markdown (comment bodies + preview) */
-.markdown > *:first-child {
+.markdown .wmde-markdown {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.markdown .wmde-markdown > *:first-child {
   margin-top: 0;
 }
-.markdown > *:last-child {
+.markdown .wmde-markdown > *:last-child {
   margin-bottom: 0;
 }
-.markdown p {
+.markdown .wmde-markdown p {
   margin: 0 0 var(--space-2);
 }
-.markdown ul,
-.markdown ol {
+.markdown .wmde-markdown ul,
+.markdown .wmde-markdown ol {
   margin: 0 0 var(--space-2);
   padding-left: 20px;
 }
-.markdown code {
+.markdown .wmde-markdown code {
   font-family: var(--mono);
   font-size: 0.92em;
   background: var(--hunk-bg);
   padding: 1px 4px;
   border-radius: var(--radius-sm);
 }
-.markdown pre {
+.markdown .wmde-markdown pre {
   background: var(--hunk-bg);
   padding: var(--space-2);
   border-radius: var(--radius-md);
   overflow: auto;
 }
-.markdown pre code {
+.markdown .wmde-markdown pre code {
   background: transparent;
   padding: 0;
 }
-.markdown blockquote {
+.markdown .wmde-markdown blockquote {
   margin: 0 0 var(--space-2);
   padding-left: 10px;
   border-left: 3px solid var(--border);
   color: var(--muted);
 }
-.markdown a {
+.markdown .wmde-markdown a {
   color: var(--accent);
 }
-.markdown h1,
-.markdown h2,
-.markdown h3 {
+.markdown .wmde-markdown h1,
+.markdown .wmde-markdown h2,
+.markdown .wmde-markdown h3 {
   font-size: 1.05em;
   margin: var(--space-2) 0 var(--space-1);
 }
-.comment-form textarea {
-  width: 100%;
-  min-height: 56px;
-  resize: vertical;
-  background: var(--bg);
+.comment-form-title {
+  margin: 0 0 8px;
+  font-weight: 600;
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
-  font-family: inherit;
-  font-size: 13px;
 }
 .comment-form-actions {
   display: flex;
@@ -1235,60 +2508,90 @@ body.pane-resizing {
   border-radius: 6px;
   padding: 4px 6px;
 }
+.general-comment-form {
+  margin-bottom: 12px;
+}
+.comment-form-context {
+  min-width: 0;
+  color: var(--muted);
+  font: 11px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 button.primary,
 button.ghost {
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 5px 12px;
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid var(--border);
+  transition: background var(--motion), border-color var(--motion),
+    color var(--motion);
 }
 button.primary {
   background: var(--accent);
   color: var(--on-accent);
   border-color: var(--accent);
 }
+button.primary:hover:not(:disabled) {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
 button.ghost {
   background: transparent;
   color: var(--text);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
 }
 button.ghost.danger {
   color: var(--must-fix);
 }
 button.ghost.danger:hover:not(:disabled) {
   border-color: var(--must-fix);
+  background: transparent;
 }
 button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
+/* Severity (S1): a coloured dot + ink-coloured word, not a bordered badge. */
 .sev {
-  text-transform: uppercase;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: capitalize;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 0;
   background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
+  border: 0;
+  color: var(--ink);
 }
-/* Colour each severity from its token (the tokens existed but went unused). */
-.sev-must-fix {
-  color: var(--must-fix);
-  border-color: var(--must-fix);
+.sev::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
 }
-.sev-suggestion {
-  color: var(--suggestion);
-  border-color: var(--suggestion);
+/* Colour the dot from each severity token. */
+.sev-must-fix::before {
+  background: var(--must-fix);
 }
-.sev-nit {
-  color: var(--nit);
-  border-color: var(--nit);
+.sev-suggestion::before {
+  background: var(--suggestion);
 }
-.sev-question {
-  color: var(--question);
-  border-color: var(--question);
+.sev-nit::before {
+  background: var(--nit);
+}
+.sev-question::before {
+  background: var(--question);
 }
 
 /* Thread list */
@@ -1301,10 +2604,14 @@ button:disabled {
 }
 .thread-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  margin-bottom: 10px;
-  background: var(--bg);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--panel);
+  transition: border-color var(--motion), opacity var(--motion);
+}
+.thread-card:hover {
+  border-color: var(--border-strong);
 }
 .thread-card-head {
   display: flex;
@@ -1355,6 +2662,18 @@ button:disabled {
   border-left: 3px solid var(--suggestion);
 }
 
+/* Earlier-iteration marker: a thread filed against an older snapshot of the same
+   review. Deliberately quiet (muted, lowercase, no card accent) — it's context,
+   not a warning like the outdated/stale flag above. */
+.iteration-badge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+}
+
 /* Status filter bar */
 .filter-bar {
   display: flex;
@@ -1365,51 +2684,316 @@ button:disabled {
 .filter {
   flex: 1 1 64px; /* shrink and wrap when the pane is squished */
   min-width: 0;
-  background: var(--bg);
+  background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 4px 4px;
   font-size: 12px;
   text-transform: capitalize;
   cursor: pointer;
+  transition: background var(--motion), color var(--motion),
+    border-color var(--motion);
+}
+.filter:hover:not(.active) {
+  color: var(--text);
+  background: var(--panel-2);
 }
 .filter.active {
-  background: var(--sel-bg);
+  background: var(--active);
   color: var(--text);
-  border-color: var(--accent);
+  border-color: var(--border-strong);
   font-weight: 600;
 }
 
-/* Thread conversation controls */
-.thread-meta {
+/* Nudge shown when a scoped review is empty but pre-scope comments exist —
+   a non-racy opt-in to the unscoped bucket (we never auto-flip the view). */
+.unscoped-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion);
+}
+.unscoped-hint:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.unscoped-hint svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* "Looks complete" suggestion — shown in the thread pane when every comment in
+   the active review is resolved. Suggest + confirm: archiving happens only on the
+   explicit Mark-complete click; the × dismisses the suggestion for this session
+   (a local UI preference, not the durable archive fact). The success colour tints
+   the icon/edge to read as a positive state; the action reuses the primary look. */
+.complete-banner {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success);
+  border-radius: var(--r);
+  font-size: 12px;
+  line-height: 1.4;
 }
+.complete-icon {
+  flex: none;
+  color: var(--success);
+}
+.complete-msg {
+  flex: 1 1 auto;
+  color: var(--text);
+}
+.complete-action {
+  flex: none;
+  padding: 4px 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion);
+}
+.complete-action:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+.complete-dismiss {
+  flex: none;
+}
+
+/* Thread conversation controls — sit at the foot of the strip. */
 .thread-actions {
   display: flex;
   flex-wrap: wrap; /* Reply/Resolve/Dismiss wrap rather than clip when squished */
+  align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+}
+.thread-actions button.ghost,
+.thread-actions button.primary {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.reply-form {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+}
+.reply-form .thread-actions {
+  padding: 6px 0 0;
+  border-top: 0;
 }
 .reply-form textarea {
   width: 100%;
   min-height: 44px;
   resize: vertical;
-  background: var(--bg);
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
+  border-radius: var(--r);
+  padding: 6px 8px;
   font-family: inherit;
   font-size: 13px;
-  margin-top: 6px;
 }
+/* Inside the thread pane, the strip drops its outer chrome — the card frames it. */
 .thread-card .inline-thread {
   border: none;
-  padding: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
   margin: 0;
   background: transparent;
+  animation: none;
+}
+.thread-card .inline-thread.status-closed {
+  border-left-color: var(--muted);
+}
+.thread-card .thread-head {
+  padding-top: 0;
+}
+.thread-card .thread-actions {
+  padding-bottom: 0;
+}
+
+/* ============ git-diff-view body — themed to the Linear palette ============
+ * The diff body is rendered by @git-diff-view/react; we remap its CSS variables
+ * (defined on .diff-style-root, scoped by the wrapper's own data-theme) so the
+ * add/del tints, line numbers, and hunks read in our zinc + indigo palette and
+ * scale with density. */
+.diff-tailwindcss-wrapper {
+  font-family: var(--mono);
+  font-size: var(--diff-size);
+  --diff-multi-select-bg: var(--range-select);
+  --diff-multi-select-border: var(--range-select-border);
+}
+.diff-tailwindcss-wrapper[data-theme="light"] .diff-style-root,
+.diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
+  --diff-border--: var(--border);
+  --diff-plain-content--: var(--panel);
+  --diff-plain-lineNumber--: var(--panel);
+  --diff-plain-lineNumber-color--: var(--faint);
+  --diff-expand-content--: var(--panel-2);
+  --diff-expand-lineNumber--: var(--panel-2);
+  --diff-expand-lineNumber-color--: var(--faint);
+  --diff-empty-content--: var(--panel-2);
+  --diff-add-content--: var(--add-bg);
+  --diff-add-lineNumber--: var(--add-bg);
+  --diff-add-content-highlight--: var(--add-line);
+  --diff-del-content--: var(--del-bg);
+  --diff-del-lineNumber--: var(--del-bg);
+  --diff-del-content-highlight--: var(--del-line);
+  --diff-hunk-content--: var(--hunk-bg);
+  --diff-hunk-lineNumber--: var(--hunk-bg);
+  --diff-hunk-lineNumber-hover--: var(--accent);
+  --diff-hunk-content-color--: var(--faint);
+  --diff-add-widget--: var(--accent);
+  --diff-add-widget-color--: var(--on-accent);
+  color: var(--ink);
+}
+/* git-diff-view ships its own hljs token colors; override the ones we have a
+   palette for so the diff's syntax matches the rest of the app. The
+   html[data-theme] prefix lifts these to (0,3,1), just past the library's
+   (0,3,0), so they win without !important; --hl-* already track the theme. */
+html[data-theme] .diff-tailwindcss-wrapper .hljs-keyword,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-built_in,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-literal,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-tag,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-name,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-selector-tag {
+  color: var(--hl-keyword);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-string,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-regexp,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-number {
+  color: var(--hl-number);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-title,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-title.function_,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-section {
+  color: var(--hl-func);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-type,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-class .hljs-title,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-attr,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-attribute,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-property,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-selector-attr {
+  color: var(--hl-type);
+}
+html[data-theme] .diff-tailwindcss-wrapper .hljs-comment,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-quote,
+html[data-theme] .diff-tailwindcss-wrapper .hljs-meta {
+  color: var(--muted);
+  font-style: italic;
+}
+/* Wrappers we mount around library extend/widget lines. */
+.lib-widget,
+.lib-selection-widget {
+  padding: 2px 0;
+}
+.lib-widget .comment-form,
+.lib-selection-widget .comment-form {
+  border-color: var(--border);
+}
+.lib-thread-stack .inline-thread {
+  max-height: min(280px, 40vh);
+  overflow: auto;
+}
+
+/* The diff library resets widget/extend descendants to `color: initial`; put
+   every inline markdown editor (new comment + reply) back on theme. */
+.diff-tailwindcss-wrapper .comment-form,
+.diff-tailwindcss-wrapper .comment-form *,
+.diff-tailwindcss-wrapper .md-editor,
+.diff-tailwindcss-wrapper .md-editor * {
+  color: var(--text);
+}
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-toolbar li > button {
+  color: var(--muted);
+}
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-toolbar li > button:hover,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-toolbar li.active > button {
+  color: var(--text);
+}
+.diff-tailwindcss-wrapper .comment-form button.primary,
+.diff-tailwindcss-wrapper .reply-form button.primary {
+  color: var(--on-accent);
+}
+.diff-tailwindcss-wrapper .md-editor .markdown a {
+  color: var(--accent);
+}
+.diff-tailwindcss-wrapper .comment-form select,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-content,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-text-input,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-preview {
+  background: var(--bg);
+  color: var(--text);
+}
+.diff-tailwindcss-wrapper .inline-thread .markdown,
+.diff-tailwindcss-wrapper .inline-thread .markdown * {
+  color: var(--ink);
+}
+.diff-tailwindcss-wrapper .inline-thread .markdown a {
+  color: var(--accent);
+}
+
+/* Persist the selected/commented range after the composer or saved thread mounts. */
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-num,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-num,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-num {
+  z-index: 2;
+}
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-content,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-content,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-content {
+  position: relative;
+}
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-num::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-num::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-num::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-content::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-content::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-content::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  opacity: 0.15;
+  background-color: var(--range-select);
+  pointer-events: none;
+}
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-num::before,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-num::before,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-num::before {
+  content: "";
+  z-index: 2;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -2px;
+  width: 4px;
+  background-color: var(--range-select-border);
 }

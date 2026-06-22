@@ -1,9 +1,12 @@
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
   AddCommentRequest,
+  ArchiveSessionRequest,
+  ArchivedSession,
   AttachmentResponse,
   CreateThreadRequest,
   DaemonEventType,
+  FileContent,
   FileRange,
   FsListing,
   OpenRequest,
@@ -95,6 +98,21 @@ export const api = {
     );
   },
 
+  /** Full old/new content for a file under a target — lets the diff renderer show
+   *  expandable context and validate without reconstructing the file. */
+  fileContent: (
+    repo: string,
+    opts: { path: string; oldPath?: string | null; target?: string; worktree?: string | null },
+  ) => {
+    const q = new URLSearchParams({ path: opts.path });
+    if (opts.oldPath && opts.oldPath !== opts.path) q.set("oldPath", opts.oldPath);
+    if (opts.target) q.set("target", opts.target);
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    return fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`).then((r) =>
+      json<FileContent>(r),
+    );
+  },
+
   refs: (repo: string, worktree?: string | null) => {
     const q = new URLSearchParams();
     if (worktree) q.set("worktree", worktree);
@@ -118,10 +136,11 @@ export const api = {
     ).then((r) => json<RefSearchResults>(r));
   },
 
-  threads: (opts: { status?: string; repo?: string; worktree?: string | null } = {}) => {
+  threads: (opts: { status?: string; repo?: string; space?: string; worktree?: string | null } = {}) => {
     const q = new URLSearchParams();
     if (opts.status) q.set("status", opts.status);
     if (opts.repo) q.set("repo", opts.repo);
+    if (opts.space) q.set("space", opts.space);
     if (opts.worktree) q.set("worktree", opts.worktree);
     const qs = q.toString();
     return fetch(`/threads${qs ? `?${qs}` : ""}`).then((r) => json<Thread[]>(r));
@@ -153,6 +172,18 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(req),
     }).then((r) => json<{ ok: boolean }>(r)),
+
+  /**
+   * Archive (`archived: true`) or revive (`archived: false`) a review session.
+   * Sends only the scope — the server re-derives the session id from it and never
+   * trusts a client-supplied id, so the unscoped bucket (no scope) is un-archivable.
+   */
+  archiveSession: (repo: string, req: ArchiveSessionRequest) =>
+    fetch(`/repos/${encodeURIComponent(repo)}/sessions/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => json<{ ok: boolean; archived: ArchivedSession | null }>(r)),
 
   /**
    * Subscribe to live daemon events; calls onChange with the event type.

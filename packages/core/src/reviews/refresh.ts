@@ -1,7 +1,13 @@
 import type { Thread } from "@diffect/shared";
 import { resolveWorkBase } from "../git/diff.js";
 import type { DiscoveredRepo, Workspace } from "../workspace.js";
-import { loadThreads, readEvents } from "./event-log.js";
+import {
+  loadThreads,
+  readEvents,
+  repoThreadStore,
+  spaceThreadStore,
+  type ThreadStoreRef,
+} from "./event-log.js";
 import { refreshAnchors, type RepoLocation } from "./anchors.js";
 
 /**
@@ -10,27 +16,45 @@ import { refreshAnchors, type RepoLocation } from "./anchors.js";
  * keeps the daemon/CLI thread views workspace-wide.
  */
 export async function loadAllThreads(ws: Workspace): Promise<Thread[]> {
-  const perRepo = await Promise.all(ws.repos.map((r) => loadThreads(r.root)));
-  return perRepo.flat();
+  return loadRefreshedThreads(ws);
+}
+
+export function workspacePaths(ws: Workspace): string[] {
+  return [...new Set([ws.root, ...ws.repos.map((r) => r.workspacePath ?? ws.root)])];
 }
 
 /**
- * Resolve which repo's central store owns a thread id, by scanning each repo's
- * log for the creating event. Used by mutation paths that carry only an id (the
- * CLI reply/resolve/dismiss, and daemon routes without a repo hint). Returns
- * undefined when no repo claims the thread.
+ * Resolve which central store owns a thread id, scanning space stores first and
+ * then legacy per-repo stores. Used by mutation paths that carry only an id.
  */
+export async function findStoreForThread(
+  ws: Workspace,
+  threadId: string,
+): Promise<ThreadStoreRef | undefined> {
+  for (const path of workspacePaths(ws)) {
+    const store = spaceThreadStore(path);
+    const events = await readEvents(store);
+    if (events.some((e) => e.type === "thread.created" && e.id === threadId)) {
+      return store;
+    }
+  }
+  for (const repo of ws.repos) {
+    const store = repoThreadStore(repo.root);
+    const events = await readEvents(store);
+    if (events.some((e) => e.type === "thread.created" && e.id === threadId)) {
+      return store;
+    }
+  }
+  return undefined;
+}
+
+/** Back-compat for callers that still expect only repo-owned threads. */
 export async function findRepoRootForThread(
   ws: Workspace,
   threadId: string,
 ): Promise<string | undefined> {
-  for (const repo of ws.repos) {
-    const events = await readEvents(repo.root);
-    if (events.some((e) => e.type === "thread.created" && e.id === threadId)) {
-      return repo.root;
-    }
-  }
-  return undefined;
+  const store = await findStoreForThread(ws, threadId);
+  return typeof store === "string" ? store : store?.kind === "repo" ? store.root : undefined;
 }
 
 /** Per-worktree content locations for one repo (worktree name → root+base). */
@@ -54,10 +78,25 @@ async function repoLocations(
  */
 export async function loadRefreshedThreads(ws: Workspace): Promise<Thread[]> {
   const out: Thread[] = [];
+  const locationsByRepo = new Map<string, Map<string, RepoLocation>>();
   for (const repo of ws.repos) {
-    const threads = await loadThreads(repo.root);
+    locationsByRepo.set(repo.name, await repoLocations(repo));
+  }
+
+  for (const path of workspacePaths(ws)) {
+    const threads = await loadThreads(spaceThreadStore(path));
     if (threads.length === 0) continue;
-    const locations = await repoLocations(repo);
+    const refreshed = await refreshAnchors(threads, (repo, worktree) =>
+      locationsByRepo.get(repo)?.get(worktree ?? ""),
+    );
+    for (const t of refreshed) t.spacePath = path;
+    out.push(...refreshed);
+  }
+
+  for (const repo of ws.repos) {
+    const threads = await loadThreads(repoThreadStore(repo.root));
+    if (threads.length === 0) continue;
+    const locations = locationsByRepo.get(repo.name)!;
     const refreshed = await refreshAnchors(threads, (_repo, worktree) =>
       locations.get(worktree ?? ""),
     );

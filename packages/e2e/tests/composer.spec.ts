@@ -7,15 +7,15 @@ async function openCommentForm(page) {
   return page.locator(".comment-form");
 }
 
-test("Preview tab renders the markdown", async ({ page }) => {
+test("Preview mode renders the markdown", async ({ page }) => {
   await page.goto("/");
   const form = await openCommentForm(page);
 
   await form.locator("textarea").fill("**bold** and `code`");
-  await form.getByRole("tab", { name: "Preview" }).click();
+  await form.getByRole("button", { name: /Preview code/ }).click();
 
-  await expect(form.locator(".md-preview strong", { hasText: "bold" })).toBeVisible();
-  await expect(form.locator(".md-preview code", { hasText: "code" })).toBeVisible();
+  await expect(form.locator(".w-md-editor-preview strong", { hasText: "bold" })).toBeVisible();
+  await expect(form.locator(".w-md-editor-preview code", { hasText: "code" })).toBeVisible();
 });
 
 test("the bold toolbar button wraps the selection", async ({ page }) => {
@@ -26,9 +26,34 @@ test("the bold toolbar button wraps the selection", async ({ page }) => {
   await textarea.fill("guard");
   await textarea.focus();
   await page.keyboard.press("ControlOrMeta+A");
-  await form.getByRole("button", { name: "Bold (⌘B)" }).click();
+  await form.getByRole("button", { name: /Add bold text/ }).click();
 
   await expect(textarea).toHaveValue("**guard**");
+});
+
+test("numbered lists continue on enter", async ({ page }) => {
+  await page.goto("/");
+  const form = await openCommentForm(page);
+  const textarea = form.locator("textarea");
+
+  await textarea.fill("1. first");
+  await textarea.press("End");
+  await textarea.press("Enter");
+
+  await expect(textarea).toHaveValue("1. first\n2. ");
+});
+
+test("preview strips unsafe markdown output", async ({ page }) => {
+  await page.goto("/");
+  const form = await openCommentForm(page);
+
+  await form.locator("textarea").fill(
+    '[x](javascript:alert(1))\n\n<img src=x onerror="alert(2)">\n\n<iframe src="javascript:alert(3)"></iframe>',
+  );
+  await form.getByRole("button", { name: /Preview code/ }).click();
+
+  const html = await form.locator(".w-md-editor-preview").innerHTML();
+  expect(html).not.toMatch(/javascript:|onerror|<iframe|<img/i);
 });
 
 test("attaching a file inserts a markdown image link", async ({ page }) => {
@@ -54,6 +79,6 @@ test("a comment renders as markdown once posted", async ({ page }) => {
   await form.getByRole("button", { name: "Comment" }).click();
 
   await expect(
-    page.locator(".inline-thread .body code", { hasText: "parseInt" }).first(),
+    page.locator(".inline-thread .c-text code", { hasText: "parseInt" }).first(),
   ).toBeVisible();
 });

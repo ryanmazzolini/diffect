@@ -6,7 +6,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
  * not-yet-existing tail (resolves the existing prefix, appends the rest). Lets a
  * containment check survive paths whose final segments don't exist yet.
  */
-function realpathSafe(p: string): string {
+export function realpathSafe(p: string): string {
   let head = p;
   const tail: string[] = [];
   for (;;) {

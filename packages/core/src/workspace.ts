@@ -1,8 +1,16 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import type { RepoSummary, WorkspaceInfo } from "@diffect/shared";
+import type { RepoSummary, ReviewSession, WorkspaceInfo } from "@diffect/shared";
 import { gitTry } from "./git/exec.js";
-import { resolveDefaultBranch, resolveWorkBase } from "./git/diff.js";
+import {
+  resolveCurrentBranch,
+  resolveDefaultBranch,
+  resolveWorkBase,
+} from "./git/diff.js";
+import { normalizeTarget } from "./git/target.js";
+import { resolveScope, sessionIdForScope } from "./reviews/scope.js";
+import { loadArchivedSessions } from "./reviews/event-log.js";
+import { realpathSafe } from "./path-safe.js";
 
 export interface Workspace {
   /** Absolute workspace root. */
@@ -122,8 +130,11 @@ async function groupIntoRepos(treeRoots: string[]): Promise<DiscoveredRepo[]> {
   for (const treeRoot of treeRoots) {
     const commonDir = await gitTry(treeRoot, ["rev-parse", "--git-common-dir"]);
     if (commonDir === null) continue; // not actually a repo
-    // git-common-dir may be relative to the working tree.
-    const key = resolve(treeRoot, commonDir);
+    // git-common-dir is relative for the primary worktree but an absolute,
+    // realpath'd path for linked ones, so realpath the resolved key — otherwise a
+    // repo under any symlinked path (e.g. macOS /var -> /private/var) splits its
+    // worktrees across two keys and they're treated as separate repos.
+    const key = realpathSafe(resolve(treeRoot, commonDir));
     if (!byCommonDir.has(key)) {
       byCommonDir.set(key, []);
       order.push(key);
@@ -136,7 +147,8 @@ async function groupIntoRepos(treeRoots: string[]): Promise<DiscoveredRepo[]> {
     // The primary worktree is the one whose .git is a real dir (commonDir lives
     // inside it); fall back to the first discovered.
     const primary =
-      worktrees.find((w) => resolve(w.root, ".git") === key) ?? worktrees[0]!;
+      worktrees.find((w) => realpathSafe(resolve(w.root, ".git")) === key) ??
+      worktrees[0]!;
     return {
       name: basename(primary.root),
       root: primary.root,
@@ -207,6 +219,29 @@ export function resolveRepoRoot(
   return r.worktrees.find((w) => w.name === worktree)?.root;
 }
 
+/**
+ * Derive the `work` review session of each checked-out worktree — the sidebar's
+ * primary review entries. Each is resolved with the SAME inputs the diff route
+ * uses (the primary worktree as `worktree=null`, never its basename) so the
+ * session id equals the one the daemon stamps onto the diff, and thus the
+ * `Thread.sessionId` of comments filed under it. Deduped by id: distinct
+ * checkouts on the same branch collapse to one session.
+ */
+async function deriveWorktreeSessions(
+  repo: DiscoveredRepo,
+): Promise<ReviewSession[]> {
+  const work = normalizeTarget("work");
+  const all = await Promise.all(
+    repo.worktrees.map(async (w) => {
+      const worktree = w.root === repo.root ? null : w.name;
+      const scope = await resolveScope(w.root, work, worktree);
+      return { id: sessionIdForScope(scope), scope, worktree };
+    }),
+  );
+  const seen = new Set<string>();
+  return all.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
+}
+
 /** Summarize a set of repos (base/default-branch/worktrees) for the API. */
 export async function summarizeRepos(
   repos: DiscoveredRepo[],
@@ -217,7 +252,18 @@ export async function summarizeRepos(
       root: r.root,
       base: await resolveWorkBase(r.root),
       defaultBranch: await resolveDefaultBranch(r.root),
-      worktrees: r.worktrees.map((w) => ({ name: w.name, root: w.root })),
+      worktrees: await Promise.all(
+        r.worktrees.map(async (w) => ({
+          name: w.name,
+          root: w.root,
+          branch: await resolveCurrentBranch(w.root),
+        })),
+      ),
+      sessions: await deriveWorktreeSessions(r),
+      // Archived reviews ride on the summary so the client can route them into a
+      // collapsed group; the archive overlay wins, so an archived id is excluded
+      // from `sessions` client-side (Slice 4).
+      archivedSessions: await loadArchivedSessions(r.root),
     })),
   );
 }
