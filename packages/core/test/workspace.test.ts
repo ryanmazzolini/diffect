@@ -7,6 +7,7 @@ import {
   discoverWorkspace,
   findRepo,
   resolveRepoRoot,
+  summarizeRepos,
 } from "../src/workspace.js";
 
 let ws: string;
@@ -74,6 +75,22 @@ describe("workspace discovery", () => {
     for (const r of w.repos) {
       expect(resolveRepoRoot(w, r.name, null)).toBe(r.root);
     }
+  });
+
+  it("summarizes each worktree's current branch, null when detached", async () => {
+    const primary = join(ws, "proj");
+    await initRepo(primary);
+    await git(primary, ["branch", "feature"]);
+    await git(primary, ["worktree", "add", join(ws, "proj-feature"), "feature"]);
+    // Detach the primary checkout's HEAD so its branch reads as null.
+    const head = (await git(primary, ["rev-parse", "HEAD"])).stdout.trim();
+    await git(primary, ["checkout", "--detach", head]);
+
+    const w = await discoverWorkspace(ws);
+    const [repo] = await summarizeRepos(w.repos);
+    const byName = new Map(repo!.worktrees.map((t) => [t.name, t.branch]));
+    expect(byName.get("proj")).toBeNull(); // detached
+    expect(byName.get("proj-feature")).toBe("feature");
   });
 
   it("throws when no repo is present", async () => {

@@ -12,14 +12,17 @@ Install this local pi package, then `/reload` and use:
 /diffect
 ```
 
-It finds the current git repo, reuses the running `diffectd` from
+It finds the current Diffect workspace, reuses the running `diffectd` from
 `~/.config/diffect/daemon.json` when present (including the Tauri app's ephemeral
-port), otherwise starts one, registers the repo as a workspace, and opens Diffect
-at:
+port), otherwise starts one, registers the workspace, and opens Diffect at:
 
 ```text
 /?repo=<repo>&worktree=<worktree>&target=work
 ```
+
+Workspace inference checks the current directory, ticket-worktree spaces shaped
+like `.../worktrees/<ticket>/<repo>`, and recent absolute paths in the pi session.
+Use `/diffect --workspace /path/to/space` when inference is ambiguous.
 
 Use `/diffect staged`, `/diffect unstaged`, or `/diffect main..feature` to open a
 specific review target. It tries the desktop app first:

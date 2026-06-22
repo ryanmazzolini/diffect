@@ -3,30 +3,43 @@ import { stat } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
-import type {
-  AddCommentRequest,
-  CreateThreadRequest,
-  DeleteThreadRequest,
-  OpenRequest,
-  ResolveThreadRequest,
-  WorkspaceEntry,
-  WorkspaceMutationRequest,
+import {
+  DAEMON_EVENTS,
+  type AddCommentRequest,
+  type ArchiveSessionRequest,
+  type CreateThreadRequest,
+  type DeleteThreadRequest,
+  type OpenRequest,
+  type ResolveThreadRequest,
+  type WorkspaceEntry,
+  type WorkspaceMutationRequest,
 } from "@diffect/shared";
+import { readTargetFileContent } from "./git/content.js";
 import { resolveWorkBase } from "./git/diff.js";
 import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, readSideLines } from "./reviews/anchors.js";
 import {
+  resolveScope,
+  sessionIdForScope,
+  snapshotIdForState,
+} from "./reviews/scope.js";
+import {
   addComment,
+  archiveSession,
   createThread,
   deleteThread,
   resolveThread,
+  spaceThreadStore,
   UnknownThreadError,
+  UnscopedSessionError,
+  type ThreadStoreRef,
 } from "./reviews/event-log.js";
 import {
-  findRepoRootForThread,
+  findStoreForThread,
   loadAllThreads,
   loadRefreshedThreads,
+  workspacePaths,
 } from "./reviews/refresh.js";
 import { EventHub } from "./events.js";
 import {
@@ -177,7 +190,9 @@ async function handle(
   if (await workspaceRoutes(ctx, req, res, method, path)) return;
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
+  if (await sessionRoutes(ctx, req, res, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
+  if (await fileContentRoute(ctx, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
   if (await attachmentRoutes(ctx, req, res, method, path)) return;
@@ -265,12 +280,17 @@ async function threadCollectionRoutes(
     // "resolved" stays accepted as a silent alias for the renamed "closed" status.
     const status = rawStatus === "resolved" ? "closed" : rawStatus;
     const repoFilter = url.searchParams.get("repo");
+    const spaceFilter = url.searchParams.get("space");
     const worktreeFilter = url.searchParams.get("worktree");
+    const sessionFilter = url.searchParams.get("session");
     let threads = await loadRefreshedThreads(ctx.ws);
     if (status) threads = threads.filter((t) => t.status === status);
     if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
+    if (spaceFilter) threads = threads.filter((t) => t.spacePath === resolve(spaceFilter));
     if (worktreeFilter)
       threads = threads.filter((t) => t.worktree === worktreeFilter);
+    if (sessionFilter)
+      threads = threads.filter((t) => t.sessionId === sessionFilter);
     sendJson(res, 200, threads);
     return true;
   }
@@ -290,14 +310,70 @@ async function createThreadRoute(
     sendJson(res, 400, { error: "body is required" });
     return true;
   }
-  const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
-  if (!target) return true;
-  const { repo, treeRoot } = target;
-  const base = await resolveWorkBase(treeRoot);
-  const anchor = await buildAnchor(treeRoot, base, body);
-  // The store is keyed by the repo's PRIMARY root so all worktrees share one log
-  // (the worktree name lives on the thread); treeRoot is only for anchoring.
-  const thread = await createThread(repo.root, { ...body, anchor }, ctx.now());
+  const targetLevel = body.file
+    ? "file"
+    : body.targetLevel === "space"
+      ? "space"
+      : "repo";
+  const spacePath = body.spacePath
+    ? resolveSpacePath(ctx, res, body.spacePath)
+    : null;
+  if (body.spacePath && !spacePath) return true;
+
+  if (targetLevel === "space") {
+    if (!spacePath) {
+      sendJson(res, 400, { error: "spacePath is required for space comments" });
+      return true;
+    }
+    const thread = await createThread(
+      spaceThreadStore(spacePath),
+      {
+        ...body,
+        repo: null,
+        worktree: null,
+        targetLevel,
+        file: null,
+        side: null,
+        line: null,
+        endLine: null,
+        anchor: null,
+        scope: null,
+        sessionId: null,
+        snapshotId: null,
+      },
+      ctx.now(),
+    );
+    thread.spacePath = spacePath;
+    ctx.events.notify(DAEMON_EVENTS.threadChanged);
+    sendJson(res, 201, thread);
+    return true;
+  }
+
+  const resolved = resolveRepoTarget(ctx, res, body.repo ?? undefined, body.worktree ?? null);
+  if (!resolved) return true;
+  const { repo, treeRoot } = resolved;
+  // Bind repo/file comments to the changeset they were filed under: resolve the
+  // scope (target spec → base/head + session) server-side, anchor file comments
+  // against the scope's base, and persist both so the comment belongs to the
+  // branch/scope, not the worktree directory.
+  const scope = await resolveScope(
+    treeRoot,
+    normalizeTarget(body.target),
+    body.worktree ?? null,
+  );
+  const anchor = await buildAnchor(treeRoot, scope.baseSha, body);
+  // Record which snapshot (iteration) of the scope the comment was filed against.
+  const snapshotId = await snapshotIdForState(treeRoot, scope);
+  const store = spacePath ? spaceThreadStore(spacePath) : repo.root;
+  const thread = await createThread(
+    store,
+    { ...body, repo: repo.name, targetLevel, anchor, scope, sessionId: sessionIdForScope(scope), snapshotId },
+    ctx.now(),
+  );
+  if (spacePath) {
+    thread.spacePath = spacePath;
+    ctx.events.notify(DAEMON_EVENTS.threadChanged);
+  }
   sendJson(res, 201, thread);
   return true;
 }
@@ -321,7 +397,7 @@ async function threadItemRoutes(
       return true;
     }
     await withThread(res, async () =>
-      addComment(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+      addComment(await requireThreadStore(ctx, id), id, body, ctx.now()),
     );
     return true;
   }
@@ -331,7 +407,7 @@ async function threadItemRoutes(
     const id = decodeURIComponent(resolveMatch[1]!);
     const body = (await readJsonBody<ResolveThreadRequest>(req)) ?? {};
     await withThread(res, async () =>
-      resolveThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+      resolveThread(await requireThreadStore(ctx, id), id, body, ctx.now()),
     );
     return true;
   }
@@ -351,11 +427,55 @@ async function deleteThreadRoute(
 ): Promise<boolean> {
   const body = (await readJsonBody<DeleteThreadRequest>(req)) ?? {};
   try {
-    await deleteThread(await requireRepoRoot(ctx, id), id, body, ctx.now());
+    await deleteThread(await requireThreadStore(ctx, id), id, body, ctx.now());
     sendJson(res, 200, { ok: true });
   } catch (err) {
     if (err instanceof UnknownThreadError) {
       sendJson(res, 404, { error: err.message });
+    } else {
+      throw err;
+    }
+  }
+  return true;
+}
+
+/**
+ * `POST /repos/:repo/sessions/archive` — archive or revive a review session.
+ * The body's `scope` identifies the review; the server re-derives the session id
+ * from it (never trusting a client-supplied id) and refuses a falsy/legacy scope.
+ */
+async function sessionRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  const m = /^\/repos\/(.+)\/sessions\/archive$/.exec(path);
+  if (!(method === "POST" && m)) return false;
+  const repoName = decodeURIComponent(m[1]!);
+  const repo = findRepo(ctx.ws, repoName);
+  if (!repo) {
+    sendJson(res, 404, { error: `unknown repo: ${repoName}` });
+    return true;
+  }
+  const body = await readJsonBody<ArchiveSessionRequest>(req);
+  if (!body || !body.scope || typeof body.archived !== "boolean") {
+    sendJson(res, 400, { error: "scope and archived are required" });
+    return true;
+  }
+  try {
+    // The store is keyed by the repo's PRIMARY root so all worktrees share one
+    // log; archiveSession re-derives the session id from the scope and refuses a
+    // falsy/legacy scope (the unscoped bucket is structurally un-archivable).
+    const result = await archiveSession(repo.root, body, ctx.now());
+    // archivedSessions rides on the workspace summary, which the client refetches
+    // only on workspaceChanged — the thread-log write alone fires threadChanged.
+    ctx.events.notify(DAEMON_EVENTS.workspaceChanged);
+    sendJson(res, 200, { ok: true, archived: result });
+  } catch (err) {
+    if (err instanceof UnscopedSessionError) {
+      sendJson(res, 400, { error: err.message });
     } else {
       throw err;
     }
@@ -381,7 +501,20 @@ async function repoRoutes(
     if (!treeRoot) return true;
     const target = normalizeTarget(url.searchParams.get("target"));
     const diff = await computeTargetDiff(treeRoot, target);
-    sendJson(res, 200, { ...diff, repo: repoName, worktree });
+    // Stamp the resolved scope/session so the client can bind and filter threads
+    // to the current review without resolving git refs itself.
+    const scope = await resolveScope(treeRoot, target, worktree);
+    sendJson(res, 200, {
+      ...diff,
+      repo: repoName,
+      worktree,
+      scope,
+      sessionId: sessionIdForScope(scope),
+      // The live snapshot the client compares each thread's snapshotId against to
+      // flag threads filed in an earlier iteration of this scope. Omit (not null)
+      // when none can be computed (unborn HEAD), matching the optional field.
+      currentSnapshotId: (await snapshotIdForState(treeRoot, scope)) ?? undefined,
+    });
     return true;
   }
 
@@ -430,6 +563,40 @@ async function repoRoutes(
     return true;
   }
   return false;
+}
+
+/**
+ * `GET /repos/:repo/file/content?path=&oldPath=&target=&worktree=` — full old/new
+ * content for the diff's two sides under a target. Lets the client render
+ * expandable collapsed context and the diff library validate without
+ * reconstructing the file (which otherwise warns in dev for any normal diff).
+ */
+async function fileContentRoute(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  const m = /^\/repos\/(.+)\/file\/content$/.exec(path);
+  if (!(method === "GET" && m)) return false;
+  const q = url.searchParams;
+  const treeRoot = resolveRepoTreeOr404(
+    ctx,
+    res,
+    decodeURIComponent(m[1]!),
+    q.get("worktree"),
+  );
+  if (!treeRoot) return true;
+  const file = q.get("path");
+  if (!file) {
+    sendJson(res, 400, { error: "path required" });
+    return true;
+  }
+  const target = normalizeTarget(q.get("target"));
+  const content = await readTargetFileContent(treeRoot, target, file, q.get("oldPath") || file);
+  sendJson(res, 200, content);
+  return true;
 }
 
 /** `GET /repos/:repo/file?path=&side=&from=&to=` — lines for unfolding context. */
@@ -655,10 +822,26 @@ function header(value: string | string[] | undefined): string | undefined {
  * repo in the workspace. Throws UnknownThreadError (→ 404 via withThread) when
  * no repo claims it, so mutations carrying only an id route to the right log.
  */
-async function requireRepoRoot(ctx: RouteContext, id: string): Promise<string> {
-  const root = await findRepoRootForThread(ctx.ws, id);
-  if (!root) throw new UnknownThreadError(id);
-  return root;
+async function requireThreadStore(
+  ctx: RouteContext,
+  id: string,
+): Promise<ThreadStoreRef> {
+  const store = await findStoreForThread(ctx.ws, id);
+  if (!store) throw new UnknownThreadError(id);
+  return store;
+}
+
+function resolveSpacePath(
+  ctx: RouteContext,
+  res: ServerResponse,
+  path: string,
+): string | null {
+  const abs = resolve(path);
+  if (!workspacePaths(ctx.ws).includes(abs)) {
+    sendJson(res, 400, { error: `unknown space: ${path}` });
+    return null;
+  }
+  return abs;
 }
 
 /**

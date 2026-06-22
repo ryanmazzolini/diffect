@@ -1,7 +1,8 @@
 import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import type { ServerResponse } from "node:http";
 import { DAEMON_EVENTS, type DaemonEventType } from "@diffect/shared";
-import { repoStoreDir } from "./store/paths.js";
+import { repoStoreDir, spaceStoreDir } from "./store/paths.js";
+import { workspacePaths } from "./reviews/refresh.js";
 import type { Workspace } from "./workspace.js";
 
 export type { DaemonEventType };
@@ -43,9 +44,17 @@ export class EventHub {
   }
 
   private attachWatches(): void {
-    // Review stores: one central log per repo now lives outside the worktree.
-    // Any write there means threads changed. Create each dir first so the watch
-    // attaches before the first comment (fs.watch needs an existing path).
+    // Review stores: one central log per selected space, plus legacy per-repo
+    // logs, live outside the worktree. Any write there means threads changed.
+    for (const path of workspacePaths(this.ws)) {
+      const store = spaceStoreDir(path);
+      try {
+        mkdirSync(store, { recursive: true });
+      } catch {
+        /* best effort */
+      }
+      this.addWatch(store, () => this.emit(DAEMON_EVENTS.threadChanged));
+    }
     for (const repo of this.ws.repos) {
       const store = repoStoreDir(repo.root);
       try {
@@ -97,6 +106,17 @@ export class EventHub {
     res.write(": connected\n\n"); // flush headers, defeat proxy buffering
     this.clients.add(res);
     return () => this.clients.delete(res);
+  }
+
+  /**
+   * Fan out an event that isn't driven by a filesystem watch. A session
+   * archive/revive writes to the thread log (so the fs watch fires
+   * `threadChanged`), but the archived-session list rides on the workspace
+   * summary, which the client refetches only on `workspaceChanged` — so the
+   * route must announce that explicitly. Debounced like watch-driven events.
+   */
+  notify(type: DaemonEventType): void {
+    this.emit(type);
   }
 
   /** Debounced fan-out: collapse a burst of fs events into one notification. */
