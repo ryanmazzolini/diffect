@@ -1,25 +1,56 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
+  MIN_THREAD_SCHEMA_VERSION,
   THREAD_EVENT_TYPES,
   THREAD_SCHEMA_VERSION,
   type AddCommentRequest,
+  type ArchivedSession,
+  type ArchiveSessionRequest,
   type Author,
   type CreateThreadRequest,
   type DeleteThreadRequest,
   type ResolveThreadRequest,
+  type SessionArchivedEvent,
   type Thread,
   type ThreadCreatedEvent,
   type ThreadEvent,
 } from "@diffect/shared";
 import { genId } from "./ids.js";
-import { threadsLogPath } from "../store/paths.js";
+import { sessionIdForScope } from "./scope.js";
+import {
+  spaceThreadsLogPath,
+  threadsLogPath as repoThreadsLogPath,
+} from "../store/paths.js";
 import { migrateLegacyStore } from "../store/migrate.js";
 
 // The canonical review store now lives in a central per-user location keyed by
-// repo root (see ../store/paths.ts), not in an in-tree `.reviews/`. Re-export so
-// callers and tests keep one import site for the log path.
-export { threadsLogPath };
+// repo root (see ../store/paths.ts), not in an in-tree `.reviews/`.
+export type ThreadStoreRef =
+  | string
+  | { kind: "repo" | "space"; root: string };
+
+export function repoThreadStore(root: string): ThreadStoreRef {
+  return { kind: "repo", root };
+}
+
+export function spaceThreadStore(root: string): ThreadStoreRef {
+  return { kind: "space", root };
+}
+
+function storeRoot(store: ThreadStoreRef): string {
+  return typeof store === "string" ? store : store.root;
+}
+
+function isSpaceStore(store: ThreadStoreRef): boolean {
+  return typeof store !== "string" && store.kind === "space";
+}
+
+function logPath(store: ThreadStoreRef): string {
+  return isSpaceStore(store)
+    ? spaceThreadsLogPath(storeRoot(store))
+    : repoThreadsLogPath(storeRoot(store));
+}
 
 /** Raised when an event targets a thread that does not exist. */
 export class UnknownThreadError extends Error {
@@ -30,12 +61,24 @@ export class UnknownThreadError extends Error {
 }
 
 /**
+ * Raised when a session-lifecycle action is attempted without a scope. The
+ * legacy/unscoped bucket has no scope and therefore no derivable session id, so
+ * it is structurally un-archivable — the caller maps this to a 400.
+ */
+export class UnscopedSessionError extends Error {
+  constructor() {
+    super("cannot archive a review without a scope");
+    this.name = "UnscopedSessionError";
+  }
+}
+
+/**
  * Append a `thread.created` event and return the resulting thread. Creates the
  * repo's central log on first write. The file is the source of truth, so this
  * works whether or not the daemon is running.
  */
 export async function createThread(
-  repoRoot: string,
+  store: ThreadStoreRef,
   req: CreateThreadRequest,
   now: string,
 ): Promise<Thread> {
@@ -44,29 +87,38 @@ export async function createThread(
     type: "thread.created",
     id: genId("th"),
     ts: now,
-    repo: req.repo,
+    repo: req.repo ?? null,
     worktree: req.worktree ?? null,
+    targetLevel: req.file ? "file" : req.targetLevel === "space" ? "space" : "repo",
     file: req.file ?? null,
     side: req.side ?? null,
     line: req.line ?? null,
     endLine: req.endLine ?? null,
     anchor: req.anchor ?? null,
     severity: req.severity ?? null,
+    // Bind sessionId to scope: a sessionId with no scope matches neither a session
+    // view nor the unscoped bucket (which keys on sessionId === null), so it would
+    // be invisible everywhere. Coerce that bad combo to fully unscoped.
+    scope: req.scope ?? null,
+    sessionId: req.scope ? (req.sessionId ?? null) : null,
+    // The snapshot is meaningful only within a scope, so bind it the same way:
+    // no scope ⇒ no snapshot (a snapshot id with no scope is invisible everywhere).
+    snapshotId: req.scope ? (req.snapshotId ?? null) : null,
     author: req.author ?? { type: "user" },
     body: req.body,
   };
-  await appendEvent(repoRoot, event);
+  await appendEvent(store, event);
   return requireThread(replay([event]), event.id);
 }
 
 /** Append a reply to an existing thread and return the updated thread. */
 export async function addComment(
-  repoRoot: string,
+  store: ThreadStoreRef,
   threadId: string,
   req: AddCommentRequest,
   now: string,
 ): Promise<Thread> {
-  const events = await readEvents(repoRoot);
+  const events = await readEvents(store);
   requireThread(replay(events), threadId); // validate existence before writing
   const event: ThreadEvent = {
     v: THREAD_SCHEMA_VERSION,
@@ -77,17 +129,17 @@ export async function addComment(
     author: req.author ?? { type: "user" },
     body: req.body,
   };
-  await appendEvent(repoRoot, event);
+  await appendEvent(store, event);
   return requireThread(replay([...events, event]), threadId);
 }
 
 export async function resolveThread(
-  repoRoot: string,
+  store: ThreadStoreRef,
   threadId: string,
   req: ResolveThreadRequest,
   now: string,
 ): Promise<Thread> {
-  const events = await readEvents(repoRoot);
+  const events = await readEvents(store);
   requireThread(replay(events), threadId);
   const event: ThreadEvent = {
     v: THREAD_SCHEMA_VERSION,
@@ -97,7 +149,7 @@ export async function resolveThread(
     author: req.author ?? { type: "user" },
     summary: req.summary ?? null,
   };
-  await appendEvent(repoRoot, event);
+  await appendEvent(store, event);
   return requireThread(replay([...events, event]), threadId);
 }
 
@@ -106,16 +158,16 @@ export async function resolveThread(
  * replay, but the log is never rewritten — deletion is just another event.
  */
 export async function deleteThread(
-  repoRoot: string,
+  store: ThreadStoreRef,
   threadId: string,
   req: DeleteThreadRequest,
   now: string,
 ): Promise<void> {
-  const events = await readEvents(repoRoot);
+  const events = await readEvents(store);
   // Existence check only (404 if already gone/unknown). Restricting deletion to
   // non-open threads is a UI affordance (like resolve/dismiss), not enforced here.
   requireThread(replay(events), threadId);
-  await appendEvent(repoRoot, {
+  await appendEvent(store, {
     v: THREAD_SCHEMA_VERSION,
     type: "thread.deleted",
     ts: now,
@@ -124,32 +176,105 @@ export async function deleteThread(
   });
 }
 
-async function appendEvent(
+/**
+ * Append a `session.archived` event toggling a review's archived state. Returns
+ * the resulting `ArchivedSession` when archiving, or null when reviving.
+ *
+ * The session id is ALWAYS re-derived from `req.scope` via `sessionIdForScope` —
+ * a client-supplied id is never trusted — and a falsy/legacy scope is refused
+ * (`UnscopedSessionError`), so the unscoped bucket can't be archived. The scope
+ * is carried inline on the event so `replaySessions` never has to consult a
+ * thread to label the session (a review can be archived with zero threads).
+ */
+export async function archiveSession(
   repoRoot: string,
+  req: ArchiveSessionRequest,
+  now: string,
+): Promise<ArchivedSession | null> {
+  if (!req.scope) throw new UnscopedSessionError();
+  const sessionId = sessionIdForScope(req.scope);
+  const event: SessionArchivedEvent = {
+    v: THREAD_SCHEMA_VERSION,
+    type: "session.archived",
+    ts: now,
+    sessionId,
+    scope: req.scope,
+    archived: req.archived,
+    author: req.author ?? { type: "user" },
+    note: req.note ?? null,
+  };
+  await appendEvent(repoRoot, event);
+  return req.archived
+    ? { sessionId, scope: req.scope, archivedAt: now, note: req.note ?? null }
+    : null;
+}
+
+/**
+ * Fold `session.archived` events into the current archived set, in log order
+ * (last writer wins): `archived:true` records/refreshes the entry, `archived:false`
+ * removes it. A single pass with no pairing logic — that's the whole point of one
+ * toggling event type. Independent of {@link replay}: archiving a review never
+ * touches its threads, and a revive simply drops the entry so the review returns
+ * to the active set unchanged.
+ */
+export function replaySessions(
+  events: ThreadEvent[],
+): Map<string, ArchivedSession> {
+  const archived = new Map<string, ArchivedSession>();
+  for (const e of events) {
+    if (e.type !== "session.archived") continue;
+    if (e.archived) {
+      archived.set(e.sessionId, {
+        sessionId: e.sessionId,
+        scope: e.scope,
+        archivedAt: e.ts,
+        note: e.note ?? null,
+      });
+    } else {
+      archived.delete(e.sessionId);
+    }
+  }
+  return archived;
+}
+
+/** Load the repo's currently-archived sessions, newest archive first. */
+export async function loadArchivedSessions(
+  repoRoot: string,
+): Promise<ArchivedSession[]> {
+  const archived = replaySessions(await readEvents(repoRoot));
+  return [...archived.values()].sort((a, b) =>
+    a.archivedAt === b.archivedAt ? 0 : a.archivedAt < b.archivedAt ? 1 : -1,
+  );
+}
+
+async function appendEvent(
+  store: ThreadStoreRef,
   event: ThreadEvent,
 ): Promise<void> {
-  // Fold a legacy in-tree store into the central log before the first write so
-  // appends never split history across two locations.
-  await migrateLegacyStore(repoRoot);
-  const path = threadsLogPath(repoRoot);
+  // Fold a legacy in-tree repo store into the central log before the first write
+  // so appends never split history across two locations. Space stores are new and
+  // have no legacy in-tree location.
+  if (!isSpaceStore(store)) await migrateLegacyStore(storeRoot(store));
+  const path = logPath(store);
   await mkdir(dirname(path), { recursive: true });
   await appendFile(path, JSON.stringify(event) + "\n", "utf8");
 }
 
 /**
- * Read the raw log text, folding in a legacy in-tree store on a first miss.
- * Returns null when no log exists yet (so the repo simply has no threads).
+ * Read the raw log text, folding in a legacy in-tree repo store on a first miss.
+ * Returns null when no log exists yet (so the store simply has no threads).
  */
-async function readLogRaw(repoRoot: string): Promise<string | null> {
+async function readLogRaw(store: ThreadStoreRef): Promise<string | null> {
   try {
-    return await readFile(threadsLogPath(repoRoot), "utf8");
+    return await readFile(logPath(store), "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
+  if (isSpaceStore(store)) return null;
   // A missing central log may predate migration; attempt it once, then re-read.
-  await migrateLegacyStore(repoRoot);
+  await migrateLegacyStore(storeRoot(store));
   try {
-    return await readFile(threadsLogPath(repoRoot), "utf8");
+    return await readFile(logPath(store), "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
@@ -157,8 +282,8 @@ async function readLogRaw(repoRoot: string): Promise<string | null> {
 }
 
 /** Read and parse every event from the log, skipping blank/corrupt lines. */
-export async function readEvents(repoRoot: string): Promise<ThreadEvent[]> {
-  const raw = await readLogRaw(repoRoot);
+export async function readEvents(store: ThreadStoreRef): Promise<ThreadEvent[]> {
+  const raw = await readLogRaw(store);
   if (raw === null) return [];
   const events: ThreadEvent[] = [];
   const lines = raw.split("\n");
@@ -180,7 +305,7 @@ export async function readEvents(repoRoot: string): Promise<ThreadEvent[]> {
       events.push(parsed);
     } else if (i !== lastNonEmpty) {
       process.stderr.write(
-        `diffect: skipping unparseable event at ${threadsLogPath(repoRoot)}:${i + 1}\n`,
+        `diffect: skipping unparseable event at ${logPath(store)}:${i + 1}\n`,
       );
     }
   }
@@ -196,17 +321,23 @@ function parseEvent(line: string): ThreadEvent | null {
   }
   if (!obj || typeof obj !== "object") return null;
   const e = obj as { type?: unknown; v?: unknown };
-  // Schema-version gate: ignore events from a future/unknown schema rather than
-  // misinterpreting them.
-  if (e.v !== THREAD_SCHEMA_VERSION) return null;
+  // Schema-version gate: accept the known range [MIN, CURRENT] so older events
+  // (e.g. v1 threads predating scope binding) still replay, but ignore events
+  // from a future/unknown schema rather than misinterpreting them.
+  if (
+    typeof e.v !== "number" ||
+    e.v < MIN_THREAD_SCHEMA_VERSION ||
+    e.v > THREAD_SCHEMA_VERSION
+  )
+    return null;
   if (typeof e.type !== "string") return null;
   if (!THREAD_EVENT_TYPES.includes(e.type as ThreadEvent["type"])) return null;
   return obj as ThreadEvent;
 }
 
 /** Load all threads by replaying the event log. */
-export async function loadThreads(repoRoot: string): Promise<Thread[]> {
-  return replay(await readEvents(repoRoot));
+export async function loadThreads(store: ThreadStoreRef): Promise<Thread[]> {
+  return replay(await readEvents(store));
 }
 
 /**
@@ -227,6 +358,7 @@ export function replay(events: ThreadEvent[]): Thread[] {
       id: e.id,
       repo: e.repo,
       worktree: e.worktree,
+      targetLevel: e.file ? "file" : e.targetLevel === "space" ? "space" : "repo",
       file: e.file,
       side: e.side,
       line: e.line,
@@ -235,6 +367,15 @@ export function replay(events: ThreadEvent[]): Thread[] {
       severity: e.severity,
       status: "open",
       anchorState: "active",
+      // Legacy (v1) created events carry no scope/session — default to the
+      // unscoped bucket rather than dropping the thread (ADR migration rule).
+      // A sessionId with no scope is invisible in every view, so bind them: no
+      // scope ⇒ unscoped, regardless of any stored sessionId.
+      scope: e.scope ?? null,
+      sessionId: e.scope ? (e.sessionId ?? null) : null,
+      // Pre-Slice-3 (and unscoped) events carry no snapshot — default to null,
+      // bound to scope exactly like sessionId so an orphaned id can't survive.
+      snapshotId: e.scope ? (e.snapshotId ?? null) : null,
       comments: [
         { id: genCommentId(e.id, 0), author: e.author, body: e.body, ts: e.ts },
       ],
@@ -245,7 +386,10 @@ export function replay(events: ThreadEvent[]): Thread[] {
 
   // Pass 2: apply comments and status changes in log order.
   for (const e of events) {
-    if (e.type === "thread.created") continue;
+    // thread.created is handled in pass 1; session.archived is a session-lifecycle
+    // event that never touches threads (see replaySessions) — neither has a
+    // `.thread` target, so both skip the thread-mutation switch below.
+    if (e.type === "thread.created" || e.type === "session.archived") continue;
     const t = byId.get(e.thread);
     if (!t) continue;
     switch (e.type) {

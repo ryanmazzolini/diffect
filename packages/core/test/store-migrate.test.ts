@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadThreads, threadsLogPath } from "../src/reviews/event-log.js";
+import { loadThreads } from "../src/reviews/event-log.js";
+import { threadsLogPath } from "../src/store/paths.js";
 import { migrateLegacyStore } from "../src/store/migrate.js";
 
 let repo: string;
