@@ -19,8 +19,8 @@ export const ThreadList = memo(function ThreadList({
   if (threads.length === 0) {
     return (
       <div className="thread-list-empty">
-        No threads here. Hover a line and click <strong>+</strong> to leave a
-        comment.
+        No threads here. Comment on the space/repo above, or hover a line and click
+        <strong>+</strong>.
       </div>
     );
   }
@@ -30,15 +30,13 @@ export const ThreadList = memo(function ThreadList({
       {threads.map((t) => (
         <div className={`thread-card status-${t.status}`} key={t.id}>
           <div className="thread-card-head">
-            {showRepo && (
+            {showRepo && t.targetLevel !== "space" && t.repo && (
               <span className="repo-chip">
                 {t.repo}
                 {t.worktree ? ` · ${t.worktree}` : ""}
               </span>
             )}
-            <span className="loc">
-              {t.file ? `${t.file}:${t.line ?? "?"}` : "general"}
-            </span>
+            <span className="loc">{threadLocation(t)}</span>
           </div>
           <ThreadConversation thread={t} editors={editors} onChanged={onChanged} />
         </div>
@@ -46,3 +44,9 @@ export const ThreadList = memo(function ThreadList({
     </div>
   );
 });
+
+function threadLocation(t: Thread): string {
+  if (t.file) return `${t.file}:${t.line ?? "?"}`;
+  if (t.targetLevel === "space") return "space";
+  return "repo";
+}
