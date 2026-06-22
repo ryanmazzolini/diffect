@@ -86,6 +86,9 @@ html[data-density="compact"] {
   --diffstat-add: var(--add-ink);
   --diffstat-del: var(--del-ink);
   --diffstat-neutral: var(--border);
+  --scrollbar-track: var(--bg);
+  --scrollbar-thumb: #3a3b42;
+  --scrollbar-thumb-hover: #555761;
   /* Module lifecycle dots — deliberately NON-indigo (amber/green/gray) so the
    * status hue never collides with the indigo accent or comment severities. */
   --st-progress: #e0a23a;
@@ -143,6 +146,9 @@ html[data-density="compact"] {
   --diffstat-add: var(--add-ink);
   --diffstat-del: var(--del-ink);
   --diffstat-neutral: var(--border);
+  --scrollbar-track: #f4f4f5;
+  --scrollbar-thumb: #c5c5cc;
+  --scrollbar-thumb-hover: #9f9faa;
   --st-progress: #d8932f;
   --st-ready: #2fa75a;
   --st-idle: var(--faint);
@@ -152,6 +158,23 @@ html[data-density="compact"] {
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 3px solid var(--scrollbar-track);
+  border-radius: var(--radius-pill);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 body {
@@ -260,12 +283,18 @@ body {
   align-items: flex-start;
   justify-content: center;
   padding: 10vh var(--space-4) var(--space-4);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+body.modal-open {
+  overflow: hidden;
 }
 .modal {
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -335,6 +364,7 @@ body {
   padding: var(--space-1);
   max-height: 200px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 .aw-dirs .muted {
   color: var(--muted);
@@ -1301,6 +1331,15 @@ body {
 .tree-file.unchanged.active .tree-name {
   color: var(--text);
 }
+.tree-file.ignored,
+.file-list .lfile.ignored {
+  background-color: color-mix(in srgb, var(--muted) 10%, transparent);
+}
+.tree-file.ignored .tree-name,
+.file-list .lfile.ignored .lname,
+.tree-icon.ignored {
+  color: var(--muted);
+}
 
 /* Per-file badges on the right of a tree/list row. */
 .ft-badges {
@@ -1322,6 +1361,18 @@ body {
 }
 .tree-file.active .ft-tcount {
   background: var(--panel);
+}
+.ft-ignored,
+.ignored-badge {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 1px 5px;
+  text-transform: uppercase;
 }
 .ft-viewed {
   color: var(--success);
@@ -1898,6 +1949,7 @@ body {
   transform: rotate(-90deg);
 }
 .file-path {
+  min-width: 0;
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 500;
@@ -1921,6 +1973,7 @@ body {
   gap: var(--space-2);
 }
 .fh-main .diffstat {
+  margin-left: auto;
   flex: none;
 }
 .viewed-toggle {

@@ -68,6 +68,8 @@ export interface DiffFile {
   /** Previous path for renames. */
   oldPath?: string;
   status: FileStatus;
+  /** True when this path matches gitignore rules, even if it is already tracked. */
+  ignored?: boolean;
   /** Added/removed line counts (the diffstat), tallied as the diff is parsed. */
   additions: number;
   deletions: number;

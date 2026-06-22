@@ -116,7 +116,32 @@ export async function gitDiff(
     ...args,
     "--",
   ]);
-  return parseUnifiedDiff(stdout);
+  return markIgnored(repoRoot, parseUnifiedDiff(stdout));
+}
+
+async function markIgnored(repoRoot: string, files: DiffFile[]): Promise<DiffFile[]> {
+  if (files.length === 0) return files;
+  const paths = files.flatMap((file) =>
+    file.oldPath && file.oldPath !== file.path ? [file.path, file.oldPath] : [file.path],
+  );
+  let ignored: Set<string>;
+  try {
+    const { stdout } = await git(repoRoot, [
+      "check-ignore",
+      "--no-index",
+      "--",
+      ...paths,
+    ]);
+    ignored = new Set(stdout.split("\n").filter(Boolean));
+  } catch {
+    ignored = new Set();
+  }
+  if (ignored.size === 0) return files;
+  return files.map((file) =>
+    ignored.has(file.path) || (file.oldPath ? ignored.has(file.oldPath) : false)
+      ? { ...file, ignored: true }
+      : file,
+  );
 }
 
 function diffAgainst(repoRoot: string, base: string): Promise<DiffFile[]> {

@@ -99,6 +99,25 @@ describe("computeWorkDiff (work target)", () => {
     expect(paths).toContain("a.txt");
     expect(paths.some((p) => p.startsWith(".reviews"))).toBe(false);
   });
+
+  it("marks tracked files that match gitignore rules", async () => {
+    await init(dir);
+    await writeFile(join(dir, ".gitignore"), "ignored.txt\n");
+    await writeFile(join(dir, "ignored.txt"), "base\n");
+    await writeFile(join(dir, "normal.txt"), "base\n");
+    await git(dir, ["add", ".gitignore", "normal.txt"]);
+    await git(dir, ["add", "-f", "ignored.txt"]);
+    await git(dir, ["commit", "-m", "base"]);
+
+    await writeFile(join(dir, "ignored.txt"), "changed\n");
+    await writeFile(join(dir, "normal.txt"), "changed\n");
+
+    const byPath = Object.fromEntries(
+      (await computeWorkDiff(dir)).files.map((f) => [f.path, f]),
+    );
+    expect(byPath["ignored.txt"]!.ignored).toBe(true);
+    expect(byPath["normal.txt"]!.ignored).toBeUndefined();
+  });
 });
 
 describe("parseUnifiedDiff", () => {

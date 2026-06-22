@@ -407,6 +407,7 @@ const FileDiff = memo(function FileDiff({
         >
           <Icon name="chevron-down" size={12} className="fh-chev" />
           <span className={`status status-${file.status}`}>{file.status}</span>
+          {file.ignored && <span className="ignored-badge">ignored</span>}
           <span className="file-path">
             {dir && <span className="fp-dir">{dir}</span>}
             {base}

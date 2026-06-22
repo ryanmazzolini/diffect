@@ -483,6 +483,10 @@ function TreeRow({
 
   if (node.type === "file") {
     const unchanged = node.status === "unchanged";
+    const ignored = node.file?.ignored ?? false;
+    let title = node.path;
+    if (ignored) title = `${node.path} — ignored by git`;
+    else if (unchanged) title = `${node.path} — unchanged, open to comment`;
     return (
       <button
         type="button"
@@ -490,15 +494,15 @@ function TreeRow({
         aria-level={depth + 1}
         className={`tree-file${node.path === activeFile ? " active" : ""}${
           unchanged ? " unchanged" : ""
-        }`}
+        }${ignored ? " ignored" : ""}`}
         style={depthVar}
-        title={unchanged ? `${node.path} — unchanged, open to comment` : node.path}
+        title={title}
         onClick={() => onSelectFile(node.path)}
       >
         <Icon
           name={statusIcon(node.status)}
           size={12}
-          className={`tree-icon status-${node.status}`}
+          className={`tree-icon status-${node.status}${ignored ? " ignored" : ""}`}
         />
         <span className="tree-name">{node.name}</span>
         <FileBadges
@@ -561,13 +565,19 @@ function FileBadges({
   threads: number;
 }) {
   const unchanged = status === "unchanged";
+  const ignored = file?.ignored ?? false;
   const hasStat = file && (file.additions > 0 || file.deletions > 0);
-  if (!threads && unchanged && !hasStat) return null;
+  if (!threads && unchanged && !hasStat && !ignored) return null;
   return (
     <span className="ft-badges">
       {threads > 0 && (
         <span className="ft-tcount" title={`${threads} open thread${threads === 1 ? "" : "s"}`}>
           {threads}
+        </span>
+      )}
+      {ignored && (
+        <span className="ft-ignored" title="Ignored by git">
+          ignored
         </span>
       )}
       {!unchanged &&
@@ -613,8 +623,10 @@ function FileList({
           <button
             type="button"
             key={node.path}
-            className={`lfile${node.path === activeFile ? " active" : ""}`}
-            title={node.path}
+            className={`lfile${node.path === activeFile ? " active" : ""}${
+              node.file?.ignored ? " ignored" : ""
+            }`}
+            title={node.file?.ignored ? `${node.path} — ignored by git` : node.path}
             onClick={() => onSelectFile(node.path)}
           >
             <span className="lname">{node.name}</span>
