@@ -19,8 +19,12 @@ export function configDir(): string {
  * working-tree root. Keyed by repo (not workspace) so the same repo resolves to
  * one store whether reached directly or via a multi-repo workspace.
  */
+function hashPath(path: string): string {
+  return createHash("sha256").update(resolve(path), "utf8").digest("hex");
+}
+
 export function hashRepoPath(repoRoot: string): string {
-  return createHash("sha256").update(resolve(repoRoot), "utf8").digest("hex");
+  return hashPath(repoRoot);
 }
 
 /** Per-repo central store directory: `<configDir>/workspaces/<hash>/`. */
@@ -28,9 +32,19 @@ export function repoStoreDir(repoRoot: string): string {
   return join(configDir(), "workspaces", hashRepoPath(repoRoot));
 }
 
+/** Per-space central store directory: `<configDir>/spaces/<hash>/`. */
+export function spaceStoreDir(spaceRoot: string): string {
+  return join(configDir(), "spaces", hashPath(spaceRoot));
+}
+
 /** The append-only thread event log for a repo. */
 export function threadsLogPath(repoRoot: string): string {
   return join(repoStoreDir(repoRoot), "threads.jsonl");
+}
+
+/** The append-only thread event log for a review space. */
+export function spaceThreadsLogPath(spaceRoot: string): string {
+  return join(spaceStoreDir(spaceRoot), "threads.jsonl");
 }
 
 /** Persisted list of known workspace paths (consumed by the workspace registry). */

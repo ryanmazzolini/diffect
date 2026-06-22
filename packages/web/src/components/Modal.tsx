@@ -41,8 +41,10 @@ export function Modal({ title, onClose, children }: Props) {
         first.focus();
       }
     };
+    document.body.classList.add("modal-open");
     document.addEventListener("keydown", onKey);
     return () => {
+      document.body.classList.remove("modal-open");
       document.removeEventListener("keydown", onKey);
       // Restore focus to the opener if it's still in the DOM.
       if (opener?.isConnected) opener.focus();
@@ -52,6 +54,9 @@ export function Modal({ title, onClose, children }: Props) {
   return (
     <div
       className="modal-backdrop"
+      onWheel={(e) => {
+        if (e.target === e.currentTarget) e.preventDefault();
+      }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
