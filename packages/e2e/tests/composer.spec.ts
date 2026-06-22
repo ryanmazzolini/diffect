@@ -54,6 +54,6 @@ test("a comment renders as markdown once posted", async ({ page }) => {
   await form.getByRole("button", { name: "Comment" }).click();
 
   await expect(
-    page.locator(".inline-thread .body code", { hasText: "parseInt" }).first(),
+    page.locator(".inline-thread .c-text code", { hasText: "parseInt" }).first(),
   ).toBeVisible();
 });

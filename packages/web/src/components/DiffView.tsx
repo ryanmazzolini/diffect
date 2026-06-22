@@ -11,6 +11,7 @@ import type { Theme } from "../theme.js";
 import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
+import { fileElementId } from "../fileTree.js";
 import { CommentForm } from "./CommentForm.js";
 import { FullFilePreview } from "./FullFilePreview.js";
 import { DiffStat } from "./DiffStat.js";
@@ -391,7 +392,8 @@ const FileDiff = memo(function FileDiff({
   return (
     <div
       className={`file${viewed ? " viewed" : ""}`}
-      id={`file-${file.path}`}
+      id={fileElementId(repo, file.path)}
+      data-path={file.path}
       ref={fileRef}
       style={{ containIntrinsicSize: `auto ${measuredHeight.current ?? estHeight}px` }}
     >
@@ -484,7 +486,7 @@ function OutOfDiffFile({
   onChanged: () => void;
 }) {
   return (
-    <div className="file out-of-diff" id={`file-${file}`}>
+    <div className="file out-of-diff" id={fileElementId(repo, file)} data-path={file}>
       <div className="file-header">
         <span className="status status-context">context</span>
         <span className="file-path">{file}</span>

@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-density="tight">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffect — Top-bar consolidation (3 options)</title>
+<style>
+  /* ============================================================
+     Quiet Precision tokens — shared verbatim with quiet-precision-v2.
+     Only the consolidated nav differs between options A/B/C; the
+     shell, right-side controls, and data are identical so the eye
+     reads only the left-side navigation as the variable.
+     ============================================================ */
+  :root {
+    --bg: #fbfbfc;
+    --panel: #ffffff;
+    --panel-2: #f4f4f5;
+    --active: #ececef;          /* neutral "you are here" fill */
+    --border: #e8e8ea;
+    --border-strong: #d6d6da;
+    --ink: #1a1a1e;
+    --muted: #6f6f78;
+    --faint: #a0a0a8;
+    --accent: #5e6ad2;          /* Linear indigo — used sparingly */
+    --accent-ink: #4a55b8;
+    --accent-soft: #eef0fb;
+    --add-bg: #eaf6ee;  --add-ink: #1a7f37;  --add-num: #d6efdf;
+    --del-bg: #fbeeee;  --del-ink: #c4453d;  --del-num: #f6dcdc;
+    --shadow-overlay: 0 16px 48px rgba(20,20,28,.16), 0 4px 12px rgba(20,20,28,.08);
+    --r: 6px;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --motion: .11s cubic-bezier(.25,.6,.3,1);
+    --ui: 13px;
+    --row-h: 28px;
+  }
+  html[data-theme="dark"] {
+    --bg: #0e0f12;
+    --panel: #16171b;
+    --panel-2: #1c1d22;
+    --active: #25262c;
+    --border: #26272c;
+    --border-strong: #34353b;
+    --ink: #e7e8ea;
+    --muted: #8a8c93;
+    --faint: #5f616a;
+    --accent: #6a76e0;
+    --accent-ink: #aab2f0;
+    --accent-soft: rgba(106,118,224,.16);
+    --add-bg: #11231a;  --add-ink: #5fc07c;  --add-num: #173021;
+    --del-bg: #271619;  --del-ink: #e0716c;  --del-num: #341a1d;
+    --shadow-overlay: 0 16px 48px rgba(0,0,0,.55), 0 4px 12px rgba(0,0,0,.45);
+  }
+  html[data-density="compact"] { --ui: 12px; --row-h: 23px; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: var(--ui)/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    color: var(--ink); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    transition: background var(--motion), color var(--motion);
+  }
+  kbd {
+    font: 10.5px/1 var(--mono); color: var(--muted); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px;
+    min-width: 16px; text-align: center; display: inline-block;
+  }
+  .kbd-on-accent { color: #fff; background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.26); }
+
+  /* ---------- page scaffold ---------- */
+  /* App frames simulate a full application window — the real diffect web app
+     uses the full viewport (~1440px), so the study column is sized to a realistic
+     app width. Prose blocks keep their own narrower max-widths below. */
+  .page { max-width: 1400px; margin: 0 auto; padding: 28px 22px 120px; }
+  .study-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; margin-bottom: 6px; }
+  .sh-title { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+  .sh-title .d { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; margin-right: 9px; vertical-align: -4px; }
+  .sh-sub { color: var(--muted); font-size: 13px; max-width: 640px; line-height: 1.5; }
+  .sh-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .elim { display: flex; flex-wrap: wrap; gap: 7px; margin: 16px 0 26px; }
+  .elim-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--add-ink); background: var(--add-bg); border: 1px solid var(--add-num); border-radius: 999px; padding: 3px 11px; }
+  .elim-chip b { font-weight: 600; }
+
+  /* ---------- option block ---------- */
+  .option { margin-bottom: 30px; scroll-margin-top: 18px; }
+  .opt-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+  .opt-tag { flex: none; width: 24px; height: 24px; border-radius: 6px; background: var(--ink); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .opt-name { font-size: 15px; font-weight: 600; }
+  .opt-name .opt-recommend { font-size: 11px; font-weight: 500; color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: 2px 9px; margin-left: 8px; vertical-align: 1px; }
+  .opt-caption { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 11px 36px; max-width: 760px; }
+  .opt-caption .tw { color: var(--ink); }
+
+  /* ---------- the mini app frame ---------- */
+  .frame { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); }
+  .frame.today { opacity: .92; }
+  .topbar {
+    height: 48px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+  .brand {
+    width: 22px; height: 22px; border-radius: 6px; flex: none;
+    background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  .rh-grow { flex: 1; min-width: 8px; }
+  .nowrap { white-space: nowrap; }
+  .bar-div { width: 1px; height: 18px; background: var(--border); flex: none; margin: 0 1px; }
+
+  /* shared controls (identical in every option) */
+  .rdelta { font: 12px var(--mono); flex: none; }
+  .rdelta .plus { color: var(--add-ink); } .rdelta .minus { color: var(--del-ink); }
+  .metaitem { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); flex: none; }
+  .btn {
+    font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel); color: var(--ink);
+    border-radius: var(--r); padding: 5px 11px; display: inline-flex; align-items: center; gap: 6px;
+    transition: background var(--motion), border-color var(--motion), color var(--motion);
+  }
+  .btn:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
+  .btn.sm { padding: 4px 9px; font-size: 12px; }
+  .icon-btn { padding: 5px 7px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; background: var(--panel); flex: none; }
+  .seg button {
+    font: inherit; font-size: 12px; color: var(--muted); background: transparent;
+    border: 0; border-right: 1px solid var(--border); padding: 4px 8px; cursor: pointer;
+    display: flex; align-items: center; gap: 5px; transition: background var(--motion), color var(--motion);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--panel-2); color: var(--ink); font-weight: 500; }
+  .seg button:hover:not(.on) { color: var(--ink); }
+  .seg.sm button { padding: 3px 7px; font-size: 11px; }
+
+  /* breadcrumb + crumb pickers */
+  .crumbs { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; min-width: 0; }
+  .crumbs .sep { color: var(--faint); }
+  .crumb { font: inherit; background: transparent; border: 0; padding: 4px 7px; border-radius: var(--r); cursor: pointer; white-space: nowrap; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; transition: background var(--motion), color var(--motion); }
+  .crumb:hover { background: var(--panel-2); color: var(--ink); }
+  .crumb.current { color: var(--ink); font-weight: 500; }
+  .crumb .caret, .caret { font-size: 9px; color: var(--faint); }
+  .cr-strong { font-weight: 600; color: var(--ink); }
+  .cr-branch { font-family: var(--mono); color: var(--muted); font-size: 11.5px; max-width: 168px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* compare/local-target controls (shared with v2) */
+  .compare-label { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+  .compare-sep { color: var(--muted); font-weight: 700; }
+  .local-targets { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--panel); flex: none; }
+  .target-mode { border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--muted); padding: 4px 9px; font: inherit; font-size: 12px; cursor: pointer; transition: background var(--motion), color var(--motion); }
+  .target-mode:last-child { border-right: 0; }
+  .target-mode:hover { color: var(--ink); background: var(--panel-2); }
+  .target-mode.active { color: #fff; background: var(--accent); font-weight: 600; }
+
+  /* ---------- option-specific nav controls ---------- */
+  .has-pop { position: relative; display: inline-flex; flex: none; }
+
+  /* A · scope pill (WHERE) */
+  .scope-pill { display: inline-flex; align-items: center; gap: 7px; font: inherit; cursor: pointer; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; color: var(--ink); max-width: 330px; transition: background var(--motion), border-color var(--motion); }
+  .scope-pill:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .sp-repo { font-weight: 600; }
+  .sp-branch { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 196px; }
+
+  /* A · session button (WHICH durable review) */
+  .session-btn { display: inline-flex; align-items: center; gap: 7px; font: inherit; cursor: pointer; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 4px 9px; color: var(--ink); transition: background var(--motion), border-color var(--motion); }
+  .session-btn:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .sb-icon { color: var(--faint); font-size: 12px; }
+  .sb-name { font-family: var(--mono); font-size: 12px; }
+
+  /* neutral count badge (threads / archived) — kept neutral so indigo stays sparing */
+  .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 10px; font-weight: 500; }
+
+  /* B · repo + compare triggers */
+  .repo-trigger { display: inline-flex; align-items: center; gap: 7px; font: inherit; cursor: pointer; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 4px 9px; color: var(--ink); max-width: 300px; transition: background var(--motion), border-color var(--motion); }
+  .repo-trigger:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .repo-name { font-weight: 600; }
+  .repo-branch { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 168px; }
+  .compare-trigger { display: inline-flex; align-items: center; gap: 5px; font: 12px var(--mono); cursor: pointer; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 4px 9px; color: var(--ink); transition: background var(--motion), border-color var(--motion); }
+  .compare-trigger:hover { background: var(--panel-2); border-color: var(--border-strong); }
+
+  /* ---------- shared menu (the only shadowed surfaces) ---------- */
+  .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; display: none; flex-direction: column; min-width: 274px; max-height: 380px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-overlay); padding: 6px; }
+  .menu.wide { min-width: 320px; }
+  .has-pop.open > .menu { display: flex; }
+  .menu-search { border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--ink); padding: 8px; margin: -6px -6px 4px; font: inherit; outline: none; }
+  .menu-search:focus { box-shadow: inset 0 0 0 2px var(--accent-soft); }
+  .menu-sec { font-size: 10px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 8px 8px 3px; }
+  .menu-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  .menu-row:hover { background: var(--panel-2); }
+  .menu-row.sel { background: var(--active); }
+  .m-name { font-weight: 500; white-space: nowrap; }
+  .m-name.mono { font-family: var(--mono); font-weight: 400; }
+  .m-branch { font-family: var(--mono); color: var(--faint); font-size: 11px; margin-left: auto; white-space: nowrap; }
+  .m-sub { color: var(--faint); font-size: 11px; margin-left: auto; white-space: nowrap; }
+  .m-check { margin-left: 8px; color: var(--accent-ink); flex: none; }
+  .m-branch + .m-check, .m-sub + .m-check { margin-left: 8px; }
+  .menu-disclosure { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  .menu-disclosure:hover { background: var(--panel-2); color: var(--ink); }
+  .disc-caret { font-size: 9px; color: var(--faint); width: 9px; }
+  .menu-foot { border-top: 1px solid var(--border); margin: 4px -6px -6px; padding: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .menu-add, .pane-link { border: 0; background: transparent; color: var(--accent-ink); font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+  .menu-add:hover, .pane-link:hover { background: var(--panel-2); }
+  .menu-add.neutral { color: var(--muted); }
+
+  /* inline base…compare editor inside a menu (replacing pane — never a 2nd popover) */
+  .cmp-edit { display: flex; align-items: center; gap: 7px; padding: 4px 8px 8px; flex-wrap: wrap; }
+  .mini-ref { font: 12px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 3px 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .mini-ref:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .mini-ref .caret { font-size: 9px; }
+  .hidden { display: none !important; }
+
+  /* ---------- frame body: files-only rail + ghosted diff ---------- */
+  .frame-body { display: flex; height: 236px; }
+  .files-rail { width: 232px; flex: none; border-right: 1px solid var(--border); background: var(--bg); padding: 10px 8px; overflow: hidden; }
+  .files-head { display: flex; align-items: center; gap: 8px; padding: 2px 6px 9px; }
+  .fh-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+  .fh-bar i { display: block; height: 100%; width: 0%; background: var(--accent); }
+  .fh-count { font: 11px var(--mono); color: var(--muted); flex: none; }
+  .files-sub { display: flex; gap: 6px; padding: 0 6px 9px; }
+  .ftree { font-size: 12px; }
+  .trow { display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 6px; color: var(--muted); }
+  .trow:hover { background: var(--panel-2); color: var(--ink); }
+  .trow.dir { color: var(--ink); }
+  .trow .tg { width: 13px; text-align: center; color: var(--faint); font-size: 11px; flex: none; }
+  .trow .tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trow .tstat { margin-left: auto; font: 10px var(--mono); flex: none; }
+  .tstat .a { color: var(--add-ink); } .tstat .d { color: var(--del-ink); }
+  .indent { padding-left: 19px; }
+  .diff-ghost { flex: 1; min-width: 0; background: var(--panel); padding: 0; overflow: hidden; position: relative; }
+  .dg-inner { opacity: .62; pointer-events: none; }
+  .dg-fh { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 16px; border-bottom: 1px solid var(--border); font: 12px var(--mono); color: var(--ink); }
+  .dg-fh .dg-d { font-size: 11px; }
+  .dg-code { font: 12px/1.65 var(--mono); padding: 6px 0; }
+  .dg-ln { display: flex; }
+  .dg-ln > span { width: 42px; flex: none; text-align: right; padding-right: 12px; color: var(--faint); user-select: none; }
+  .dg-ln code { white-space: pre; }
+  .dg-ln.add { background: var(--add-bg); } .dg-ln.add code { color: var(--add-ink); }
+  .dg-ln.del { background: var(--del-bg); } .dg-ln.del code { color: var(--del-ink); }
+  .dg-scrim { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, var(--panel)); }
+
+  /* today / before annotations */
+  .rheader { background: var(--panel); }
+  .rh-row { display: flex; align-items: center; gap: 9px; padding: 0 12px; }
+  .rh-identity { height: 46px; }
+  .rh-subbar { height: 38px; border-top: 1px solid var(--border); }
+  .ws { font: inherit; font-weight: 600; color: var(--ink); background: transparent; border: 0; cursor: pointer; border-radius: var(--r); padding: 4px 7px; display: inline-flex; align-items: center; gap: 6px; }
+  .ws:hover { background: var(--panel-2); }
+  .ws .ws-path { font: 12px var(--mono); font-weight: 400; color: var(--muted); }
+  .ref-trigger-static { font: 12px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 3px 8px; display: inline-flex; align-items: center; gap: 6px; }
+  .dup { font-size: 10px; color: var(--del-ink); background: var(--del-bg); border: 1px solid var(--del-num); border-radius: 4px; padding: 1px 6px; margin-left: 7px; white-space: nowrap; }
+  .dup.b { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--accent-soft); }
+  .ws-section { padding: 10px 8px; }
+  .ws-label { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 0 6px 6px; display: flex; align-items: center; }
+  .ws-label .plus2 { margin-left: auto; color: var(--muted); cursor: pointer; }
+  .ws-row { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 6px; color: var(--ink); }
+  .ws-row .wsr-name { font-weight: 500; }
+  .ws-row .wsr-branch { font: 11px var(--mono); color: var(--muted); }
+  .sess-row { display: flex; align-items: center; gap: 7px; padding: 3px 6px 3px 22px; border-radius: 6px; color: var(--muted); font: 12px var(--mono); }
+  .sess-row.active { background: var(--active); color: var(--ink); }
+  .arch-row { padding: 3px 6px 3px 22px; color: var(--faint); font-size: 11.5px; }
+
+  /* ---------- pickbar ---------- */
+  .pickbar { position: sticky; bottom: 0; z-index: 80; margin-top: 30px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-overlay); padding: 11px 14px; }
+  .pb-label { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  .pb-opt { font: inherit; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border); background: var(--panel); color: var(--ink); border-radius: var(--r); padding: 6px 12px; transition: background var(--motion), border-color var(--motion); }
+  .pb-opt:hover { background: var(--panel-2); border-color: var(--border-strong); }
+  .pb-opt.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pb-spacer { flex: 1; }
+  .pb-note { font-size: 12px; color: var(--faint); }
+
+  /* small theme/density control set top-right */
+  .theme-toggle { }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="study-head">
+    <div>
+      <div class="sh-title"><span class="d">D</span>Top-bar consolidation</div>
+      <div class="sh-sub">One calm ~48&nbsp;px bar replaces today's two-row header <em>and</em> the sidebar's Workspaces / Sessions / Archived tree. Same shell, same right-side controls, same data in all three — only the left-side nav changes, so you compare like for like.</div>
+    </div>
+    <div class="sh-controls">
+      <div class="seg" data-control="density"><button data-d="tight" class="on">Tight</button><button data-d="compact">Compact</button></div>
+      <button class="btn ghost icon-btn" data-control="theme" title="Toggle light / dark">◐</button>
+    </div>
+  </header>
+
+  <div class="elim">
+    <span class="elim-chip">✓&nbsp;<b>Workspace</b> shown once</span>
+    <span class="elim-chip">✓&nbsp;<b>Comparison</b> shown once</span>
+    <span class="elim-chip">✓&nbsp;Second header row removed</span>
+    <span class="elim-chip">✓&nbsp;Sidebar is files-only</span>
+    <span class="elim-chip">✓&nbsp;Scope stays visible &amp; distinct from the review</span>
+  </div>
+
+  <!-- ============================================================
+       TODAY — the redundancy the redesign removes
+       ============================================================ -->
+  <section class="option">
+    <div class="opt-head">
+      <span class="opt-tag" style="background:var(--del-ink)">!</span>
+      <span class="opt-name">Today — the same things, shown twice</span>
+    </div>
+    <p class="opt-caption">The workspace/repo+branch and the <code>main..HEAD</code> comparison each appear in <em>both</em> the top bar and the sidebar, and "workspace" means two different things (a path up top, a section below). That's the confusion.</p>
+
+    <div class="frame today">
+      <div class="rheader">
+        <div class="rh-row rh-identity">
+          <div class="brand">D</div>
+          <button class="ws">diffect <span class="ws-path">~/personal/diffect</span> <span class="caret">▾</span></button>
+          <span class="dup">workspace ⟲</span>
+          <span class="rh-grow"></span>
+          <span class="rdelta"><span class="plus">+1.2k</span> <span class="minus">−380</span></span>
+          <div class="seg"><button class="on">Unified</button><button>Split</button></div>
+        </div>
+        <div class="rh-row rh-subbar">
+          <span class="compare-label">base</span>
+          <span class="ref-trigger-static">main <span class="caret">▾</span></span>
+          <span class="compare-sep">…</span>
+          <span class="compare-label">compare</span>
+          <span class="ref-trigger-static">HEAD <span class="caret">▾</span></span>
+          <span class="dup b">comparison ⟲</span>
+          <span style="width:14px"></span>
+          <span class="local-targets"><button class="target-mode active">All</button><button class="target-mode">Staged</button><button class="target-mode">Unstaged</button></span>
+        </div>
+      </div>
+      <div class="frame-body">
+        <aside class="files-rail" style="width:248px">
+          <div class="ws-section">
+            <div class="ws-label">Workspaces <span class="plus2">＋</span></div>
+            <div class="ws-row"><span class="tg">▾</span><span class="wsr-name">diffect</span> <span class="wsr-branch">⎇ claude/ui-redesign-mockups-34ouhr</span></div>
+            <div class="sess-row active">main..HEAD <span class="dup b" style="margin-left:auto">⟲</span></div>
+            <div class="arch-row">▸ Archived (1)</div>
+            <div class="ws-row"><span class="tg">▸</span><span class="wsr-name">pi-skills</span> <span class="wsr-branch">⎇ main</span></div>
+          </div>
+        </aside>
+        <div class="diff-ghost"><div class="dg-inner">
+          <div class="dg-fh">packages/web/src/components/Topbar.tsx <span class="dg-d"><span class="plus" style="color:var(--add-ink)">+84</span> <span class="minus" style="color:var(--del-ink)">−20</span></span></div>
+          <div class="dg-code">
+            <div class="dg-ln"><span>41</span><code>export function Topbar({ workspace, repo }: Props) {</code></div>
+            <div class="dg-ln del"><span>42</span><code>  return &lt;div className="topbar two-row"&gt;</code></div>
+            <div class="dg-ln add"><span>42</span><code>  return &lt;div className="topbar"&gt;</code></div>
+            <div class="dg-ln"><span>43</span><code>    &lt;WorkspaceCrumb /&gt;</code></div>
+            <div class="dg-ln"><span>44</span><code>    &lt;TargetPicker target={target} /&gt;</code></div>
+          </div>
+        </div><div class="dg-scrim"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <hr style="border:0;border-top:1px solid var(--border);margin:6px 0 26px">
+
+  <!-- ============================================================
+       OPTION A — Scope Pill + Session Switcher  (recommended)
+       ============================================================ -->
+  <section class="option" id="opt-a">
+    <div class="opt-head">
+      <span class="opt-tag">A</span>
+      <span class="opt-name">Scope Pill + Session Switcher <span class="opt-recommend">panel pick · 7.8</span></span>
+    </div>
+    <p class="opt-caption">Two honest anchors: a rounded <span class="tw">Where</span> pill (workspace · repo · branch as one unit) and a labelled <span class="tw">Which-review</span> button, with the always-visible <span class="tw">All / Staged / Unstaged</span> scope toggle kept separate. Base…compare lives inside the review menu — rendered once. <span class="tw">Tradeoff:</span> the "session" button is a new control concept to learn.</p>
+
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand">D</div>
+
+        <span class="has-pop">
+          <button class="scope-pill" data-pop aria-haspopup="menu">
+            <span class="sp-repo">diffect</span>
+            <span class="sp-branch">claude/ui-redesign-mockups-34ouhr</span>
+            <span class="caret">▾</span>
+          </button>
+          <div class="menu" role="menu">
+            <input class="menu-search" placeholder="Switch workspace or repo…">
+            <div class="menu-sec">diffect · workspace</div>
+            <button class="menu-row sel" role="menuitem"><span class="m-name">diffect</span><span class="m-branch">⎇ claude/…-34ouhr</span><span class="m-check">✓</span></button>
+            <button class="menu-row" role="menuitem"><span class="m-name">pi-skills</span><span class="m-branch">⎇ main</span></button>
+            <div class="menu-sec">side-projects · workspace</div>
+            <button class="menu-row" role="menuitem"><span class="m-name">scratch</span><span class="m-branch">⎇ main</span></button>
+            <div class="menu-foot"><button class="menu-add">＋ Add workspace…</button></div>
+          </div>
+        </span>
+
+        <span class="has-pop">
+          <button class="session-btn" data-pop aria-haspopup="menu" title="Active review">
+            <span class="sb-icon">⎇</span>
+            <span class="sb-name">main..HEAD</span>
+            <span class="badge" title="2 open threads">2</span>
+            <span class="caret">▾</span>
+          </button>
+          <div class="menu" role="menu">
+            <div class="menu-sec">Comparison</div>
+            <div class="cmp-edit">
+              <span class="compare-label">base</span>
+              <button class="mini-ref">main <span class="caret">▾</span></button>
+              <span class="compare-sep">…</span>
+              <span class="compare-label">compare</span>
+              <button class="mini-ref">HEAD <span class="caret">▾</span></button>
+            </div>
+            <div class="menu-sec">Other reviews · diffect</div>
+            <button class="menu-row" role="menuitem"><span class="m-name mono">v0.4.0..HEAD</span><span class="m-sub">+812 −96 · 12/40</span></button>
+            <button class="menu-row" role="menuitem"><span class="m-name">Local changes</span><span class="m-sub">working tree · 3 files</span></button>
+            <button class="menu-disclosure" data-disc><span class="disc-caret">▸</span>Archived <span class="badge">1</span></button>
+            <div class="disc-body hidden">
+              <button class="menu-row" role="menuitem"><span class="m-name mono">feat/virtual-tree..main</span><span class="m-sub">3d ago · revive</span></button>
+            </div>
+            <div class="menu-foot"><button class="menu-add neutral">See all in inbox →</button></div>
+          </div>
+        </span>
+
+        <span class="local-targets" title="Review scope (live)">
+          <button class="target-mode active">All</button>
+          <button class="target-mode">Staged</button>
+          <button class="target-mode">Unstaged</button>
+        </span>
+
+        <span class="rh-grow"></span>
+        <span class="rdelta"><span class="plus">+1.2k</span> <span class="minus">−380</span></span>
+        <span class="metaitem">0/46 reviewed</span>
+        <span class="bar-div"></span>
+        <div class="seg" data-control="diffmode"><button class="on">Unified</button><button>Split</button></div>
+        <button class="btn primary nowrap">Finish review <kbd class="kbd-on-accent">⌘⏎</kbd></button>
+      </div>
+      <div class="frame-body">
+        <aside class="files-rail">
+          <div class="files-head">
+            <span class="fh-bar"><i></i></span>
+            <span class="fh-count">0/46</span>
+          </div>
+          <div class="files-sub">
+            <div class="seg sm" data-control="scope"><button class="on">Diff</button><button>All files</button></div>
+            <div class="seg sm" data-control="treeview"><button class="on">Tree</button><button>List</button></div>
+          </div>
+          <div class="ftree">
+            <div class="trow dir"><span class="tg">▾</span><span class="tn">packages/web/src</span></div>
+            <div class="trow dir indent"><span class="tg">▾</span><span class="tn">components</span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">Topbar.tsx</span><span class="tstat"><span class="a">+84</span> <span class="d">−20</span></span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">Sidebar.tsx</span><span class="tstat"><span class="a">+120</span> <span class="d">−44</span></span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">TargetPicker.tsx</span><span class="tstat"><span class="a">+60</span> <span class="d">−8</span></span></div>
+            <div class="trow indent"><span class="tg">›</span><span class="tn">App.tsx</span><span class="tstat"><span class="a">+40</span> <span class="d">−12</span></span></div>
+            <div class="trow dir"><span class="tg">▾</span><span class="tn">packages/core/src</span></div>
+            <div class="trow indent"><span class="tg">›</span><span class="tn">server.ts</span><span class="tstat"><span class="a">+90</span> <span class="d">−30</span></span></div>
+          </div>
+        </aside>
+        <div class="diff-ghost"><div class="dg-inner">
+          <div class="dg-fh">packages/web/src/components/Topbar.tsx <span class="dg-d"><span class="plus" style="color:var(--add-ink)">+84</span> <span class="minus" style="color:var(--del-ink)">−20</span></span></div>
+          <div class="dg-code">
+            <div class="dg-ln"><span>41</span><code>export function Topbar({ scope, session }: Props) {</code></div>
+            <div class="dg-ln del"><span>42</span><code>  // identity + comparison rendered twice</code></div>
+            <div class="dg-ln add"><span>42</span><code>  return &lt;div className="topbar"&gt;</code></div>
+            <div class="dg-ln add"><span>43</span><code>    &lt;ScopePill /&gt; &lt;SessionSwitcher /&gt;</code></div>
+            <div class="dg-ln"><span>44</span><code>    &lt;LocalTargets value={scope} /&gt;</code></div>
+          </div>
+        </div><div class="dg-scrim"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       OPTION B — Compare Bar  (GitHub-style, one sentence)
+       ============================================================ -->
+  <section class="option" id="opt-b">
+    <div class="opt-head">
+      <span class="opt-tag">B</span>
+      <span class="opt-name">Compare Bar <span class="opt-recommend">panel pick · 7.3</span></span>
+    </div>
+    <p class="opt-caption">Reads left-to-right as one sentence: <span class="tw">diffect › main…HEAD</span>. A quiet workspace crumb, a repo picker, then a single GitHub-style compare button whose popover holds recent comparisons and an "edit refs" pane (no stacked popover). <span class="tw">Tradeoff:</span> workspace switching sits behind the leading crumb, not the repo button.</p>
+
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand">D</div>
+
+        <span class="crumbs">
+          <span class="has-pop">
+            <button class="crumb" data-pop>diffect <span class="caret">▾</span></button>
+            <div class="menu" role="menu">
+              <input class="menu-search" placeholder="Switch workspace…">
+              <div class="menu-sec">Workspaces</div>
+              <button class="menu-row sel" role="menuitem"><span class="m-name">diffect</span><span class="m-sub">2 repos</span><span class="m-check">✓</span></button>
+              <button class="menu-row" role="menuitem"><span class="m-name">side-projects</span><span class="m-sub">1 repo</span></button>
+              <div class="menu-foot"><button class="menu-add">＋ Add workspace…</button></div>
+            </div>
+          </span>
+          <span class="sep">›</span>
+        </span>
+
+        <span class="has-pop">
+          <button class="repo-trigger" data-pop>
+            <span class="repo-name">diffect</span>
+            <span class="repo-branch">⎇ claude/ui-redesign-mockups-34ouhr</span>
+            <span class="caret">▾</span>
+          </button>
+          <div class="menu" role="menu">
+            <input class="menu-search" placeholder="Find a repo…">
+            <div class="menu-sec">Repos · diffect</div>
+            <button class="menu-row sel" role="menuitem"><span class="m-name">diffect</span><span class="m-branch">⎇ claude/…-34ouhr</span><span class="m-check">✓</span></button>
+            <button class="menu-row" role="menuitem"><span class="m-name">pi-skills</span><span class="m-branch">⎇ main</span></button>
+          </div>
+        </span>
+
+        <span class="has-pop">
+          <button class="compare-trigger" data-pop title="Comparison">
+            <span>main</span><span class="compare-sep">…</span><span>HEAD</span>
+            <span class="caret">▾</span>
+          </button>
+          <div class="menu wide" role="menu">
+            <div class="cm-pane" data-pane="recents">
+              <input class="menu-search" placeholder="Switch comparison…">
+              <div class="menu-sec">Recent</div>
+              <button class="menu-row" role="menuitem"><span class="m-name mono">v0.4.0..HEAD</span><span class="m-sub">yesterday · 12/40</span></button>
+              <button class="menu-row" role="menuitem"><span class="m-name mono">main..claude/…-34ouhr</span><span class="m-sub">2h ago</span></button>
+              <button class="menu-disclosure" data-disc><span class="disc-caret">▸</span>Archived <span class="badge">1</span></button>
+              <div class="disc-body hidden">
+                <button class="menu-row" role="menuitem"><span class="m-name mono">feat/virtual-tree..main</span><span class="m-sub">restore</span></button>
+              </div>
+              <div class="menu-foot">
+                <button class="pane-link" data-goto="edit">Edit refs / new comparison →</button>
+                <button class="menu-add neutral">See all in inbox →</button>
+              </div>
+            </div>
+            <div class="cm-pane hidden" data-pane="edit">
+              <button class="pane-link" data-goto="recents">‹ Back</button>
+              <div class="menu-sec">Edit comparison</div>
+              <div class="cmp-edit">
+                <span class="compare-label">base</span>
+                <button class="mini-ref">main <span class="caret">▾</span></button>
+                <span class="compare-sep">…</span>
+                <span class="compare-label">compare</span>
+                <button class="mini-ref">HEAD <span class="caret">▾</span></button>
+              </div>
+              <div class="menu-foot"><button class="btn primary sm">Compare</button></div>
+            </div>
+          </div>
+        </span>
+
+        <span class="local-targets" title="Review scope (live)">
+          <button class="target-mode active">All</button>
+          <button class="target-mode">Staged</button>
+          <button class="target-mode">Unstaged</button>
+        </span>
+
+        <span class="rh-grow"></span>
+        <span class="rdelta"><span class="plus">+1.2k</span> <span class="minus">−380</span></span>
+        <span class="metaitem">0/46 reviewed</span>
+        <span class="bar-div"></span>
+        <div class="seg" data-control="diffmode"><button class="on">Unified</button><button>Split</button></div>
+        <button class="btn primary nowrap">Finish review <kbd class="kbd-on-accent">⌘⏎</kbd></button>
+      </div>
+      <div class="frame-body">
+        <aside class="files-rail">
+          <div class="files-head">
+            <span class="fh-bar"><i></i></span>
+            <span class="fh-count">0/46</span>
+          </div>
+          <div class="files-sub">
+            <div class="seg sm" data-control="scope"><button class="on">Diff</button><button>All files</button></div>
+            <div class="seg sm" data-control="treeview"><button class="on">Tree</button><button>List</button></div>
+          </div>
+          <div class="ftree">
+            <div class="trow dir"><span class="tg">▾</span><span class="tn">packages/web/src</span></div>
+            <div class="trow dir indent"><span class="tg">▾</span><span class="tn">components</span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">Topbar.tsx</span><span class="tstat"><span class="a">+84</span> <span class="d">−20</span></span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">Sidebar.tsx</span><span class="tstat"><span class="a">+120</span> <span class="d">−44</span></span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">TargetPicker.tsx</span><span class="tstat"><span class="a">+60</span> <span class="d">−8</span></span></div>
+            <div class="trow indent"><span class="tg">›</span><span class="tn">App.tsx</span><span class="tstat"><span class="a">+40</span> <span class="d">−12</span></span></div>
+            <div class="trow dir"><span class="tg">▾</span><span class="tn">packages/core/src</span></div>
+            <div class="trow indent"><span class="tg">›</span><span class="tn">server.ts</span><span class="tstat"><span class="a">+90</span> <span class="d">−30</span></span></div>
+          </div>
+        </aside>
+        <div class="diff-ghost"><div class="dg-inner">
+          <div class="dg-fh">packages/web/src/components/Topbar.tsx <span class="dg-d"><span class="plus" style="color:var(--add-ink)">+84</span> <span class="minus" style="color:var(--del-ink)">−20</span></span></div>
+          <div class="dg-code">
+            <div class="dg-ln"><span>41</span><code>export function CompareBar({ repo, target }: Props) {</code></div>
+            <div class="dg-ln"><span>42</span><code>  return &lt;div className="topbar"&gt;</code></div>
+            <div class="dg-ln add"><span>43</span><code>    &lt;WorkspaceCrumb /&gt; &lt;RepoPicker /&gt;</code></div>
+            <div class="dg-ln add"><span>44</span><code>    &lt;ComparePicker value="main…HEAD" /&gt;</code></div>
+            <div class="dg-ln"><span>45</span><code>    &lt;LocalTargets /&gt;</code></div>
+          </div>
+        </div><div class="dg-scrim"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       OPTION C — Two-Crumb Minimal
+       ============================================================ -->
+  <section class="option" id="opt-c">
+    <div class="opt-head">
+      <span class="opt-tag">C</span>
+      <span class="opt-name">Two-Crumb Minimal <span class="opt-recommend">panel pick · 7.0</span></span>
+    </div>
+    <p class="opt-caption">The most minimal: just two breadcrumb pickers — <span class="tw">Project</span> (workspace + repo) and <span class="tw">Review</span> (sessions + archived, with an inline base…compare editor) — plus the thin scope toggle. Nothing else. <span class="tw">Tradeoff:</span> both crumbs lean hard on the popovers and need care at very narrow widths.</p>
+
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand">D</div>
+
+        <span class="crumbs">
+          <span class="has-pop">
+            <button class="crumb" data-pop>
+              <span class="cr-strong">diffect</span> <span class="cr-branch">claude/…-34ouhr</span> <span class="caret">▾</span>
+            </button>
+            <div class="menu" role="menu">
+              <input class="menu-search" placeholder="Switch project…">
+              <div class="menu-sec">diffect · workspace</div>
+              <button class="menu-row sel" role="menuitem"><span class="m-name">diffect</span><span class="m-branch">⎇ claude/…-34ouhr</span><span class="m-check">✓</span></button>
+              <button class="menu-row" role="menuitem"><span class="m-name">pi-skills</span><span class="m-branch">⎇ main</span></button>
+              <div class="menu-sec">side-projects · workspace</div>
+              <button class="menu-row" role="menuitem"><span class="m-name">scratch</span><span class="m-branch">⎇ main</span></button>
+              <div class="menu-foot"><button class="menu-add">＋ Add workspace…</button></div>
+            </div>
+          </span>
+
+          <span class="sep">›</span>
+
+          <span class="has-pop">
+            <button class="crumb current" data-pop>
+              <span class="mono" style="font-size:12px">main..HEAD</span> <span class="badge" style="margin-left:2px">2</span> <span class="caret">▾</span>
+            </button>
+            <div class="menu wide" role="menu">
+              <div class="menu-sec">Reviews · diffect</div>
+              <button class="menu-row sel" role="menuitem"><span class="m-name mono">main..HEAD</span><span class="m-sub">+1.2k −380 · 0/46</span><span class="m-check">✓</span></button>
+              <button class="menu-row" role="menuitem"><span class="m-name mono">v0.4.0..HEAD</span><span class="m-sub">12/40</span></button>
+              <button class="menu-row" role="menuitem"><span class="m-name">Local changes</span><span class="m-sub">3 files</span></button>
+              <div class="menu-sec">Reviews · pi-skills</div>
+              <button class="menu-row" role="menuitem"><span class="m-name mono">staged</span><span class="m-sub">+57 −112 · resolved</span></button>
+              <button class="menu-disclosure" data-disc><span class="disc-caret">▸</span>Archived <span class="badge">1</span></button>
+              <div class="disc-body hidden">
+                <button class="menu-row" role="menuitem"><span class="m-name mono">feat/virtual-tree..main</span><span class="m-sub">revive</span></button>
+              </div>
+              <div class="menu-sec">Edit comparison</div>
+              <div class="cmp-edit">
+                <span class="compare-label">base</span>
+                <button class="mini-ref">main <span class="caret">▾</span></button>
+                <span class="compare-sep">…</span>
+                <span class="compare-label">compare</span>
+                <button class="mini-ref">HEAD <span class="caret">▾</span></button>
+              </div>
+              <div class="menu-foot"><button class="menu-add neutral">See all in inbox →</button></div>
+            </div>
+          </span>
+        </span>
+
+        <span class="local-targets" title="Review scope (live)">
+          <button class="target-mode active">All</button>
+          <button class="target-mode">Staged</button>
+          <button class="target-mode">Unstaged</button>
+        </span>
+
+        <span class="rh-grow"></span>
+        <span class="rdelta"><span class="plus">+1.2k</span> <span class="minus">−380</span></span>
+        <span class="metaitem">0/46 reviewed</span>
+        <span class="bar-div"></span>
+        <div class="seg" data-control="diffmode"><button class="on">Unified</button><button>Split</button></div>
+        <button class="btn primary nowrap">Finish review <kbd class="kbd-on-accent">⌘⏎</kbd></button>
+      </div>
+      <div class="frame-body">
+        <aside class="files-rail">
+          <div class="files-head">
+            <span class="fh-bar"><i></i></span>
+            <span class="fh-count">0/46</span>
+          </div>
+          <div class="files-sub">
+            <div class="seg sm" data-control="scope"><button class="on">Diff</button><button>All files</button></div>
+            <div class="seg sm" data-control="treeview"><button class="on">Tree</button><button>List</button></div>
+          </div>
+          <div class="ftree">
+            <div class="trow dir"><span class="tg">▾</span><span class="tn">packages/web/src</span></div>
+            <div class="trow dir indent"><span class="tg">▾</span><span class="tn">components</span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">Topbar.tsx</span><span class="tstat"><span class="a">+84</span> <span class="d">−20</span></span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">Sidebar.tsx</span><span class="tstat"><span class="a">+120</span> <span class="d">−44</span></span></div>
+            <div class="trow indent" style="padding-left:38px"><span class="tg">›</span><span class="tn">TargetPicker.tsx</span><span class="tstat"><span class="a">+60</span> <span class="d">−8</span></span></div>
+            <div class="trow indent"><span class="tg">›</span><span class="tn">App.tsx</span><span class="tstat"><span class="a">+40</span> <span class="d">−12</span></span></div>
+            <div class="trow dir"><span class="tg">▾</span><span class="tn">packages/core/src</span></div>
+            <div class="trow indent"><span class="tg">›</span><span class="tn">server.ts</span><span class="tstat"><span class="a">+90</span> <span class="d">−30</span></span></div>
+          </div>
+        </aside>
+        <div class="diff-ghost"><div class="dg-inner">
+          <div class="dg-fh">packages/web/src/components/Topbar.tsx <span class="dg-d"><span class="plus" style="color:var(--add-ink)">+84</span> <span class="minus" style="color:var(--del-ink)">−20</span></span></div>
+          <div class="dg-code">
+            <div class="dg-ln"><span>41</span><code>export function CrumbBar({ project, review }: Props) {</code></div>
+            <div class="dg-ln"><span>42</span><code>  return &lt;div className="topbar"&gt;</code></div>
+            <div class="dg-ln add"><span>43</span><code>    &lt;ProjectCrumb /&gt; › &lt;ReviewCrumb /&gt;</code></div>
+            <div class="dg-ln add"><span>44</span><code>    &lt;LocalTargets /&gt;</code></div>
+            <div class="dg-ln del"><span>45</span><code>    {/* sidebar nav deleted — files only */}</code></div>
+          </div>
+        </div><div class="dg-scrim"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="pickbar">
+    <span class="pb-label">Lean toward:</span>
+    <button class="pb-opt" data-pick="A">A · Scope Pill</button>
+    <button class="pb-opt" data-pick="B">B · Compare Bar</button>
+    <button class="pb-opt" data-pick="C">C · Two-Crumb</button>
+    <span class="pb-spacer"></span>
+    <span class="pb-note" id="pb-note">Click the pickers in each bar — they're live.</span>
+  </div>
+
+</div>
+
+<script>
+  // popovers: one open at a time; click-out closes
+  document.querySelectorAll('[data-pop]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const host = btn.closest('.has-pop');
+      const open = host.classList.contains('open');
+      document.querySelectorAll('.has-pop.open').forEach(h => h.classList.remove('open'));
+      if (!open) host.classList.add('open');
+    });
+  });
+  document.querySelectorAll('.menu').forEach(m => m.addEventListener('click', e => e.stopPropagation()));
+  document.addEventListener('click', () => document.querySelectorAll('.has-pop.open').forEach(h => h.classList.remove('open')));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.has-pop.open').forEach(h => h.classList.remove('open')); });
+
+  // menu rows: mark selection within their section group, then close
+  document.querySelectorAll('.menu-row').forEach(row => {
+    row.addEventListener('click', e => {
+      e.stopPropagation();
+      const menu = row.closest('.menu');
+      menu.querySelectorAll('.menu-row.sel').forEach(r => {
+        r.classList.remove('sel');
+        const c = r.querySelector('.m-check'); if (c) c.remove();
+      });
+      row.classList.add('sel');
+      if (!row.querySelector('.m-check')) row.insertAdjacentHTML('beforeend', '<span class="m-check">✓</span>');
+      setTimeout(() => row.closest('.has-pop').classList.remove('open'), 80);
+    });
+  });
+
+  // archived disclosure
+  document.querySelectorAll('[data-disc]').forEach(b => {
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      const body = b.nextElementSibling;
+      const hidden = body.classList.toggle('hidden');
+      b.querySelector('.disc-caret').textContent = hidden ? '▸' : '▾';
+    });
+  });
+
+  // compare-menu: recents <-> edit (replacing pane, single overlay)
+  document.querySelectorAll('[data-goto]').forEach(b => {
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      const menu = b.closest('.menu');
+      const target = b.dataset.goto;
+      menu.querySelectorAll('.cm-pane').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== target));
+    });
+  });
+
+  // theme toggle (keeps all instances in sync)
+  document.querySelectorAll('[data-control="theme"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const root = document.documentElement;
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    });
+  });
+
+  // density segmented control (global)
+  document.querySelectorAll('[data-control="density"] button').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      document.documentElement.dataset.density = btn.dataset.d;
+      document.querySelectorAll('[data-control="density"] button').forEach(x => x.classList.toggle('on', x.dataset.d === btn.dataset.d));
+    });
+  });
+
+  // local-targets + per-bar segmented toggles (visual state only)
+  document.querySelectorAll('.local-targets').forEach(group => {
+    group.querySelectorAll('.target-mode').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        group.querySelectorAll('.target-mode').forEach(x => x.classList.toggle('active', x === btn));
+      });
+    });
+  });
+  document.querySelectorAll('.seg[data-control="diffmode"], .seg[data-control="scope"], .seg[data-control="treeview"]').forEach(group => {
+    group.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        group.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn));
+      });
+    });
+  });
+  document.querySelectorAll('[data-seg-wrap]').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); btn.classList.toggle('on'); });
+  });
+
+  // pickbar
+  const note = document.getElementById('pb-note');
+  const labels = { A: 'Scope Pill + Session Switcher', B: 'Compare Bar', C: 'Two-Crumb Minimal' };
+  document.querySelectorAll('.pb-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pb-opt').forEach(x => x.classList.toggle('on', x === btn));
+      note.textContent = 'Leaning toward ' + labels[btn.dataset.pick] + ' — tell me to build it out.';
+    });
+  });
+</script>
+</body>
+</html>

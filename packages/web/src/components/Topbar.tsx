@@ -5,6 +5,12 @@ import { Icon } from "../icons.js";
 import { DiffStat } from "./DiffStat.js";
 import { TargetPicker } from "./TargetPicker.js";
 
+/** Trailing path segment of a workspace root, for the N≥2 crumb. */
+function basename(p: string): string {
+  const parts = p.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? p;
+}
+
 interface Props {
   workspace: WorkspaceInfo;
   repo: string;
@@ -62,6 +68,10 @@ export function Topbar({
 }: Props) {
   const activeRepo = workspace.repos.find((r) => r.name === repo);
   const hasFiles = filesChanged > 0;
+  // N≥2 ⇒ a workspace holding several repos: show the workspace folder as a crumb
+  // plus a repo count, so the header names the whole modules view. N=1 keeps the
+  // bare repo path exactly as before — the single repo IS the workspace.
+  const multiRepo = workspace.repos.length > 1;
 
   return (
     <header className="rheader">
@@ -78,9 +88,20 @@ export function Topbar({
         <span className="brand" aria-hidden="true">
           d
         </span>
-        <span className="workspace-path" title={workspace.root}>
-          {workspace.root}
-        </span>
+        {multiRepo ? (
+          <>
+            <span className="workspace-crumb" title={workspace.root}>
+              {basename(workspace.root)}
+            </span>
+            <span className="repo-count">
+              {workspace.repos.length} repos
+            </span>
+          </>
+        ) : (
+          <span className="workspace-path" title={workspace.root}>
+            {workspace.root}
+          </span>
+        )}
         {hasFiles && <DiffStat additions={additions} deletions={deletions} />}
 
         <span className="rh-grow" />
@@ -106,18 +127,27 @@ export function Topbar({
       </div>
 
       <div className="rh-row rh-subbar">
-        <TargetPicker
-          repo={repo}
-          worktree={worktree}
-          defaultBranch={activeRepo?.defaultBranch ?? null}
-          target={target}
-          onTarget={onTarget}
-          refs={refs}
-        />
-        {hasFiles && (
-          <span className="metaitem" title="Files marked viewed">
-            {viewedCount}/{filesChanged} viewed
-          </span>
+        {/* N≥2: the per-repo base…compare picker lives in each module header and
+            viewed progress is per-module (header) + the rail rollup, so the subbar
+            drops both as redundant — only the global diff-display controls remain.
+            N=1 keeps the picker + viewed count exactly as before; the single repo's
+            review controls have nowhere else to live. */}
+        {!multiRepo && (
+          <>
+            <TargetPicker
+              repo={repo}
+              worktree={worktree}
+              defaultBranch={activeRepo?.defaultBranch ?? null}
+              target={target}
+              onTarget={onTarget}
+              refs={refs}
+            />
+            {hasFiles && (
+              <span className="metaitem" title="Files marked viewed">
+                {viewedCount}/{filesChanged} viewed
+              </span>
+            )}
+          </>
         )}
 
         <span className="rh-grow" />

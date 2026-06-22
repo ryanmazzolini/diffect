@@ -202,14 +202,16 @@ export interface ArchivedSession {
   note: string | null;
 }
 
-/** Branches, tags, and recent commits for the compare picker (GET /repos/:repo/refs). */
+/** Branches, tags, remote-tracking branches, and recent commits for the compare picker (GET /repos/:repo/refs). */
 export interface RefList {
   branches: string[];
   tags: string[];
+  /** Remote-tracking branches by short name (e.g. "origin/main"); excludes each remote's symbolic HEAD alias. */
+  remotes: string[];
   commits: { sha: string; subject: string }[];
 }
 
-export type RefSearchKind = "branch" | "tag" | "commit";
+export type RefSearchKind = "branch" | "tag" | "remote" | "commit";
 
 /** One selectable base/compare point returned by `GET /repos/:repo/refs/search`. */
 export interface RefSearchOption {
@@ -227,6 +229,8 @@ export interface RefSearchOption {
 export interface RefSearchResults {
   query: string;
   branches: RefSearchOption[];
+  /** Remote-tracking branches (kind "remote"); value is the short name, e.g. "origin/main". */
+  remotes: RefSearchOption[];
   tags: RefSearchOption[];
   commits: RefSearchOption[];
 }

@@ -49,8 +49,8 @@ html[data-density="compact"] {
   --border-strong: #34353b;
   --text: #e7e8ea;
   --ink: #e7e8ea;
-  --muted: #8a8c93;
-  --faint: #787b83;
+  --muted: #8c8e95;
+  --faint: #80838a;
   --add-bg: #11231a;
   --add-line: #2ea04322;
   --add-ink: #5fc07c;
@@ -58,12 +58,12 @@ html[data-density="compact"] {
   --del-line: #f8514922;
   --del-ink: #e0716c;
   --accent: #6a76e0;
-  --accent-strong: #6a76e0;
+  --accent-strong: #5e6ad2;
   --accent-ink: #aab2f0;
   --accent-soft: rgba(106, 118, 224, 0.16);
   --must-fix: #f0716a;
   --suggestion: #e0a23a;
-  --nit: #8a8c93;
+  --nit: #8c8e95;
   --question: #8a92e8;
   --success: #3fb950;
   --target: #2a2410; /* commented-line highlight */
@@ -86,6 +86,15 @@ html[data-density="compact"] {
   --diffstat-add: var(--add-ink);
   --diffstat-del: var(--del-ink);
   --diffstat-neutral: var(--border);
+  /* Module lifecycle dots — deliberately NON-indigo (amber/green/gray) so the
+   * status hue never collides with the indigo accent or comment severities. */
+  --st-progress: #e0a23a;
+  --st-ready: #3fb950;
+  --st-idle: var(--faint);
+  /* Quiet per-module wayfinding bands — low-sat, outside the status + indigo
+   * budgets, just enough to tell two stacked modules apart at a glance. */
+  --band-1: #6c7280;
+  --band-2: #80726c;
 }
 
 [data-theme="light"] {
@@ -99,8 +108,8 @@ html[data-density="compact"] {
   --border-strong: #d6d6da;
   --text: #1a1a1e;
   --ink: #1a1a1e;
-  --muted: #6f6f78;
-  --faint: #8e8e96;
+  --muted: #686871;
+  --faint: #737379;
   --add-bg: #eaf6ee;
   --add-line: #2ea04322;
   --add-ink: #1a7f37;
@@ -134,6 +143,11 @@ html[data-density="compact"] {
   --diffstat-add: var(--add-ink);
   --diffstat-del: var(--del-ink);
   --diffstat-neutral: var(--border);
+  --st-progress: #d8932f;
+  --st-ready: #2fa75a;
+  --st-idle: var(--faint);
+  --band-1: #8a8f9c;
+  --band-2: #9c8f8a;
 }
 
 * {
@@ -421,6 +435,27 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 36vw;
+}
+/* N≥2 identity: the workspace folder as a crumb plus a repo count, naming the
+ * whole modules view. N=1 keeps the bare .workspace-path above, unchanged. */
+.workspace-crumb {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28vw;
+}
+.repo-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+  flex: none;
 }
 /* Total diffstat in the identity row. */
 .rdelta {
@@ -778,8 +813,8 @@ body {
   border-right: 1px solid var(--border);
   background: var(--bg-elev);
   overflow: auto;
-  padding: 10px 8px;
-  font-size: 13px;
+  padding: 8px 6px;
+  font-size: 12.5px;
 }
 /* Drag handle between the sidebar and the diff/thread area. */
 .sidebar-resizer {
@@ -798,19 +833,79 @@ body {
   align-items: center;
   justify-content: space-between;
   text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  letter-spacing: 0.08em;
   color: var(--muted);
-  margin: 12px 4px 6px;
+  margin: 10px 4px 5px;
 }
 .sidebar-head:first-child {
   margin-top: 0;
 }
+.open-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 8px;
+}
+.open-review {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion);
+}
+.open-review:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.open-review.active {
+  background: var(--nav-sel);
+  color: var(--text);
+}
+.open-review-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.open-review-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.open-review-name,
+.open-review-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-review-name {
+  color: var(--text);
+  font-weight: 600;
+}
+.open-review-meta,
+.open-review-empty {
+  color: var(--faint);
+  font-size: 11px;
+}
+.open-review-empty {
+  padding: 3px 8px 8px;
+}
 .ws-path {
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  margin: 4px 4px 2px;
+  font-size: 10.5px;
+  color: var(--faint);
+  margin: 3px 7px 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -821,12 +916,13 @@ body {
   align-items: baseline;
   gap: 6px;
   width: 100%;
+  min-height: 28px;
   text-align: left;
   background: transparent;
   border: none;
   color: var(--text);
   cursor: pointer;
-  padding: 3px 8px;
+  padding: 3px 7px;
   border-radius: var(--r);
   overflow: hidden;
   white-space: nowrap;
@@ -870,7 +966,7 @@ body {
   color: var(--text);
   font-weight: 600;
 }
-/* Review sessions: the sidebar's primary review entries, nested under the repo. */
+/* Special review buckets nested under the active space (normal reviews live above). */
 .session-list {
   padding-left: 12px;
 }
@@ -1044,6 +1140,39 @@ body {
   border-color: var(--accent);
   color: var(--accent-ink);
 }
+.connections-head {
+  margin-top: 12px;
+}
+.connections-list {
+  margin: 0 0 10px;
+}
+.connection-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 3px 7px;
+  color: var(--muted);
+  border-radius: var(--r);
+}
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.connection-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-meta {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
 /* Diff | All-files scope toggle — a single spanning segmented control. */
 .file-mode-toggle {
   display: flex;
@@ -1061,8 +1190,8 @@ body {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 4px 7px;
+  font-size: 11.5px;
   transition: background var(--motion), color var(--motion);
 }
 .file-mode:last-child {
@@ -1260,6 +1389,398 @@ body {
   padding: 12px;
   background: var(--bg);
 }
+
+/* ============ Modules view (N≥2): stacked per-repo diff sections ============ */
+/* The shared scroll container for the stacked layout — mirrors .diff-pane so j/k
+ * scrolling and the scroll-spy IntersectionObserver behave identically, but it
+ * holds N repo modules instead of one bare diff. At N=1 the app renders a single
+ * .diff-pane instead, so none of this applies. */
+.modmain {
+  overflow: auto;
+  padding: 0 0 80px;
+  /* The page backdrop shows through the gap between modules, so each module
+   * reads as its own panel-colored block rather than one continuous sheet. */
+  background: var(--bg);
+}
+/* One repo's section: a sticky header over its diff body, separated from the
+ * next module by an 8px band of the page backdrop so the two stacked modules
+ * read as distinct surfaces (not a hairline, which looked like a file split). */
+.module {
+  background: var(--panel);
+  border-bottom: 8px solid var(--bg);
+}
+.module:last-child {
+  border-bottom: 0;
+}
+/* The module header parks ABOVE file headers in the sticky stack so a file's
+ * own sticky header never rides over the repo name it belongs under. Two lines:
+ * line 1 names the repo, line 2 carries the inline target picker. */
+.mod-head {
+  position: sticky;
+  top: 0;
+  z-index: calc(var(--z-sticky) + 1);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+/* Accent the scroll-focused module's header — the one currently driving the
+ * active repo (thread pane, sidebar). */
+.module.focused > .mod-head {
+  background: var(--panel-2);
+}
+/* Line 1: band spine, collapse caret, repo identity, right-aligned diffstat. */
+.mh-line1 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 14px 0 0;
+}
+/* A full-height wayfinding spine: a low-sat hue per module (m1/m2), alternating
+ * down the stack so two adjacent modules read as distinct surfaces. Independent
+ * of focus, which is shown by the header background. */
+.mod-band {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  background: var(--border-strong);
+}
+.module.m1 .mod-band {
+  background: var(--band-1);
+}
+.module.m2 .mod-band {
+  background: var(--band-2);
+}
+.mh-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--motion), transform var(--motion);
+}
+.mh-caret:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.module.collapsed .mh-caret {
+  transform: rotate(-90deg);
+}
+.mh-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+.mh-repo .fork {
+  color: var(--faint);
+  flex: none;
+}
+.mod-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The status crumb: the module's durable lifecycle state, sat between the repo
+ * name and the right-aligned stats. STATE only — neutral chrome; the colored dot
+ * is the sole hue, deliberately non-indigo (amber/green/gray), so it never
+ * competes with the accent. */
+.mh-state-wrap {
+  flex: none;
+  display: inline-flex;
+}
+.status-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font-size: 12.5px;
+}
+.sc-label {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sc-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.sc-dot.progress {
+  background: var(--st-progress);
+}
+.sc-dot.ready {
+  background: var(--st-ready);
+}
+/* Idle reads as an outline, not a fill — "a diff exists, nothing reviewed yet". */
+.sc-dot.idle {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+  border: 1.5px solid var(--st-idle);
+}
+.sc-dot.arch {
+  background: var(--st-idle);
+}
+/* The inline finish/revive affordance — a quiet ghost button, never indigo. */
+.sc-ready-action {
+  margin-left: 2px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion);
+}
+.sc-ready-action:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* The passive module rail: a compact repo navigator pinned atop the sidebar in
+ * the stacked (N≥2) layout, above the file tree. Read-only wayfinding — a colored
+ * lifecycle dot + a numberless viewed bar per repo, then a workspace rollup. Click
+ * a row to jump to that module; the rail never drives scroll-focus itself. */
+.module-rail {
+  padding: 10px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.mr-title {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px 9px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mr-collapse {
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--motion);
+}
+.mr-collapse:hover {
+  color: var(--text);
+}
+.mr-row {
+  display: block;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 7px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background var(--motion);
+}
+.mr-row:hover {
+  background: var(--panel-2);
+}
+/* Neutral "you are here" fill — calm, no hard edge, matching the rest of the app's
+ * active rows; the scroll-spy, not this rail, owns which module is active. */
+.mr-row.here {
+  background: var(--active);
+}
+.mr-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.mr-caret {
+  flex: none;
+  color: var(--faint);
+}
+.mr-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mr-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+}
+.mr-dot.idle {
+  /* Hollow ring — "not started" reads as an outline, distinct from archived's
+     solid gray. The global box-sizing:border-box keeps the 7px outer matching
+     the 6px solid dots within a pixel. */
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  background: transparent;
+  border: 1.5px solid var(--st-idle);
+}
+.mr-dot.progress {
+  background: var(--st-progress);
+}
+.mr-dot.ready {
+  background: var(--st-ready);
+}
+.mr-dot.arch {
+  background: var(--st-idle);
+}
+/* Numberless progress — a neutral fill, indented to sit under the name. */
+.mr-bar {
+  display: block;
+  height: 4px;
+  margin: 7px 0 0 19px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.mr-bar i {
+  display: block;
+  height: 100%;
+  background: var(--border-strong);
+}
+.mr-rollup {
+  margin-top: 9px;
+  padding: 11px 6px 2px;
+  border-top: 1px solid var(--border);
+}
+.rollup-label {
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Read-only proportional bar — deliberately NOT a segmented toggle. */
+.rollup-bar {
+  display: flex;
+  height: 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.rollup-bar .rb {
+  height: 100%;
+}
+.rollup-bar .rb.ready {
+  background: var(--st-ready);
+}
+.rollup-bar .rb.progress {
+  background: var(--st-progress);
+}
+.rollup-bar .rb.idle {
+  background: var(--border-strong);
+}
+.rollup-bar .rb.arch {
+  background: var(--st-idle);
+}
+.rollup-tally {
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.tally-row {
+  display: block;
+}
+.tally-row .swatch {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+.tally-row .swatch.ready {
+  background: var(--st-ready);
+}
+.tally-row .swatch.progress {
+  background: var(--st-progress);
+}
+.tally-row .swatch.idle {
+  background: var(--border-strong);
+}
+.tally-row .swatch.arch {
+  background: var(--st-idle);
+}
+
+/* Right-aligned per-module stats: diffstat, file count, viewed progress. */
+.mh-stat {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+}
+.mh-files,
+.mh-viewed {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.mh-viewed {
+  color: var(--faint);
+}
+.mod-empty {
+  font-style: italic;
+}
+/* Line 2: the inline base…compare target picker, dashed-separated from line 1.
+ * Hidden when the module is collapsed. */
+.mh-line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 5px 14px 5px 17px;
+  border-top: 1px dashed var(--border);
+  flex-wrap: wrap;
+}
+.module.collapsed .mh-line2 {
+  display: none;
+}
+/* The module picker is a touch denser than the topbar's. */
+.mh-line2 .target-picker {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* File sticky headers inside a module park just below the two-line module header
+ * (line 1 = 38px + line 2 = 40px) rather than at the container top, so both stay
+ * visible while scrolling. */
+.modmain .file-header {
+  top: 78px;
+}
+/* When a module is collapsed its line 2 is hidden, so the body (and its file
+ * headers) are gone too — no offset adjustment needed. */
 
 .loading,
 .empty,

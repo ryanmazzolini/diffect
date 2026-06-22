@@ -16,7 +16,6 @@ import type {
 } from "@diffect/shared";
 import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
-import { relativeTime } from "../relativeTime.js";
 import {
   buildPathTree,
   type FileTreeEntry,
@@ -24,21 +23,6 @@ import {
   type TreeFileStatus,
   type TreeNode,
 } from "../fileTree.js";
-
-/**
- * One iteration in a session's timeline: a distinct git snapshot that threads
- * were filed against. Derived client-side from the active session's threads plus
- * the live snapshot — there is no persisted snapshot history. `ordinal` is the
- * 1-based age order, `firstAt` the earliest comment time (null for the live
- * snapshot when no thread sits on it yet), `isCurrent` flags the live one.
- */
-export interface SnapshotGroup {
-  id: string;
-  count: number;
-  ordinal: number;
-  firstAt: string | null;
-  isCurrent: boolean;
-}
 
 interface Props {
   entries: WorkspaceEntry[];
@@ -52,17 +36,14 @@ interface Props {
   /** Sessions archived for the active repo (durable + optimistic), routed to a
    *  collapsed Archived group instead of the active list. */
   archivedSessions: ReviewSession[];
-  /** Ids of archived sessions — excluded from the active session list. */
-  archivedIds: Set<string>;
+  /** Archived session ids by repo — excluded from Open reviews. */
+  archivedIdsByRepo: Map<string, Set<string>>;
   /** Thread count per session id, plus the legacy bucket under `__legacy__`. */
   sessionCounts: Map<string, number>;
   /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
   legacyCount: number;
-  /** Iterations of the active session, newest knowledge of the live snapshot
-   * included; rendered as a static timeline under the active session entry. */
-  snapshotGroups: SnapshotGroup[];
   onSelectRepo: (repo: string) => void;
-  onSelectSession: (session: ReviewSession) => void;
+  onSelectReview: (repo: string, session: ReviewSession) => void;
   onReviveSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
   files: DiffFile[];
@@ -78,11 +59,6 @@ interface Props {
 
 const LEGACY_KEY = "__legacy__";
 const EMPTY_SESSIONS: ReviewSession[] = [];
-const EMPTY_GROUPS: SnapshotGroup[] = [];
-// Session ids aren't repo-qualified (sha256 of kind+baseRef+headRef), so two
-// repos on the same branch names can share one. The archived-id filter is only
-// meaningful for the active repo, so non-active repos get an empty set.
-const EMPTY_IDS: Set<string> = new Set();
 
 /**
  * Human label for a review session, derived from its scope so the client never
@@ -144,12 +120,11 @@ export const Sidebar = memo(function Sidebar({
   showUnscoped,
   extraSessions,
   archivedSessions,
-  archivedIds,
+  archivedIdsByRepo,
   sessionCounts,
   legacyCount,
-  snapshotGroups,
   onSelectRepo,
-  onSelectSession,
+  onSelectReview,
   onReviveSession,
   onSelectLegacy,
   files,
@@ -168,11 +143,29 @@ export const Sidebar = memo(function Sidebar({
     [allFiles, fileMode, files],
   );
   const showFiles = files.length > 0 || allFiles.length > 0;
+  const spaceCount = useMemo(
+    () => entries.reduce((n, ws) => n + ws.repos.length, 0),
+    [entries],
+  );
 
   return (
     <nav className="sidebar">
       <div className="sidebar-head">
-        <span>Workspaces</span>
+        <span>Open reviews</span>
+      </div>
+      <OpenReviewList
+        entries={entries}
+        activeRepo={repo}
+        currentSession={currentSession}
+        showUnscoped={showUnscoped}
+        extraSessions={extraSessions}
+        archivedIdsByRepo={archivedIdsByRepo}
+        sessionCounts={sessionCounts}
+        onSelectReview={onSelectReview}
+      />
+
+      <div className="sidebar-head">
+        <span>Spaces</span>
         <button
           type="button"
           className="icon-btn sidebar-add"
@@ -197,22 +190,28 @@ export const Sidebar = memo(function Sidebar({
               key={r.name}
               repo={r}
               active={r.name === repo}
-              currentSession={currentSession}
               showUnscoped={showUnscoped}
-              extraSessions={r.name === repo ? extraSessions : EMPTY_SESSIONS}
               archivedSessions={r.name === repo ? archivedSessions : EMPTY_SESSIONS}
-              archivedIds={r.name === repo ? archivedIds : EMPTY_IDS}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
-              snapshotGroups={r.name === repo ? snapshotGroups : EMPTY_GROUPS}
               onSelectRepo={onSelectRepo}
-              onSelectSession={onSelectSession}
               onReviveSession={onReviveSession}
               onSelectLegacy={onSelectLegacy}
             />
           ))}
         </div>
       ))}
+
+      <div className="sidebar-head connections-head">
+        <span>Connections</span>
+      </div>
+      <div className="connections-list">
+        <div className="connection-row">
+          <span className="connection-dot" aria-hidden="true" />
+          <span className="connection-name">Local</span>
+          <span className="connection-meta">{spaceCount} spaces</span>
+        </div>
+      </div>
 
       {showFiles && (
         <>
@@ -341,6 +340,92 @@ function ReviewProgress({
         {done}/{total}
       </span>
     </button>
+  );
+}
+
+function OpenReviewList({
+  entries,
+  activeRepo,
+  currentSession,
+  showUnscoped,
+  extraSessions,
+  archivedIdsByRepo,
+  sessionCounts,
+  onSelectReview,
+}: {
+  entries: WorkspaceEntry[];
+  activeRepo: string;
+  currentSession: string | null;
+  showUnscoped: boolean;
+  extraSessions: ReviewSession[];
+  archivedIdsByRepo: Map<string, Set<string>>;
+  sessionCounts: Map<string, number>;
+  onSelectReview: (repo: string, session: ReviewSession) => void;
+}) {
+  const reviews = useMemo(() => {
+    const out: Array<{ repo: string; session: ReviewSession }> = [];
+    for (const ws of entries) {
+      for (const r of ws.repos) {
+        const sessions = [...r.sessions];
+        if (r.name === activeRepo) {
+          const byId = new Map(sessions.map((s, i) => [s.id, i]));
+          for (const extra of extraSessions) {
+            const i = byId.get(extra.id);
+            if (i === undefined) {
+              byId.set(extra.id, sessions.length);
+              sessions.push(extra);
+            } else {
+              sessions[i] = extra;
+            }
+          }
+        }
+        const seen = new Set<string>();
+        const archivedIds = archivedIdsByRepo.get(r.name);
+        for (const session of sessions) {
+          if (seen.has(session.id)) continue;
+          if (archivedIds?.has(session.id)) continue;
+          seen.add(session.id);
+          out.push({ repo: r.name, session });
+        }
+      }
+    }
+    return out;
+  }, [entries, activeRepo, extraSessions, archivedIdsByRepo]);
+
+  if (reviews.length === 0) {
+    return <div className="open-review-empty">No open reviews</div>;
+  }
+
+  return (
+    <div className="open-review-list">
+      {reviews.map(({ repo, session }) => {
+        const active = !showUnscoped && repo === activeRepo && session.id === currentSession;
+        const detail = sessionDetail(session.scope);
+        const title = `${repo} · ${sessionLabel(session.scope)}`;
+        const count = repo === activeRepo ? (sessionCounts.get(session.id) ?? 0) : 0;
+        return (
+          <Fragment key={`${repo}:${session.id}`}>
+            <button
+              type="button"
+              className={`open-review ${active ? "active" : ""}`}
+              onClick={() => onSelectReview(repo, session)}
+              title={detail ? `${title} — ${detail}` : title}
+            >
+              <span className="open-review-dot" aria-hidden="true" />
+              <span className="open-review-copy">
+                <span className="open-review-name">{sessionLabel(session.scope)}</span>
+                <span className="open-review-meta">
+                  {repo}
+                  {detail ? ` · ${detail}` : ""}
+                </span>
+              </span>
+              {count > 0 && <span className="session-count">{count}</span>}
+            </button>
+
+          </Fragment>
+        );
+      })}
+    </div>
   );
 }
 
@@ -615,31 +700,21 @@ function statusIcon(status: TreeFileStatus): IconName {
 function RepoItem({
   repo,
   active,
-  currentSession,
   showUnscoped,
-  extraSessions,
   archivedSessions,
-  archivedIds,
   sessionCounts,
   legacyCount,
-  snapshotGroups,
   onSelectRepo,
-  onSelectSession,
   onReviveSession,
   onSelectLegacy,
 }: {
   repo: RepoSummary;
   active: boolean;
-  currentSession: string | null;
   showUnscoped: boolean;
-  extraSessions: ReviewSession[];
   archivedSessions: ReviewSession[];
-  archivedIds: Set<string>;
   sessionCounts: Map<string, number>;
   legacyCount: number;
-  snapshotGroups: SnapshotGroup[];
   onSelectRepo: (repo: string) => void;
-  onSelectSession: (session: ReviewSession) => void;
   onReviveSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
 }) {
@@ -651,24 +726,9 @@ function RepoItem({
     repo.worktrees[0]?.branch ??
     null;
 
-  // Server-derived sessions first (the stable per-worktree work reviews), then
-  // any reconstructed/ad-hoc ones, deduped so a stale server feed can't double a
-  // reconstructed entry, and with archived ids removed — the archive overlay wins
-  // the bucket, routing them to the Archived group instead of the active list. A
-  // lone session needs no list — the repo row is it; the list appears once there's
-  // a real choice (multiple sessions, legacy threads, or anything archived).
-  const sessions = useMemo(() => {
-    const seen = new Set<string>();
-    const out: ReviewSession[] = [];
-    for (const s of [...repo.sessions, ...extraSessions]) {
-      if (archivedIds.has(s.id) || seen.has(s.id)) continue;
-      seen.add(s.id);
-      out.push(s);
-    }
-    return out;
-  }, [repo.sessions, extraSessions, archivedIds]);
-  const showSessions =
-    active && (sessions.length > 1 || legacyCount > 0 || archivedSessions.length > 0);
+  // Normal active reviews live in the Open reviews list above. Keep only the
+  // special buckets here so the Spaces list stays compact.
+  const showSessions = active && (legacyCount > 0 || archivedSessions.length > 0);
 
   return (
     <div>
@@ -687,26 +747,6 @@ function RepoItem({
       </button>
       {showSessions && (
         <div className="session-list">
-          {sessions.map((s) => {
-            const sessionActive = !showUnscoped && s.id === currentSession;
-            return (
-              <Fragment key={s.id}>
-                <SessionItem
-                  label={sessionLabel(s.scope)}
-                  detail={sessionDetail(s.scope)}
-                  count={sessionCounts.get(s.id) ?? 0}
-                  active={sessionActive}
-                  onClick={() => onSelectSession(s)}
-                />
-                {/* The iteration timeline only earns its space once a session has
-                    more than one snapshot; a single-iteration session is just the
-                    entry itself. */}
-                {sessionActive && snapshotGroups.length > 1 && (
-                  <SessionTimeline groups={snapshotGroups} />
-                )}
-              </Fragment>
-            );
-          })}
           {legacyCount > 0 && (
             <SessionItem
               label="Unscoped"
@@ -842,39 +882,5 @@ function SessionItem({
       {head}
       {countPill}
     </button>
-  );
-}
-
-/**
- * Static iteration timeline for the active session: one row per snapshot the
- * session's threads were filed against, oldest first, the live snapshot marked
- * "Current". Informational only — rows are not interactive; the marker on each
- * thread card is what tells a comment apart from the current iteration.
- */
-function SessionTimeline({ groups }: { groups: SnapshotGroup[] }) {
-  return (
-    <ul className="session-timeline" aria-label="Review iterations">
-      {groups.map((g) => (
-        <li
-          key={g.id}
-          className={`timeline-row${g.isCurrent ? " current" : ""}`}
-          title={g.isCurrent ? "The iteration on screen now" : `Iteration ${g.ordinal}`}
-        >
-          <span className="timeline-dot" aria-hidden="true" />
-          <span className="timeline-label">
-            {g.isCurrent ? "Current" : `Iteration ${g.ordinal}`}
-          </span>
-          {g.firstAt && <span className="timeline-when">{relativeTime(g.firstAt)}</span>}
-          {g.count > 0 && (
-            <span
-              className="session-count"
-              title={`${g.count} comment${g.count === 1 ? "" : "s"} filed here`}
-            >
-              {g.count}
-            </span>
-          )}
-        </li>
-      ))}
-    </ul>
   );
 }

@@ -2,6 +2,16 @@ import type { DiffFile, FileStatus } from "@diffect/shared";
 
 export type TreeFileStatus = FileStatus | "unchanged";
 
+/**
+ * DOM id of a file's diff block, repo-qualified so stacked modules (one diff list
+ * per repo, sharing a scroll container) never collide on a shared path. The
+ * scroll-spy reads the file path back off the element's `data-path` attribute
+ * rather than parsing this id, since both `repo` and `path` may contain hyphens.
+ */
+export function fileElementId(repo: string, path: string): string {
+  return `file-${repo}-${path}`;
+}
+
 export interface FileTreeEntry {
   path: string;
   status: TreeFileStatus;
