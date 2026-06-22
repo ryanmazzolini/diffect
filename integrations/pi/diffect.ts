@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -13,15 +13,23 @@ const MAX_OUTPUT = 50_000;
 
 type Command = { command: string; args: string[] };
 type RepoLocation = { repo: string; worktree: string | null };
+type ReviewWorkspace = { workspaceRoot: string; anchorRoot: string | null };
+type SessionLike = {
+  sessionManager?: {
+    getBranch?: () => unknown[];
+    getEntries?: () => unknown[];
+  };
+};
+type CwdContext = SessionLike & { cwd: string };
 
 export default function diffectExtension(pi: ExtensionAPI) {
   pi.registerCommand("diffect", {
-    description: "Open the current repo in Diffect",
+    description: "Open the current Diffect workspace",
     handler: async (args, ctx) => {
       try {
-        const target = args.trim() || DEFAULT_TARGET;
-        const { url } = await diffectUrl(pi, ctx.cwd, target);
-        await openUrl(pi, ctx.cwd, url);
+        const parsed = parseCommandArgs(args, ctx.cwd);
+        const { url, workspaceRoot } = await diffectUrl(pi, ctx, parsed.target, parsed.workspace);
+        await openUrl(pi, workspaceRoot, url);
         ctx.ui.notify(`Diffect: ${url}`, "info");
       } catch (err) {
         ctx.ui.notify(`Diffect failed: ${messageOf(err)}`, "error");
@@ -32,16 +40,23 @@ export default function diffectExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "diffect_open",
     label: "Diffect Open",
-    description: "Start/reuse diffectd and return the current repo's Diffect URL.",
-    promptSnippet: "Open the current repo in Diffect's local review UI",
+    description: "Start/reuse diffectd and return the current workspace's Diffect URL.",
+    promptSnippet: "Open the current workspace in Diffect's local review UI",
     parameters: Type.Object({
       target: Type.Optional(Type.String({ description: "Review target, default: work" })),
+      workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
       open: Type.Optional(Type.Boolean({ description: "Also ask the OS to open the URL" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const { url, repoRoot } = await diffectUrl(pi, ctx.cwd, params.target ?? DEFAULT_TARGET, signal);
-      if (params.open) await openUrl(pi, ctx.cwd, url, signal);
-      return textResult(url, { url, repoRoot });
+      const { url, workspaceRoot, repoRoot } = await diffectUrl(
+        pi,
+        ctx,
+        params.target ?? DEFAULT_TARGET,
+        params.workspace,
+        signal,
+      );
+      if (params.open) await openUrl(pi, workspaceRoot, url, signal);
+      return textResult(url, { url, workspaceRoot, repoRoot });
     },
   });
 
@@ -57,13 +72,14 @@ export default function diffectExtension(pi: ExtensionAPI) {
       status: Type.Optional(Type.String({ description: "open, closed, or all; default: open" })),
       repo: Type.Optional(Type.String()),
       worktree: Type.Optional(Type.String()),
+      workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const args = ["list", "--json"];
       if (params.status && params.status !== "all") args.push("--status", params.status);
       if (params.repo) args.push("--repo", params.repo);
       if (params.worktree) args.push("--worktree", params.worktree);
-      return runDiffectTool(pi, ctx.cwd, args, signal);
+      return runDiffectTool(pi, ctx, args, signal, params.workspace);
     },
   });
 
@@ -79,7 +95,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
     async execute(_id, params, signal, _onUpdate, ctx) {
       return runDiffectTool(
         pi,
-        ctx.cwd,
+        ctx,
         ["reply", params.id, "--agent", params.agent ?? "pi", "--body", params.body],
         signal,
       );
@@ -98,7 +114,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
     async execute(_id, params, signal, _onUpdate, ctx) {
       return runDiffectTool(
         pi,
-        ctx.cwd,
+        ctx,
         ["resolve", params.id, "--agent", params.agent ?? "pi", "--summary", params.summary],
         signal,
       );
@@ -137,39 +153,182 @@ export default function diffectExtension(pi: ExtensionAPI) {
       ];
       if (params.endLine !== undefined) args.push("--end-line", String(params.endLine));
       if (params.severity) args.push("--severity", params.severity);
-      return runDiffectTool(pi, ctx.cwd, args, signal);
+      return runDiffectTool(pi, ctx, args, signal);
     },
   });
 }
 
 async function diffectUrl(
   pi: ExtensionAPI,
-  cwd: string,
+  ctx: CwdContext,
   target: string,
+  explicitWorkspace?: string,
   signal?: AbortSignal,
-): Promise<{ url: string; repoRoot: string }> {
-  const repoRoot = await gitRoot(pi, cwd, signal);
-  const baseUrl = await ensureDaemon(pi, repoRoot, signal);
-  await registerWorkspace(baseUrl, repoRoot, signal);
-  const loc = await locateRepo(baseUrl, repoRoot, signal);
+): Promise<{ url: string; workspaceRoot: string; repoRoot: string | null }> {
+  const { workspaceRoot, anchorRoot } = await resolveReviewWorkspace(
+    pi,
+    ctx,
+    explicitWorkspace,
+    signal,
+  );
+  const baseUrl = await ensureDaemon(pi, workspaceRoot, signal);
+  await registerWorkspace(baseUrl, workspaceRoot, signal);
+  const loc = await locateRepo(baseUrl, workspaceRoot, anchorRoot, signal);
   const q = new URLSearchParams({ repo: loc.repo, target });
   if (loc.worktree) q.set("worktree", loc.worktree);
-  return { url: `${baseUrl}/?${q}`, repoRoot };
+  return { url: `${baseUrl}/?${q}`, workspaceRoot, repoRoot: anchorRoot };
 }
 
-async function gitRoot(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<string> {
+function parseCommandArgs(raw: string, cwd: string): { target: string; workspace?: string } {
+  const tokens = splitArgs(raw.trim());
+  if (tokens[0] === "--workspace" || tokens[0] === "-w") {
+    return { workspace: tokens[1], target: tokens.slice(2).join(" ") || DEFAULT_TARGET };
+  }
+  if (tokens[0] && existsSync(resolveUserPath(tokens[0], cwd))) {
+    return { workspace: tokens[0], target: tokens.slice(1).join(" ") || DEFAULT_TARGET };
+  }
+  return { target: raw.trim() || DEFAULT_TARGET };
+}
+
+function splitArgs(raw: string): string[] {
+  return raw.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((s) => s.replace(/^(["'])(.*)\1$/, "$2")) ?? [];
+}
+
+async function resolveReviewWorkspace(
+  pi: ExtensionAPI,
+  ctx: CwdContext,
+  explicitWorkspace?: string,
+  signal?: AbortSignal,
+): Promise<ReviewWorkspace> {
+  const candidates = [
+    explicitWorkspace ? resolveUserPath(explicitWorkspace, ctx.cwd) : null,
+    ctx.cwd,
+    ...sessionPathCandidates(ctx).map((p) => resolveUserPath(p, ctx.cwd)),
+  ];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const key = resolve(candidate);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const workspace = await workspaceFromPath(pi, key, signal);
+    if (workspace) return workspace;
+  }
+  throw new Error(
+    `No git repo or Diffect workspace found from ${explicitWorkspace ?? ctx.cwd}. Pass /diffect --workspace /path/to/workspace.`,
+  );
+}
+
+async function workspaceFromPath(
+  pi: ExtensionAPI,
+  path: string,
+  signal?: AbortSignal,
+): Promise<ReviewWorkspace | null> {
+  const dir = await existingDirectory(path);
+  if (!dir) return null;
+
+  const repoRoot = await gitTopLevel(pi, dir, signal);
+  if (repoRoot) {
+    const parent = dirname(repoRoot);
+    // ticket-worktree layout: .../worktrees/<ticket>/<repo>
+    if (basename(dirname(parent)) === "worktrees" && (await firstWorkingTree(parent))) {
+      return { workspaceRoot: parent, anchorRoot: repoRoot };
+    }
+    return { workspaceRoot: repoRoot, anchorRoot: repoRoot };
+  }
+
+  return (await firstWorkingTree(dir)) ? { workspaceRoot: dir, anchorRoot: null } : null;
+}
+
+async function existingDirectory(path: string): Promise<string | null> {
+  const info = await stat(path).catch(() => null);
+  if (!info) return null;
+  return info.isDirectory() ? path : dirname(path);
+}
+
+async function gitTopLevel(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<string | null> {
   const r = await pi.exec("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     signal,
     timeout: 5_000,
   });
-  if (r.code !== 0) throw new Error(r.stderr.trim() || "not inside a git repository");
-  return r.stdout.trim();
+  return r.code === 0 && r.stdout.trim() ? resolve(r.stdout.trim()) : null;
+}
+
+async function firstWorkingTree(root: string): Promise<string | null> {
+  const found: string[] = [];
+  const seen = new Set<string>();
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > 2 || found.length > 0) return;
+    if (await isWorkingTree(dir)) {
+      const abs = resolve(dir);
+      if (!seen.has(abs)) {
+        seen.add(abs);
+        found.push(abs);
+      }
+      return;
+    }
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name === "node_modules" || e.name === ".git" || e.name === ".reviews") continue;
+      await walk(join(dir, e.name), depth + 1);
+      if (found.length > 0) return;
+    }
+  }
+
+  await walk(root, 0);
+  return found[0] ?? null;
+}
+
+async function isWorkingTree(dir: string): Promise<boolean> {
+  return Boolean(await stat(join(dir, ".git")).catch(() => null));
+}
+
+function sessionPathCandidates(ctx: SessionLike): string[] {
+  const entries = safeSessionEntries(ctx).slice(-80).reverse();
+  const paths: string[] = [];
+  for (const entry of entries) {
+    const strings: string[] = [];
+    collectStrings(entry, strings, 200);
+    for (const text of strings) paths.push(...extractPaths(text));
+  }
+  return [...new Set(paths)];
+}
+
+function safeSessionEntries(ctx: SessionLike): unknown[] {
+  try {
+    return ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function collectStrings(value: unknown, out: string[], limit: number): void {
+  if (out.length >= limit) return;
+  if (typeof value === "string") {
+    out.push(value);
+  } else if (Array.isArray(value)) {
+    for (const v of value) collectStrings(v, out, limit);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) collectStrings(v, out, limit);
+  }
+}
+
+function extractPaths(text: string): string[] {
+  return (text.match(/(?:~\/|\/)[^\s"'`<>),;]+/g) ?? [])
+    .map((p) => p.replace(/[.!?:}\]]+$/, ""))
+    .filter(Boolean);
+}
+
+function resolveUserPath(path: string, cwd: string): string {
+  const expanded = path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+  return isAbsolute(expanded) ? resolve(expanded) : resolve(cwd, expanded);
 }
 
 async function ensureDaemon(
   pi: ExtensionAPI,
-  repoRoot: string,
+  workspaceRoot: string,
   signal?: AbortSignal,
 ): Promise<string> {
   const configured = process.env.DIFFECT_URL?.trim();
@@ -181,7 +340,7 @@ async function ensureDaemon(
   const marked = await liveMarkedDaemon(signal);
   if (marked) return marked;
 
-  if (await openDiffectApp(pi, repoRoot, undefined, signal)) {
+  if (await openDiffectApp(pi, workspaceRoot, undefined, signal)) {
     for (let i = 0; i < 80; i++) {
       await sleep(100, signal);
       const url = await liveMarkedDaemon(signal);
@@ -191,8 +350,8 @@ async function ensureDaemon(
 
   if (await isDiffectd(DEFAULT_BASE_URL, signal)) return DEFAULT_BASE_URL;
 
-  const daemon = await findDaemon(pi, repoRoot, signal);
-  spawn(daemon.command, [...daemon.args, "--workspace", repoRoot, "--host", "127.0.0.1", "--port", "0"], {
+  const daemon = await findDaemon(pi, workspaceRoot, signal);
+  spawn(daemon.command, [...daemon.args, "--workspace", workspaceRoot, "--host", "127.0.0.1", "--port", "0"], {
     detached: true,
     stdio: "ignore",
     env: process.env,
@@ -217,11 +376,11 @@ async function isDiffectd(baseUrl: string, signal?: AbortSignal): Promise<boolea
   }
 }
 
-async function registerWorkspace(baseUrl: string, repoRoot: string, signal?: AbortSignal) {
+async function registerWorkspace(baseUrl: string, workspaceRoot: string, signal?: AbortSignal) {
   const res = await fetch(`${baseUrl}/workspaces`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: repoRoot }),
+    body: JSON.stringify({ path: workspaceRoot }),
     signal,
   });
   if (!res.ok) throw new Error(await responseError(res));
@@ -229,34 +388,44 @@ async function registerWorkspace(baseUrl: string, repoRoot: string, signal?: Abo
 
 async function locateRepo(
   baseUrl: string,
-  repoRoot: string,
+  workspaceRoot: string,
+  anchorRoot: string | null,
   signal?: AbortSignal,
 ): Promise<RepoLocation> {
-  const res = await fetch(`${baseUrl}/workspace`, { signal });
+  const res = await fetch(`${baseUrl}/workspaces`, { signal });
   if (!res.ok) throw new Error(await responseError(res));
-  const workspace = (await res.json()) as {
+  const entries = (await res.json()) as Array<{
+    path: string;
     repos?: Array<{ name: string; root: string; worktrees?: Array<{ name: string; root: string }> }>;
-  };
-  const wanted = real(repoRoot);
-  for (const repo of workspace.repos ?? []) {
-    if (real(repo.root) === wanted) return { repo: repo.name, worktree: null };
-    for (const wt of repo.worktrees ?? []) {
-      if (real(wt.root) === wanted) return { repo: repo.name, worktree: wt.name };
+  }>;
+  const wantedWorkspace = real(workspaceRoot);
+  const entry = entries.find((e) => real(e.path) === wantedWorkspace);
+  const repos = entry?.repos ?? [];
+  if (anchorRoot) {
+    const wanted = real(anchorRoot);
+    for (const repo of repos) {
+      if (real(repo.root) === wanted) return { repo: repo.name, worktree: null };
+      for (const wt of repo.worktrees ?? []) {
+        if (real(wt.root) === wanted) return { repo: repo.name, worktree: wt.name };
+      }
     }
   }
-  throw new Error(`diffectd does not list repo ${repoRoot}`);
+  const first = repos[0];
+  if (first) return { repo: first.name, worktree: null };
+  throw new Error(`diffectd does not list workspace ${workspaceRoot}`);
 }
 
 async function runDiffectTool(
   pi: ExtensionAPI,
-  cwd: string,
+  ctx: CwdContext,
   args: string[],
   signal?: AbortSignal,
+  explicitWorkspace?: string,
 ) {
-  const repoRoot = await gitRoot(pi, cwd, signal);
-  const cli = await findCli(pi, repoRoot, signal);
+  const { workspaceRoot } = await resolveReviewWorkspace(pi, ctx, explicitWorkspace, signal);
+  const cli = await findCli(pi, workspaceRoot, signal);
   const r = await pi.exec(cli.command, [...cli.args, ...args], {
-    cwd: repoRoot,
+    cwd: workspaceRoot,
     signal,
     timeout: 30_000,
   });

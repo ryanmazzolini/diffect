@@ -21,7 +21,7 @@ test("comment on an unchanged file from the all-files sidebar", async ({ page })
 
   // The thread renders inline in the full-file preview and in the inbox.
   await expect(
-    preview.locator(".inline-thread .body", { hasText: "typo on this line" }).first(),
+    preview.locator(".inline-thread .c-text", { hasText: "typo on this line" }).first(),
   ).toBeVisible();
   await expect(page.locator(".thread-pane")).toContainText("typo on this line");
 });

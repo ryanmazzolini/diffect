@@ -63,6 +63,20 @@ describe("computeWorkDiff (work target)", () => {
     expect(byPath["new.txt"]!.deletions).toBe(0);
   });
 
+  it("marks an untracked file that lacks a trailing newline", async () => {
+    await init(dir);
+    await writeFile(join(dir, "base.txt"), "x\n");
+    await git(dir, ["add", "."]);
+    await git(dir, ["commit", "-m", "base"]);
+    await writeFile(join(dir, "nonl.txt"), "a\nb"); // no trailing newline
+
+    const diff = await computeWorkDiff(dir);
+    const f = diff.files.find((x) => x.path === "nonl.txt")!;
+    const last = f.hunks[0]!.lines.at(-1)!;
+    expect(last.text).toBe("b");
+    expect(last.noNewline).toBe(true);
+  });
+
   it("handles a repo with no commits (everything untracked)", async () => {
     await init(dir);
     await mkdir(join(dir, "sub"), { recursive: true });
@@ -84,6 +98,25 @@ describe("computeWorkDiff (work target)", () => {
     const paths = (await computeWorkDiff(dir)).files.map((f) => f.path);
     expect(paths).toContain("a.txt");
     expect(paths.some((p) => p.startsWith(".reviews"))).toBe(false);
+  });
+
+  it("marks tracked files that match gitignore rules", async () => {
+    await init(dir);
+    await writeFile(join(dir, ".gitignore"), "ignored.txt\n");
+    await writeFile(join(dir, "ignored.txt"), "base\n");
+    await writeFile(join(dir, "normal.txt"), "base\n");
+    await git(dir, ["add", ".gitignore", "normal.txt"]);
+    await git(dir, ["add", "-f", "ignored.txt"]);
+    await git(dir, ["commit", "-m", "base"]);
+
+    await writeFile(join(dir, "ignored.txt"), "changed\n");
+    await writeFile(join(dir, "normal.txt"), "changed\n");
+
+    const byPath = Object.fromEntries(
+      (await computeWorkDiff(dir)).files.map((f) => [f.path, f]),
+    );
+    expect(byPath["ignored.txt"]!.ignored).toBe(true);
+    expect(byPath["normal.txt"]!.ignored).toBeUndefined();
   });
 });
 
@@ -154,6 +187,26 @@ describe("parseUnifiedDiff", () => {
       ].join("\n"),
     );
     expect(deleted[0]).toMatchObject({ path: "d.txt", status: "deleted" });
+  });
+
+  it("records the no-newline-at-EOF marker on the line it follows", () => {
+    const [file] = parseUnifiedDiff(
+      [
+        "diff --git a/f.txt b/f.txt",
+        "--- a/f.txt",
+        "+++ b/f.txt",
+        "@@ -1,2 +1,2 @@",
+        " keep",
+        "-old",
+        "\\ No newline at end of file",
+        "+new",
+        "\\ No newline at end of file",
+      ].join("\n"),
+    );
+    const lines = file!.hunks[0]!.lines;
+    expect(lines.find((l) => l.type === "del")!.noNewline).toBe(true);
+    expect(lines.find((l) => l.type === "add")!.noNewline).toBe(true);
+    expect(lines.find((l) => l.type === "context")!.noNewline).toBeUndefined();
   });
 
   it("parses renames", () => {
