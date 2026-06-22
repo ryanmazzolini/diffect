@@ -170,7 +170,7 @@ export async function refreshAnchors(
 
   const out: Thread[] = [];
   for (const t of threads) {
-    if (!t.file || t.line === null || !t.side || !t.anchor) {
+    if (!t.repo || !t.file || t.line === null || !t.side || !t.anchor) {
       out.push(t);
       continue;
     }

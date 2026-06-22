@@ -8,7 +8,8 @@ import { test, expect } from "@playwright/test";
 
 test("loads the workspace and shows the work diff", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".brand")).toHaveText("Diffect");
+  // The brand is now a compact "d" logo mark; this is just a shell-loaded smoke check.
+  await expect(page.locator(".brand")).toBeVisible();
   // The fixture has a modified calc.js in the default work target.
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
   await expect(page.locator("tbody.diff-table-body tr").first()).toBeVisible();
@@ -28,7 +29,7 @@ test("creates an inline comment and it appears in the inbox", async ({ page }) =
 
   // The new thread shows inline and in the thread inbox.
   await expect(
-    page.locator(".inline-thread .body", { hasText: "overflow for large ints" }).first(),
+    page.locator(".inline-thread .c-text", { hasText: "overflow for large ints" }).first(),
   ).toBeVisible();
   await expect(page.locator(".thread-pane")).toContainText("overflow for large ints");
 });
@@ -72,10 +73,14 @@ test("resolves a thread and the open count drops", async ({ page }) => {
 test("switches review target without errors", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
+  // Scope to the Topbar's local-mode control: selecting a target also surfaces that
+  // review as a sidebar session-item sharing the same accessible name, so an
+  // unscoped getByRole would be ambiguous once the diff settles.
+  const modes = page.locator(".local-targets");
   // The fixture has no staged changes, so Staged shows the empty state.
-  await page.getByRole("button", { name: "Staged changes", exact: true }).click();
+  await modes.getByRole("button", { name: "Staged changes", exact: true }).click();
   await expect(page.locator(".empty")).toContainText("No changes");
   // Back to all local changes restores the diff.
-  await page.getByRole("button", { name: "All local changes", exact: true }).click();
+  await modes.getByRole("button", { name: "All local changes", exact: true }).click();
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
 });
