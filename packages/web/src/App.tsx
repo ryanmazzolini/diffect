@@ -7,7 +7,6 @@ import type {
   RepoDiff,
   RepoSummary,
   ReviewSession,
-  ReviewTargetKind,
   Thread,
   ThreadStatus,
   WorkspaceEntry,
@@ -84,19 +83,6 @@ function loadDismissedComplete(): Set<string> {
 // The session-count map key standing in for legacy (pre-scope, sessionId === null)
 // threads, which share the dedicated unscoped bucket rather than any one session.
 const LEGACY_KEY = "__legacy__";
-// Kinds whose session identity is worktree/branch-independent, so a scope stored
-// on a thread round-trips to the same diff-route id no matter what's checked out
-// now. `work`/`ref` resolve `headRef` from the LIVE branch (reviews/scope.ts), so
-// a session reconstructed for a branch no longer checked out would re-stamp a
-// *different* id on selection — orphaning itself. We therefore only reconstruct
-// these stable kinds from thread scopes; live `work` sessions come from the server
-// (one per checked-out worktree), and the active diff is always selectable on its own.
-const STABLE_KINDS: ReadonlySet<ReviewTargetKind> = new Set([
-  "range",
-  "staged",
-  "unstaged",
-]);
-
 // Signature of a (worktree, target) selection — the cache key the diff fan-out
 // dedupes on, so scroll-focus promoting a repo to active doesn't refetch a module
 // whose selection is already loaded.
@@ -260,13 +246,29 @@ export function App() {
   workspaceRef.current = workspace;
   const selectionsRef = useRef(selections);
   selectionsRef.current = selections;
+  const activeEntry = useMemo(
+    () => entries.find((ws) => ws.repos.some((r) => r.name === repo)) ?? null,
+    [entries, repo],
+  );
+  const visibleRepos = activeEntry?.repos ?? workspace?.repos ?? [];
+  const visibleWorkspace = useMemo<WorkspaceInfo | null>(
+    () =>
+      workspace
+        ? {
+            ...workspace,
+            root: activeEntry?.path ?? workspace.root,
+            repos: visibleRepos,
+          }
+        : null,
+    [activeEntry?.path, visibleRepos, workspace],
+  );
   // N≥2 ⇒ the stacked "modules view" (one diff list per repo, sharing a scroll
   // container); N≤1 ⇒ the literal single pane. A presentational switch only: every
   // selector/effect below still treats the single repo as the N=1 case.
-  const stacked = (workspace?.repos.length ?? 0) > 1;
+  const stacked = visibleRepos.length > 1;
   // Stable key over the repo *names* so the module scroll-spy re-subscribes when the
   // set of repos changes, but not when a diff/selection inside one does.
-  const repoNamesKey = JSON.stringify(workspace?.repos.map((r) => r.name) ?? []);
+  const repoNamesKey = JSON.stringify(visibleRepos.map((r) => r.name));
 
   // Write the unscoped/pending session UI for a given repo; both no-op when the
   // value is unchanged so a redundant settle (e.g. clearing an already-clear pending
@@ -332,6 +334,7 @@ export function App() {
       window.clearTimeout(programmaticRepoTimerRef.current);
     }
     setRepo(name);
+    setReselectTick((n) => n + 1);
     diffPaneRef.current
       ?.querySelector(`.module[data-repo="${cssEscape(name)}"]`)
       ?.scrollIntoView({ block: "start" });
@@ -340,6 +343,13 @@ export function App() {
       programmaticRepoTimerRef.current = null;
     }, 350);
   }, []);
+  const selectWorkspace = useCallback(
+    (path: string) => {
+      const firstRepo = entries.find((ws) => ws.path === path)?.repos[0]?.name;
+      if (firstRepo) selectRepo(firstRepo);
+    },
+    [entries, selectRepo],
+  );
   const initialDeepLinkScrolled = useRef(false);
   useEffect(() => {
     const name = initialDeepLink.repo;
@@ -380,7 +390,7 @@ export function App() {
     setViewedByRepo((prev) => {
       let changed = false;
       const next = new Map(prev);
-      for (const r of workspace.repos) {
+      for (const r of visibleRepos) {
         const sel = selections.get(r.name) ?? {
           worktree: null,
           target: DEFAULT_TARGET,
@@ -400,7 +410,7 @@ export function App() {
       }
       return changed ? next : prev;
     });
-  }, [workspace, selections, viewedKeyFor]);
+  }, [workspace, visibleRepos, selections, viewedKeyFor]);
 
   // Toggle "viewed" for a file in a SPECIFIC repo (a stacked module passes its own
   // repo, so a click writes the right set even if scroll-focus hasn't yet promoted
@@ -585,23 +595,6 @@ export function App() {
     [repo, changeTargetFor],
   );
 
-  // Selecting a review entry sets that repo's checkout + target together so the
-  // diff route re-resolves to the session; the top Open reviews list can jump
-  // across spaces, while the legacy active-repo path delegates to the same helper.
-  const selectSessionFor = useCallback(
-    (forRepo: string, s: ReviewSession) => {
-      selectRepo(forRepo);
-      setUnscopedFor(forRepo, false);
-      setPendingFor(forRepo, s.id);
-      setSelections((prev) =>
-        new Map(prev).set(forRepo, { worktree: s.worktree, target: s.scope.target }),
-      );
-      // Force a reload even if (worktree, target) are unchanged, so the optimistic
-      // highlight always has a settle to retire it and a failed session can retry.
-      setReselectTick((n) => n + 1);
-    },
-    [selectRepo, setUnscopedFor, setPendingFor],
-  );
   const selectLegacy = useCallback(() => {
     if (!repo) return;
     setPendingFor(repo, null);
@@ -698,12 +691,12 @@ export function App() {
   // checkout change, exactly as the active-only effect it replaced.
   useEffect(() => {
     if (!workspace) return;
-    for (const r of workspace.repos) {
+    for (const r of visibleRepos) {
       const wt = selections.get(r.name)?.worktree ?? null;
       if (loadedRefsRef.current.get(r.name) === (wt ?? "")) continue;
       void refreshRefsFor(r.name, wt);
     }
-  }, [workspace, selections, refreshRefsFor]);
+  }, [workspace, visibleRepos, selections, refreshRefsFor]);
 
   // Load every tracked file for the sidebar's All files mode.
   useEffect(() => {
@@ -727,7 +720,7 @@ export function App() {
     if (!workspace) return;
     const forced = lastReselectRef.current !== reselectTick;
     lastReselectRef.current = reselectTick;
-    for (const r of workspace.repos) {
+    for (const r of visibleRepos) {
       const sel = selections.get(r.name) ?? {
         worktree: null,
         target: DEFAULT_TARGET,
@@ -737,7 +730,7 @@ export function App() {
       if (loaded && !(isFocused && forced)) continue;
       void refreshDiffFor(r.name, sel);
     }
-  }, [workspace, repo, selections, reselectTick, refreshDiffFor]);
+  }, [workspace, visibleRepos, repo, selections, reselectTick, refreshDiffFor]);
 
   const sidebarFiles = useMemo(() => diff?.files ?? EMPTY_FILES, [diff]);
   // Render the diff in the same order the sidebar tree shows, so the active-file
@@ -749,11 +742,9 @@ export function App() {
   const headerFiles = useMemo(
     () =>
       stacked
-        ? (workspace?.repos ?? []).flatMap(
-            (r) => diffs.get(r.name)?.files ?? EMPTY_FILES,
-          )
+        ? visibleRepos.flatMap((r) => diffs.get(r.name)?.files ?? EMPTY_FILES)
         : sidebarFiles,
-    [stacked, workspace, diffs, sidebarFiles],
+    [stacked, visibleRepos, diffs, sidebarFiles],
   );
 
   // Scroll-spy: highlight the file in the sidebar that's at the top of the diff
@@ -902,15 +893,14 @@ export function App() {
     () => entries.flatMap((e) => e.repos).find((r) => r.name === repo) ?? null,
     [entries, repo],
   );
-  const serverSessions = activeRepo?.sessions ?? EMPTY_SESSIONS;
 
   // The active diff's own session, stabilized so a benign refetch re-creating the
   // RepoDiff (and a fresh `scope` object) doesn't churn the sidebar's session memo.
   // The session id is sha256(kind+baseRef+headRef), so an equal id guarantees an
   // equal symbolic scope; only `baseSha` (commit drift) and `target` (the raw
   // spec, e.g. `a..b` vs `a...b`) can differ for one id. baseSha is unused by the
-  // label or navigation, but `target` drives re-selection (selectSessionFor →
-  // setSelections), so we re-key the cache on it too — keeping identity stable while
+  // label or navigation, but `target` drives re-selection, so we re-key the cache
+  // on it too — keeping identity stable while
   // (id, worktree, target) hold, and refreshing the scope when any of them move.
   const diffSessionId = diff?.sessionId ?? null;
   // Stabilized per repo: each module's diff carries its own session, cached so a
@@ -938,16 +928,6 @@ export function App() {
     }
   }
   const diffSession = repo ? (diffSessionsRef.current.get(repo) ?? null) : null;
-
-  // The set of worktree names currently checked out, used to drop a thread's
-  // stored worktree if it has since been removed (selecting it would otherwise
-  // 404 the diff route, which keeps a truthy worktree). Stable kinds round-trip
-  // to the same id regardless of worktree, so falling back to the primary keeps
-  // the thread reachable.
-  const liveWorktrees = useMemo(
-    () => new Set((activeRepo?.worktrees ?? []).map((w) => w.name)),
-    [activeRepo],
-  );
 
   // The archived-session list: the durable set (from the per-repo log, on the
   // workspace summary, carrying each session's scope) with optimistic overrides
@@ -1006,40 +986,6 @@ export function App() {
       return changed ? next : prev;
     });
   }, [serverArchivedByRepo]);
-
-  // Sessions not server-derived but still reachable: reconstructed from threads'
-  // stored scopes (so a range/staged review you've commented on stays a sidebar
-  // entry after you navigate away), plus the active diff's own scope (so a fresh
-  // review with no threads yet is selectable). Only *stable* kinds are
-  // reconstructed — `work`/`ref` ids depend on the live branch, so a stored one
-  // for a branch no longer checked out can't round-trip (see STABLE_KINDS). The
-  // active diff is exempt only because it IS the live resolution (its id is
-  // whatever the route just stamped), so selecting it re-stamps the same id.
-  // Tradeoff (Decision #3): a `work`/`ref` review you commented on but aren't
-  // currently viewing has no sidebar entry until you re-target it — its threads
-  // aren't lost (still in the log, counted), just not surfaced as a session.
-  // All deduped by id against the server set and each other.
-  const extraSessions = useMemo<ReviewSession[]>(() => {
-    if (!repo) return EMPTY_SESSIONS;
-    const serverIds = new Set(serverSessions.map((s) => s.id));
-    const byId = new Map<string, ReviewSession>();
-    for (const t of threads) {
-      if (t.repo !== repo || t.sessionId === null || t.scope === null) continue;
-      if (!STABLE_KINDS.has(t.scope.kind)) continue;
-      if (serverIds.has(t.sessionId) || byId.has(t.sessionId)) continue;
-      const worktree =
-        t.worktree !== null && !liveWorktrees.has(t.worktree) ? null : t.worktree;
-      byId.set(t.sessionId, { id: t.sessionId, scope: t.scope, worktree });
-    }
-    if (
-      diffSession &&
-      !serverIds.has(diffSession.id) &&
-      !byId.has(diffSession.id)
-    ) {
-      byId.set(diffSession.id, diffSession);
-    }
-    return byId.size ? [...byId.values()] : EMPTY_SESSIONS;
-  }, [repo, threads, serverSessions, diffSession, liveWorktrees]);
 
   // Thread count per session id (and the legacy bucket) over ALL the repo's
   // threads — the sidebar badge reads "how many comments live under this review",
@@ -1119,7 +1065,7 @@ export function App() {
       string,
       { state: Lifecycle; session: ReviewSession | null }
     >();
-    for (const r of workspace?.repos ?? []) {
+    for (const r of visibleRepos) {
       const name = r.name;
       const d = diffs.get(name) ?? null;
       const rShow = showUnscopedByRepo.get(name) ?? false;
@@ -1155,7 +1101,7 @@ export function App() {
     }
     return map;
   }, [
-    workspace,
+    visibleRepos,
     diffs,
     threads,
     showUnscopedByRepo,
@@ -1172,7 +1118,7 @@ export function App() {
   // old `scopedThreads`.
   const scopedThreadsByRepo = useMemo(() => {
     const map = new Map<string, Thread[]>();
-    for (const r of workspace?.repos ?? []) {
+    for (const r of visibleRepos) {
       const rShow = showUnscopedByRepo.get(r.name) ?? false;
       const rPending = pendingByRepo.get(r.name) ?? null;
       // Mirror the active-repo `currentSession` derivation, per repo.
@@ -1191,7 +1137,7 @@ export function App() {
       );
     }
     return map;
-  }, [threads, workspace, showUnscopedByRepo, pendingByRepo, diffs]);
+  }, [threads, visibleRepos, showUnscopedByRepo, pendingByRepo, diffs]);
   // Active repo's scoped threads — byte-identical to the pre-lift `scopedThreads`
   // (its internal rSession for the active repo equals `currentSession`). Drives the
   // active-repo views: the iteration timeline, the per-file thread badges, the
@@ -1204,11 +1150,9 @@ export function App() {
   const paneThreads = useMemo(
     () =>
       stacked
-        ? (workspace?.repos ?? []).flatMap(
-            (r) => scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS,
-          )
+        ? visibleRepos.flatMap((r) => scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS)
         : scopedThreads,
-    [stacked, workspace, scopedThreadsByRepo, scopedThreads],
+    [stacked, visibleRepos, scopedThreadsByRepo, scopedThreads],
   );
   const byStatus = useMemo(
     () =>
@@ -1249,7 +1193,7 @@ export function App() {
       return sidebarFiles.reduce((n, f) => (viewed.has(f.path) ? n + 1 : n), 0);
     }
     let n = 0;
-    for (const r of workspace?.repos ?? []) {
+    for (const r of visibleRepos) {
       const rv = viewedByRepo.get(r.name);
       if (!rv) continue;
       for (const f of diffs.get(r.name)?.files ?? EMPTY_FILES) {
@@ -1257,7 +1201,7 @@ export function App() {
       }
     }
     return n;
-  }, [stacked, sidebarFiles, viewed, workspace, viewedByRepo, diffs]);
+  }, [stacked, sidebarFiles, viewed, visibleRepos, viewedByRepo, diffs]);
   const threadCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const t of scopedThreads) {
@@ -1266,6 +1210,12 @@ export function App() {
     }
     return counts;
   }, [scopedThreads]);
+
+  const changedFilesByRepo = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [name, d] of diffs) map.set(name, d.files.length);
+    return map;
+  }, [diffs]);
 
   // A failed fetch no longer replaces the whole app; it shows a dismissible
   // banner so the current view stays usable and recoverable.
@@ -1290,7 +1240,7 @@ export function App() {
     </div>
   );
 
-  if (!workspace || !repo) {
+  if (!workspace || !visibleWorkspace || !repo) {
     return (
       <div className="app">
         {toast}
@@ -1308,7 +1258,7 @@ export function App() {
         <AddWorkspaceDialog onClose={() => setAddOpen(false)} onAdded={setEntries} />
       )}
       <Topbar
-        workspace={workspace}
+        workspace={visibleWorkspace}
         repo={repo}
         worktree={worktree}
         target={target}
@@ -1335,16 +1285,16 @@ export function App() {
           <>
             <Sidebar
               entries={entries}
+              activeWorkspacePath={activeEntry?.path ?? visibleWorkspace.root}
               repo={repo}
               currentSession={currentSession}
               showUnscoped={showUnscoped}
-              extraSessions={extraSessions}
+              changedFilesByRepo={changedFilesByRepo}
               archivedSessions={archivedSessions}
-              archivedIdsByRepo={archivedByRepo}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
+              onSelectWorkspace={selectWorkspace}
               onSelectRepo={selectRepo}
-              onSelectReview={selectSessionFor}
               onReviveSession={reviveSession}
               onSelectLegacy={selectLegacy}
               files={sidebarFiles}
@@ -1370,7 +1320,7 @@ export function App() {
             snapshot context, so the diff side always sees its own repo's snapshot. */}
         {stacked ? (
           <section className="modmain" ref={diffPaneRef}>
-            {workspace.repos.map((r, i) => (
+            {visibleRepos.map((r, i) => (
               <ModuleSection
                 key={r.name}
                 stacked

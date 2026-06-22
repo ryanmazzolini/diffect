@@ -1,5 +1,4 @@
 import {
-  Fragment,
   memo,
   useEffect,
   useMemo,
@@ -26,24 +25,23 @@ import {
 
 interface Props {
   entries: WorkspaceEntry[];
+  activeWorkspacePath: string;
   repo: string;
-  /** Id of the session the active diff resolved to — drives the entry highlight. */
+  /** Id of the session the active diff resolved to — remounts the file tree on review switch. */
   currentSession: string | null;
   /** The unscoped/legacy bucket is open; no session entry is highlighted. */
   showUnscoped: boolean;
-  /** Sessions reachable beyond the server-derived set (reconstructed/ad-hoc). */
-  extraSessions: ReviewSession[];
+  /** Changed file count per repo, when that repo's diff has loaded. */
+  changedFilesByRepo: Map<string, number>;
   /** Sessions archived for the active repo (durable + optimistic), routed to a
    *  collapsed Archived group instead of the active list. */
   archivedSessions: ReviewSession[];
-  /** Archived session ids by repo — excluded from Open reviews. */
-  archivedIdsByRepo: Map<string, Set<string>>;
   /** Thread count per session id, plus the legacy bucket under `__legacy__`. */
   sessionCounts: Map<string, number>;
   /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
   legacyCount: number;
+  onSelectWorkspace: (path: string) => void;
   onSelectRepo: (repo: string) => void;
-  onSelectReview: (repo: string, session: ReviewSession) => void;
   onReviveSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
   files: DiffFile[];
@@ -111,20 +109,20 @@ function allFileEntries(paths: string[], changed: DiffFile[]): FileTreeEntry[] {
   return [...byPath.values()];
 }
 
-/** Left navigation: workspaces → repos → review sessions, plus the changed-file
- * tree. Memoized so a diff/thread change doesn't re-render the whole nav. */
+/** Left navigation: spaces/threads → repos → files. Memoized so a diff/thread
+ * change doesn't re-render the whole nav. */
 export const Sidebar = memo(function Sidebar({
   entries,
+  activeWorkspacePath,
   repo,
   currentSession,
   showUnscoped,
-  extraSessions,
+  changedFilesByRepo,
   archivedSessions,
-  archivedIdsByRepo,
   sessionCounts,
   legacyCount,
+  onSelectWorkspace,
   onSelectRepo,
-  onSelectReview,
   onReviveSession,
   onSelectLegacy,
   files,
@@ -143,29 +141,19 @@ export const Sidebar = memo(function Sidebar({
     [allFiles, fileMode, files],
   );
   const showFiles = files.length > 0 || allFiles.length > 0;
-  const spaceCount = useMemo(
-    () => entries.reduce((n, ws) => n + ws.repos.length, 0),
-    [entries],
+  const activeWorkspace = useMemo(
+    () =>
+      entries.find((ws) => ws.path === activeWorkspacePath) ??
+      entries.find((ws) => ws.repos.some((r) => r.name === repo)) ??
+      null,
+    [activeWorkspacePath, entries, repo],
   );
+  const spaceCount = entries.length;
 
   return (
     <nav className="sidebar">
       <div className="sidebar-head">
-        <span>Open reviews</span>
-      </div>
-      <OpenReviewList
-        entries={entries}
-        activeRepo={repo}
-        currentSession={currentSession}
-        showUnscoped={showUnscoped}
-        extraSessions={extraSessions}
-        archivedIdsByRepo={archivedIdsByRepo}
-        sessionCounts={sessionCounts}
-        onSelectReview={onSelectReview}
-      />
-
-      <div className="sidebar-head">
-        <span>Spaces</span>
+        <span>Spaces / Threads</span>
         <button
           type="button"
           className="icon-btn sidebar-add"
@@ -176,31 +164,37 @@ export const Sidebar = memo(function Sidebar({
           <Icon name="plus" size={14} />
         </button>
       </div>
-      {entries.map((ws) => (
-        <div className="ws-group" key={ws.path}>
-          {/* A single-repo workspace's folder name just duplicates the repo row,
-              so only label the group when it actually holds multiple repos. */}
-          {ws.repos.length > 1 && (
-            <div className="ws-path" title={ws.path}>
-              {basename(ws.path)}
-            </div>
-          )}
-          {ws.repos.map((r) => (
-            <RepoItem
-              key={r.name}
-              repo={r}
-              active={r.name === repo}
-              showUnscoped={showUnscoped}
-              archivedSessions={r.name === repo ? archivedSessions : EMPTY_SESSIONS}
-              sessionCounts={sessionCounts}
-              legacyCount={legacyCount}
-              onSelectRepo={onSelectRepo}
-              onReviveSession={onReviveSession}
-              onSelectLegacy={onSelectLegacy}
-            />
-          ))}
-        </div>
-      ))}
+      <ThreadSpaceList
+        entries={entries}
+        activeWorkspacePath={activeWorkspacePath}
+        activeRepo={repo}
+        changedFilesByRepo={changedFilesByRepo}
+        onSelectWorkspace={onSelectWorkspace}
+      />
+
+      {activeWorkspace && (
+        <>
+          <div className="sidebar-head">
+            <span>Repos in review</span>
+          </div>
+          <div className="ws-group">
+            {activeWorkspace.repos.map((r) => (
+              <RepoItem
+                key={r.name}
+                repo={r}
+                active={r.name === repo}
+                showUnscoped={showUnscoped}
+                archivedSessions={r.name === repo ? archivedSessions : EMPTY_SESSIONS}
+                sessionCounts={sessionCounts}
+                legacyCount={legacyCount}
+                onSelectRepo={onSelectRepo}
+                onReviveSession={onReviveSession}
+                onSelectLegacy={onSelectLegacy}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="sidebar-head connections-head">
         <span>Connections</span>
@@ -343,86 +337,55 @@ function ReviewProgress({
   );
 }
 
-function OpenReviewList({
+function ThreadSpaceList({
   entries,
+  activeWorkspacePath,
   activeRepo,
-  currentSession,
-  showUnscoped,
-  extraSessions,
-  archivedIdsByRepo,
-  sessionCounts,
-  onSelectReview,
+  changedFilesByRepo,
+  onSelectWorkspace,
 }: {
   entries: WorkspaceEntry[];
+  activeWorkspacePath: string;
   activeRepo: string;
-  currentSession: string | null;
-  showUnscoped: boolean;
-  extraSessions: ReviewSession[];
-  archivedIdsByRepo: Map<string, Set<string>>;
-  sessionCounts: Map<string, number>;
-  onSelectReview: (repo: string, session: ReviewSession) => void;
+  changedFilesByRepo: Map<string, number>;
+  onSelectWorkspace: (path: string) => void;
 }) {
-  const reviews = useMemo(() => {
-    const out: Array<{ repo: string; session: ReviewSession }> = [];
-    for (const ws of entries) {
-      for (const r of ws.repos) {
-        const sessions = [...r.sessions];
-        if (r.name === activeRepo) {
-          const byId = new Map(sessions.map((s, i) => [s.id, i]));
-          for (const extra of extraSessions) {
-            const i = byId.get(extra.id);
-            if (i === undefined) {
-              byId.set(extra.id, sessions.length);
-              sessions.push(extra);
-            } else {
-              sessions[i] = extra;
-            }
-          }
-        }
-        const seen = new Set<string>();
-        const archivedIds = archivedIdsByRepo.get(r.name);
-        for (const session of sessions) {
-          if (seen.has(session.id)) continue;
-          if (archivedIds?.has(session.id)) continue;
-          seen.add(session.id);
-          out.push({ repo: r.name, session });
-        }
-      }
-    }
-    return out;
-  }, [entries, activeRepo, extraSessions, archivedIdsByRepo]);
-
-  if (reviews.length === 0) {
-    return <div className="open-review-empty">No open reviews</div>;
+  if (entries.length === 0) {
+    return <div className="open-review-empty">No spaces</div>;
   }
 
   return (
     <div className="open-review-list">
-      {reviews.map(({ repo, session }) => {
-        const active = !showUnscoped && repo === activeRepo && session.id === currentSession;
-        const detail = sessionDetail(session.scope);
-        const title = `${repo} · ${sessionLabel(session.scope)}`;
-        const count = repo === activeRepo ? (sessionCounts.get(session.id) ?? 0) : 0;
+      {entries.map((ws) => {
+        const active =
+          ws.path === activeWorkspacePath || ws.repos.some((r) => r.name === activeRepo);
+        const loaded = ws.repos.some((r) => changedFilesByRepo.has(r.name));
+        const changed = ws.repos.reduce(
+          (n, r) => n + (changedFilesByRepo.get(r.name) ?? 0),
+          0,
+        );
+        const repoCount = `${ws.repos.length} repo${ws.repos.length === 1 ? "" : "s"}`;
+        const changedLabel = loaded
+          ? changed === 0
+            ? "no changes"
+            : `${changed} changed file${changed === 1 ? "" : "s"}`
+          : null;
         return (
-          <Fragment key={`${repo}:${session.id}`}>
-            <button
-              type="button"
-              className={`open-review ${active ? "active" : ""}`}
-              onClick={() => onSelectReview(repo, session)}
-              title={detail ? `${title} — ${detail}` : title}
-            >
-              <span className="open-review-dot" aria-hidden="true" />
-              <span className="open-review-copy">
-                <span className="open-review-name">{sessionLabel(session.scope)}</span>
-                <span className="open-review-meta">
-                  {repo}
-                  {detail ? ` · ${detail}` : ""}
-                </span>
+          <button
+            key={ws.path}
+            type="button"
+            className={`open-review space-review ${active ? "active" : ""}`}
+            onClick={() => onSelectWorkspace(ws.path)}
+            title={ws.path}
+          >
+            <span className="open-review-dot" aria-hidden="true" />
+            <span className="open-review-copy">
+              <span className="open-review-name">{basename(ws.path)}</span>
+              <span className="open-review-meta">
+                {repoCount}{changedLabel ? ` · ${changedLabel}` : ""}
               </span>
-              {count > 0 && <span className="session-count">{count}</span>}
-            </button>
-
-          </Fragment>
+            </span>
+          </button>
         );
       })}
     </div>
@@ -726,8 +689,8 @@ function RepoItem({
     repo.worktrees[0]?.branch ??
     null;
 
-  // Normal active reviews live in the Open reviews list above. Keep only the
-  // special buckets here so the Spaces list stays compact.
+  // The space/thread row is the review. Keep only special buckets nested here so
+  // repo rows stay compact.
   const showSessions = active && (legacyCount > 0 || archivedSessions.length > 0);
 
   return (

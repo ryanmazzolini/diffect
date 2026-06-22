@@ -253,7 +253,7 @@ function StackedModule({
 
   return (
     <section
-      className={`module m${band}${focused ? " focused" : ""}${collapsed ? " collapsed" : ""}`}
+      className={`module m${band}${focused ? " focused" : ""}${collapsed ? " collapsed" : ""}${!hasFiles ? " empty" : ""}`}
       data-repo={repo}
     >
       <header className="mod-head">

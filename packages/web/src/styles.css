@@ -877,6 +877,12 @@ body {
   border-radius: 999px;
   background: var(--success);
 }
+.space-review .open-review-dot {
+  background: var(--border-strong);
+}
+.space-review.active .open-review-dot {
+  background: var(--accent);
+}
 .open-review-copy {
   min-width: 0;
   display: flex;
@@ -1411,6 +1417,16 @@ body {
 }
 .module:last-child {
   border-bottom: 0;
+}
+.module.empty {
+  background: var(--bg-elev);
+}
+.module.empty > .mod-head {
+  color: var(--muted);
+}
+.module.empty .mod-name,
+.module.empty .mh-files {
+  color: var(--muted);
 }
 /* The module header parks ABOVE file headers in the sticky stack so a file's
  * own sticky header never rides over the repo name it belongs under. Two lines:
