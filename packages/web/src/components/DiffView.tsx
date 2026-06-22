@@ -17,7 +17,6 @@ import {
   type MultiSelectResult,
   type MultiSelectState,
 } from "@git-diff-view/react";
-import "@git-diff-view/react/styles/diff-view.css";
 import type { DiffFile, DiffHunk, FileContent, RepoDiff, Side, Thread } from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import { api } from "../api.js";
@@ -212,13 +211,58 @@ function buildExtendData(
   for (const t of threads) {
     if (t.line === null || t.side === null) continue;
     const bucket = t.side === "old" ? oldFile : newFile;
-    (bucket[String(t.line)] ??= { data: emptyLineWidgetData() }).data.threads.push(t);
+    const renderLine = Math.max(t.line, t.endLine ?? t.line);
+    (bucket[String(renderLine)] ??= { data: emptyLineWidgetData() }).data.threads.push(t);
   }
   if (selection) {
     const bucket = selection.side === "old" ? oldFile : newFile;
     (bucket[String(selection.end)] ??= { data: emptyLineWidgetData() }).data.selection = selection;
   }
   return { oldFile, newFile };
+}
+
+const RANGE_HIGHLIGHT_CLASS = "diff-range-commented";
+
+function clearRangeHighlights(root: HTMLElement): void {
+  root
+    .querySelectorAll(`.${RANGE_HIGHLIGHT_CLASS}`)
+    .forEach((el) => el.classList.remove(RANGE_HIGHLIGHT_CLASS));
+}
+
+function addRangeHighlight(root: HTMLElement, { side, start, end }: SelectionComment): void {
+  for (let line = start; line <= end; line += 1) {
+    root
+      .querySelectorAll<HTMLElement>(`.diff-line-${side}-num span[data-line-num="${line}"]`)
+      .forEach((span) => {
+        const numberCell = span.closest(`.diff-line-${side}-num`);
+        const contentCell = numberCell
+          ?.closest("tr[data-line]")
+          ?.querySelector(`.diff-line-${side}-content`);
+        numberCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
+        contentCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
+      });
+
+    root
+      .querySelectorAll<HTMLElement>(`.diff-line-num span[data-line-${side}-num="${line}"]`)
+      .forEach((span) => {
+        const numberCell = span.closest(".diff-line-num");
+        const contentCell = numberCell
+          ?.closest("tr[data-line]")
+          ?.querySelector(".diff-line-content");
+        numberCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
+        contentCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
+      });
+  }
+}
+
+function threadRange(thread: Thread): SelectionComment | null {
+  if (thread.line === null || thread.side === null) return null;
+  const end = thread.endLine ?? thread.line;
+  return {
+    side: thread.side,
+    start: Math.min(thread.line, end),
+    end: Math.max(thread.line, end),
+  };
 }
 
 const toSide = (side: SplitSide): Side => (side === SplitSide.old ? "old" : "new");
@@ -320,6 +364,13 @@ const FileDiff = memo(function FileDiff({
     () => buildExtendData(threads, selectionComment),
     [threads, selectionComment],
   );
+  const rangeHighlights = useMemo(
+    () => [
+      ...threads.map(threadRange).filter((r): r is SelectionComment => r !== null),
+      ...(selectionComment ? [selectionComment] : []),
+    ],
+    [threads, selectionComment],
+  );
   // Click-to-collapse the diff body; seeded from "viewed" so viewed files start
   // collapsed. Marking a file viewed/unviewed (here or anywhere) drives the
   // collapse via the effect; clicking the header still toggles it independently.
@@ -397,6 +448,14 @@ const FileDiff = memo(function FileDiff({
     const rows = file.hunks.reduce((n, h) => n + h.lines.length + 1, 0);
     return Math.max(120, rows * EST_ROW_PX);
   }, [file]);
+
+  useEffect(() => {
+    const root = bodyRef.current;
+    if (!showBody || !root) return;
+    clearRangeHighlights(root);
+    rangeHighlights.forEach((range) => addRangeHighlight(root, range));
+    return () => clearRangeHighlights(root);
+  }, [showBody, rangeHighlights, mode, wrap]);
 
   const closeSelectionComment = useCallback((onUpdate?: () => void) => {
     setSelectionComment(null);

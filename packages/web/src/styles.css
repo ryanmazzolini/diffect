@@ -2217,11 +2217,12 @@ body.pane-resizing {
   white-space: nowrap;
 }
 
-/* The new-comment composer keeps a light bordered box. */
+/* The new-comment composer keeps only quiet chrome; the textarea does the work. */
 .comment-form {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r);
+  color: var(--text);
   padding: 8px 10px;
   margin: 4px 0;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
@@ -2287,13 +2288,13 @@ body.pane-resizing {
   color: var(--text);
   background: var(--panel-2);
 }
-/* Collapsible conversation body — animates height via the grid 1fr/0fr trick. */
+/* Collapsible conversation body. Keep open state as block so table rows never stretch. */
 .thread-body-wrap {
-  display: grid;
-  grid-template-rows: 1fr;
+  display: block;
   transition: grid-template-rows var(--motion-slow);
 }
 .thread-body-wrap.collapsed {
+  display: grid;
   grid-template-rows: 0fr;
 }
 .thread-body-inner {
@@ -2334,6 +2335,7 @@ body.pane-resizing {
 .c-name {
   font-weight: 600;
   font-size: 12px;
+  color: var(--text);
 }
 .c-role {
   font-size: 9.5px;
@@ -2364,51 +2366,70 @@ body.pane-resizing {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  --color-fg-default: var(--text);
+  --color-fg-muted: var(--muted);
+  --color-fg-subtle: var(--faint);
+  --color-canvas-default: var(--bg);
+  --color-canvas-subtle: var(--panel-2);
+  --color-border-default: var(--border);
+  --color-border-muted: var(--border);
+  --color-neutral-muted: var(--panel-2);
+  --color-accent-fg: var(--accent);
+  --color-danger-fg: var(--danger);
+  --md-editor-font-family: inherit;
+  --md-editor-background-color: var(--bg);
+  --md-editor-box-shadow-color: var(--border);
 }
-.md-tabs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.md-tablist {
-  display: flex;
-  gap: var(--space-1);
-}
-.md-tab {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-.md-tab.active {
+.md-editor .w-md-editor {
   color: var(--text);
-  border-bottom-color: var(--accent);
-}
-.md-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  margin-left: auto;
-}
-.md-tool {
-  font-size: 12px;
-  font-weight: 700;
-  min-width: 22px;
-  height: 22px;
-}
-.md-preview {
-  min-height: 56px;
-  padding: var(--space-2);
   background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 13px;
+  box-shadow: 0 0 0 1px var(--border);
+  font-family: inherit;
 }
-.md-preview .muted {
+.md-editor .w-md-editor-toolbar {
+  padding: 2px 4px;
+  border-bottom-color: var(--border);
+  background: var(--panel);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.md-editor .w-md-editor-toolbar li > button {
   color: var(--muted);
+  height: 22px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.md-editor .w-md-editor-toolbar li > button:hover,
+.md-editor .w-md-editor-toolbar li.active > button {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.md-editor .w-md-editor-toolbar-divider {
+  background: var(--border);
+}
+.md-editor .w-md-editor-content {
+  background: var(--bg);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+.md-editor .w-md-editor-text {
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+}
+.md-editor .w-md-editor-text-input {
+  color: var(--text);
+  caret-color: var(--text);
+  font-family: inherit !important;
+  resize: none;
+}
+.md-editor .w-md-editor-preview {
+  padding: 8px;
+  background: var(--bg);
+  box-shadow: inset 1px 0 0 var(--border);
+}
+.md-editor .w-md-editor-show-preview .w-md-editor-preview {
+  box-shadow: none;
 }
 .md-uploading {
   font-size: 11px;
@@ -2416,49 +2437,56 @@ body.pane-resizing {
 }
 
 /* Rendered markdown (comment bodies + preview) */
-.markdown > *:first-child {
+.markdown .wmde-markdown {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.markdown .wmde-markdown > *:first-child {
   margin-top: 0;
 }
-.markdown > *:last-child {
+.markdown .wmde-markdown > *:last-child {
   margin-bottom: 0;
 }
-.markdown p {
+.markdown .wmde-markdown p {
   margin: 0 0 var(--space-2);
 }
-.markdown ul,
-.markdown ol {
+.markdown .wmde-markdown ul,
+.markdown .wmde-markdown ol {
   margin: 0 0 var(--space-2);
   padding-left: 20px;
 }
-.markdown code {
+.markdown .wmde-markdown code {
   font-family: var(--mono);
   font-size: 0.92em;
   background: var(--hunk-bg);
   padding: 1px 4px;
   border-radius: var(--radius-sm);
 }
-.markdown pre {
+.markdown .wmde-markdown pre {
   background: var(--hunk-bg);
   padding: var(--space-2);
   border-radius: var(--radius-md);
   overflow: auto;
 }
-.markdown pre code {
+.markdown .wmde-markdown pre code {
   background: transparent;
   padding: 0;
 }
-.markdown blockquote {
+.markdown .wmde-markdown blockquote {
   margin: 0 0 var(--space-2);
   padding-left: 10px;
   border-left: 3px solid var(--border);
   color: var(--muted);
 }
-.markdown a {
+.markdown .wmde-markdown a {
   color: var(--accent);
 }
-.markdown h1,
-.markdown h2,
-.markdown h3 {
+.markdown .wmde-markdown h1,
+.markdown .wmde-markdown h2,
+.markdown .wmde-markdown h3 {
   font-size: 1.05em;
   margin: var(--space-2) 0 var(--space-1);
 }
@@ -2466,18 +2494,6 @@ body.pane-resizing {
   margin: 0 0 8px;
   font-weight: 600;
   color: var(--text);
-}
-.comment-form textarea {
-  width: 100%;
-  min-height: 56px;
-  resize: vertical;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
-  font-family: inherit;
-  font-size: 13px;
 }
 .comment-form-actions {
   display: flex;
@@ -2897,6 +2913,87 @@ html[data-theme] .diff-tailwindcss-wrapper .hljs-meta {
 .lib-selection-widget {
   padding: 2px 0;
 }
+.lib-widget .comment-form,
 .lib-selection-widget .comment-form {
-  border-color: var(--accent);
+  border-color: var(--border);
+}
+.lib-thread-stack .inline-thread {
+  max-height: min(280px, 40vh);
+  overflow: auto;
+}
+
+/* The diff library resets widget/extend descendants to `color: initial`; put
+   every inline markdown editor (new comment + reply) back on theme. */
+.diff-tailwindcss-wrapper .comment-form,
+.diff-tailwindcss-wrapper .comment-form *,
+.diff-tailwindcss-wrapper .md-editor,
+.diff-tailwindcss-wrapper .md-editor * {
+  color: var(--text);
+}
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-toolbar li > button {
+  color: var(--muted);
+}
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-toolbar li > button:hover,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-toolbar li.active > button {
+  color: var(--text);
+}
+.diff-tailwindcss-wrapper .comment-form button.primary,
+.diff-tailwindcss-wrapper .reply-form button.primary {
+  color: var(--on-accent);
+}
+.diff-tailwindcss-wrapper .md-editor .markdown a {
+  color: var(--accent);
+}
+.diff-tailwindcss-wrapper .comment-form select,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-content,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-text-input,
+.diff-tailwindcss-wrapper .md-editor .w-md-editor-preview {
+  background: var(--bg);
+  color: var(--text);
+}
+.diff-tailwindcss-wrapper .inline-thread .markdown,
+.diff-tailwindcss-wrapper .inline-thread .markdown * {
+  color: var(--ink);
+}
+.diff-tailwindcss-wrapper .inline-thread .markdown a {
+  color: var(--accent);
+}
+
+/* Persist the selected/commented range after the composer or saved thread mounts. */
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-num,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-num,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-num {
+  z-index: 2;
+}
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-content,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-content,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-content {
+  position: relative;
+}
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-num::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-num::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-num::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-content::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-content::after,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-content::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  opacity: 0.15;
+  background-color: var(--range-select);
+  pointer-events: none;
+}
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-new-num::before,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-old-num::before,
+.diff-tailwindcss-wrapper .diff-range-commented.diff-line-num::before {
+  content: "";
+  z-index: 2;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -2px;
+  width: 4px;
+  background-color: var(--range-select-border);
 }
