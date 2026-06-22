@@ -13,10 +13,11 @@ import {
   replay,
   replaySessions,
   resolveThread,
-  threadsLogPath,
+  spaceThreadStore,
   UnknownThreadError,
   UnscopedSessionError,
 } from "../src/reviews/event-log.js";
+import { threadsLogPath } from "../src/store/paths.js";
 import { sessionIdForScope } from "../src/reviews/scope.js";
 import {
   THREAD_EVENT_TYPES,
@@ -78,6 +79,7 @@ describe("event log", () => {
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.id).toBe(created.id);
     expect(loaded[0]!.status).toBe("open");
+    expect(loaded[0]!.targetLevel).toBe("file");
     expect(loaded[0]!.comments[0]).toMatchObject({
       author: { type: "user" },
       body: "N+1 query here",
@@ -93,6 +95,26 @@ describe("event log", () => {
 
   it("returns no threads when the log is absent", async () => {
     expect(await loadThreads(dir)).toEqual([]);
+  });
+
+  it("round-trips space and repo-level comments from a space store", async () => {
+    const store = spaceThreadStore(dir);
+    await createThread(
+      store,
+      { repo: null, targetLevel: "space", file: null, body: "whole space" },
+      T0,
+    );
+    await createThread(
+      store,
+      { repo: "r", targetLevel: "repo", file: null, body: "repo note" },
+      T0,
+    );
+
+    const loaded = await loadThreads(store);
+    expect(loaded.map((t) => [t.targetLevel, t.repo, t.file, t.comments[0]!.body])).toEqual([
+      ["space", null, null, "whole space"],
+      ["repo", "r", null, "repo note"],
+    ]);
   });
 
   it("appends comment + resolve and replays into one conversation", async () => {

@@ -350,6 +350,7 @@ export type Severity = "must-fix" | "suggestion" | "nit" | "question";
 // "closed" — so this rename needs no migration.
 export type ThreadStatus = "open" | "closed";
 export type AnchorState = "active" | "stale";
+export type ThreadTargetLevel = "space" | "repo" | "file";
 export type AuthorType = "user" | "agent";
 
 export interface Author {
@@ -379,9 +380,14 @@ export interface ThreadAnchor {
 /** A thread after replaying the event log. */
 export interface Thread {
   id: string;
-  repo: string;
+  /** null for space-level comments stored on the review space itself. */
+  repo: string | null;
   worktree: string | null;
-  /** null for general (non-line-anchored) threads. */
+  /** Present for comments loaded from a review-space store. */
+  spacePath?: string | null;
+  /** What this review comment is about: the whole space, a repo, or a file/range. */
+  targetLevel: ThreadTargetLevel;
+  /** null for space/repo-level (non-line-anchored) threads. */
   file: string | null;
   side: Side | null;
   line: number | null;
@@ -423,8 +429,9 @@ interface BaseEvent {
 export interface ThreadCreatedEvent extends BaseEvent {
   type: "thread.created";
   id: string;
-  repo: string;
+  repo: string | null;
   worktree: string | null;
+  targetLevel?: ThreadTargetLevel;
   file: string | null;
   side: Side | null;
   line: number | null;
@@ -528,8 +535,11 @@ export const THREAD_EVENT_TYPES: readonly ThreadEventType[] = [
 // --- API request payloads --------------------------------------------------
 
 export interface CreateThreadRequest {
-  repo: string;
+  repo?: string | null;
   worktree?: string | null;
+  /** Absolute selected review-space root; new space/repo-level comments live here. */
+  spacePath?: string | null;
+  targetLevel?: ThreadTargetLevel;
   file?: string | null;
   side?: Side | null;
   line?: number | null;

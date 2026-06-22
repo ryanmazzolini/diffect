@@ -67,6 +67,8 @@ html[data-density="compact"] {
   --question: #8a92e8;
   --success: #3fb950;
   --target: #2a2410; /* commented-line highlight */
+  --range-select: #d29922;
+  --range-select-border: var(--accent);
   --hunk-bg: #1c1d22;
   --on-accent: #ffffff;
   --hl-keyword: #c792ea;
@@ -129,6 +131,8 @@ html[data-density="compact"] {
   --question: #5e6ad2;
   --success: #1a7f37;
   --target: #fdf6e3;
+  --range-select: #f0c000;
+  --range-select-border: var(--accent);
   --hunk-bg: #f4f4f5;
   --on-accent: #ffffff;
   --hl-keyword: #9333ea;
@@ -1446,6 +1450,14 @@ body.modal-open {
   padding: 12px;
   background: var(--bg);
 }
+.thread-pane-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.thread-pane-actions .ghost {
+  flex: 1;
+}
 
 /* ============ Modules view (N≥2): stacked per-repo diff sections ============ */
 /* The shared scroll container for the stacked layout — mirrors .diff-pane so j/k
@@ -2450,6 +2462,11 @@ body.pane-resizing {
   font-size: 1.05em;
   margin: var(--space-2) 0 var(--space-1);
 }
+.comment-form-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--text);
+}
 .comment-form textarea {
   width: 100%;
   min-height: 56px;
@@ -2474,6 +2491,17 @@ body.pane-resizing {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 6px;
+}
+.general-comment-form {
+  margin-bottom: 12px;
+}
+.comment-form-context {
+  min-width: 0;
+  color: var(--muted);
+  font: 11px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 button.primary,
 button.ghost {
@@ -2798,8 +2826,8 @@ button:disabled {
 .diff-tailwindcss-wrapper {
   font-family: var(--mono);
   font-size: var(--diff-size);
-  --diff-multi-select-bg: var(--accent-soft);
-  --diff-multi-select-border: var(--accent);
+  --diff-multi-select-bg: var(--range-select);
+  --diff-multi-select-border: var(--range-select-border);
 }
 .diff-tailwindcss-wrapper[data-theme="light"] .diff-style-root,
 .diff-tailwindcss-wrapper[data-theme="dark"] .diff-style-root {
@@ -2865,6 +2893,10 @@ html[data-theme] .diff-tailwindcss-wrapper .hljs-meta {
   font-style: italic;
 }
 /* Wrappers we mount around library extend/widget lines. */
-.lib-widget {
+.lib-widget,
+.lib-selection-widget {
   padding: 2px 0;
+}
+.lib-selection-widget .comment-form {
+  border-color: var(--accent);
 }

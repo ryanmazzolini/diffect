@@ -1,9 +1,21 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   DiffViewWithMultiSelect,
   DiffFile as LibDiffFile,
   DiffModeEnum,
   SplitSide,
+  type DiffViewWithMultiSelectRef,
+  type LineRange,
+  type MultiSelectResult,
+  type MultiSelectState,
 } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view.css";
 import type { DiffFile, DiffHunk, FileContent, RepoDiff, Side, Thread } from "@diffect/shared";
@@ -172,22 +184,74 @@ function toFullDiff(file: DiffFile): string {
   return out.join("\n") + "\n";
 }
 
-/** Thread bucket keyed by line number, split by side — git-diff-view's extendData shape. */
-function buildExtendData(threads: Thread[]): {
-  oldFile: Record<string, { data: Thread[] }>;
-  newFile: Record<string, { data: Thread[] }>;
+interface SelectionComment {
+  side: Side;
+  start: number;
+  end: number;
+}
+
+interface LineWidgetData {
+  threads: Thread[];
+  selection: SelectionComment | null;
+}
+
+function emptyLineWidgetData(): LineWidgetData {
+  return { threads: [], selection: null };
+}
+
+/** Thread/form bucket keyed by line number, split by side — git-diff-view's extendData shape. */
+function buildExtendData(
+  threads: Thread[],
+  selection: SelectionComment | null,
+): {
+  oldFile: Record<string, { data: LineWidgetData }>;
+  newFile: Record<string, { data: LineWidgetData }>;
 } {
-  const oldFile: Record<string, { data: Thread[] }> = {};
-  const newFile: Record<string, { data: Thread[] }> = {};
+  const oldFile: Record<string, { data: LineWidgetData }> = {};
+  const newFile: Record<string, { data: LineWidgetData }> = {};
   for (const t of threads) {
     if (t.line === null || t.side === null) continue;
     const bucket = t.side === "old" ? oldFile : newFile;
-    (bucket[String(t.line)] ??= { data: [] }).data.push(t);
+    (bucket[String(t.line)] ??= { data: emptyLineWidgetData() }).data.threads.push(t);
+  }
+  if (selection) {
+    const bucket = selection.side === "old" ? oldFile : newFile;
+    (bucket[String(selection.end)] ??= { data: emptyLineWidgetData() }).data.selection = selection;
   }
   return { oldFile, newFile };
 }
 
 const toSide = (side: SplitSide): Side => (side === SplitSide.old ? "old" : "new");
+
+function rangeLines(a: number, b: number): number[] {
+  const start = Math.min(a, b);
+  const end = Math.max(a, b);
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
+
+function readLineFromElement(el: HTMLElement | null, side: Side): number | null {
+  if (!el) return null;
+  const splitNum =
+    el.closest(`.diff-line-${side}-num`) ??
+    el.closest(`.diff-line-${side}-content`)?.parentElement?.querySelector(`.diff-line-${side}-num`);
+  const splitLine = splitNum?.querySelector("span[data-line-num]")?.getAttribute("data-line-num");
+  if (splitLine && Number.isFinite(Number(splitLine))) return Number(splitLine);
+
+  const unifiedNum =
+    el.closest(".diff-line-num") ??
+    el.closest("tr[data-line]")?.querySelector(".diff-line-num");
+  const attr = side === "old" ? "data-line-old-num" : "data-line-new-num";
+  const unifiedLine = unifiedNum?.querySelector(`span[${attr}]`)?.getAttribute(attr);
+  return unifiedLine && Number.isFinite(Number(unifiedLine)) ? Number(unifiedLine) : null;
+}
+
+function readAddWidgetStart(target: HTMLElement): SelectionComment | null {
+  const widget = target.closest(".diff-add-widget-wrapper") as HTMLElement | null;
+  const rawSide = widget?.getAttribute("data-add-widget");
+  if (rawSide !== "old" && rawSide !== "new") return null;
+  const line = readLineFromElement(widget, rawSide);
+  return line === null ? null : { side: rawSide, start: line, end: line };
+}
 
 // Memoized so a thread change on one file doesn't re-render every other file.
 const FileDiff = memo(function FileDiff({
@@ -250,7 +314,12 @@ const FileDiff = memo(function FileDiff({
     f.buildUnifiedDiffLines();
     return f;
   }, [file, content]);
-  const extendData = useMemo(() => buildExtendData(threads), [threads]);
+  const multiSelectRef = useRef<DiffViewWithMultiSelectRef>(null);
+  const [selectionComment, setSelectionComment] = useState<SelectionComment | null>(null);
+  const extendData = useMemo(
+    () => buildExtendData(threads, selectionComment),
+    [threads, selectionComment],
+  );
   // Click-to-collapse the diff body; seeded from "viewed" so viewed files start
   // collapsed. Marking a file viewed/unviewed (here or anywhere) drives the
   // collapse via the effect; clicking the header still toggles it independently.
@@ -273,6 +342,8 @@ const FileDiff = memo(function FileDiff({
   // an unrelated new-but-equal `file` reference can't trigger a needless refetch.
   useEffect(() => {
     setContent(null);
+    setSelectionComment(null);
+    multiSelectRef.current?.clearSelection();
     measuredHeight.current = null;
   }, [repo, worktree, target, file.path, file.oldPath]);
   useEffect(() => {
@@ -327,11 +398,74 @@ const FileDiff = memo(function FileDiff({
     return Math.max(120, rows * EST_ROW_PX);
   }, [file]);
 
-  // Existing threads, rendered persistently under their anchor line.
+  const closeSelectionComment = useCallback((onUpdate?: () => void) => {
+    setSelectionComment(null);
+    multiSelectRef.current?.clearSelection();
+    onUpdate?.();
+  }, []);
+
+  const showSelectedRange = useCallback((side: Side, start: number, end: number) => {
+    const lines = rangeLines(start, end);
+    multiSelectRef.current?.setPreselectedLines({
+      old: side === "old" ? lines : [],
+      new: side === "new" ? lines : [],
+    });
+  }, []);
+
+  const onAddWidgetMouseDownCapture = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const start = readAddWidgetStart(e.target as HTMLElement);
+      if (!start) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectionComment(null);
+      showSelectedRange(start.side, start.start, start.end);
+
+      const drag = { ...start };
+      const updateEnd = (clientX: number, clientY: number) => {
+        const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+        const line = readLineFromElement(el, drag.side);
+        if (line === null) return;
+        drag.end = line;
+        showSelectedRange(drag.side, drag.start, drag.end);
+      };
+      const onMove = (ev: MouseEvent) => updateEnd(ev.clientX, ev.clientY);
+      const onUp = (ev: MouseEvent) => {
+        document.removeEventListener("mousemove", onMove);
+        updateEnd(ev.clientX, ev.clientY);
+        setSelectionComment({
+          side: drag.side,
+          start: Math.min(drag.start, drag.end),
+          end: Math.max(drag.start, drag.end),
+        });
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp, { once: true });
+    },
+    [showSelectedRange],
+  );
+
+  const onMultiSelectChange = useCallback(
+    (_range: LineRange | null, state: MultiSelectState) => {
+      if (state.isSelecting) setSelectionComment(null);
+    },
+    [],
+  );
+
+  const onMultiSelectComplete = useCallback((result: MultiSelectResult) => {
+    const start = Math.min(result.range.startLineNumber, result.range.endLineNumber);
+    const end = Math.max(result.range.startLineNumber, result.range.endLineNumber);
+    if (start === end) return;
+    setSelectionComment({ side: result.range.side === "old" ? "old" : "new", start, end });
+  }, []);
+
+  // Existing threads, plus a pending multi-line comment form under the selected range.
   const renderExtendLine = useCallback(
-    ({ data, onUpdate }: { data: Thread[]; onUpdate: () => void }) => (
+    ({ data, onUpdate }: { data: LineWidgetData; onUpdate: () => void }) => (
       <div className="lib-thread-stack">
-        {data.map((t) => (
+        {data.threads.map((t) => (
           <InlineThread
             key={`${t.id}:${t.status}`}
             thread={t}
@@ -342,9 +476,27 @@ const FileDiff = memo(function FileDiff({
             }}
           />
         ))}
+        {data.selection && (
+          <div className="lib-selection-widget">
+            <CommentForm
+              repo={repo}
+              worktree={worktree}
+              target={target}
+              file={file.path}
+              side={data.selection.side}
+              line={data.selection.start}
+              endLine={data.selection.end}
+              onCancel={() => closeSelectionComment(onUpdate)}
+              onCreated={() => {
+                closeSelectionComment(onUpdate);
+                onChanged();
+              }}
+            />
+          </div>
+        )}
       </div>
     ),
-    [editors, onChanged],
+    [closeSelectionComment, editors, file.path, onChanged, repo, target, worktree],
   );
 
   // The new-comment form, opened by the + button or a drag range selection.
@@ -433,8 +585,13 @@ const FileDiff = memo(function FileDiff({
       </div>
       {!collapsed &&
         (showBody ? (
-          <div ref={bodyRef} className="file-body">
-            <DiffViewWithMultiSelect<Thread[]>
+          <div
+            ref={bodyRef}
+            className="file-body"
+            onMouseDownCapture={onAddWidgetMouseDownCapture}
+          >
+            <DiffViewWithMultiSelect<LineWidgetData>
+              ref={multiSelectRef}
               diffFile={diffFile!}
               extendData={extendData}
               diffViewMode={mode}
@@ -443,6 +600,9 @@ const FileDiff = memo(function FileDiff({
               diffViewHighlight
               diffViewAddWidget
               enableMultiSelect
+              onMultiSelectChange={onMultiSelectChange}
+              onMultiSelectComplete={onMultiSelectComplete}
+              onAddWidgetClick={() => setSelectionComment(null)}
               renderExtendLine={renderExtendLine}
               renderWidgetLine={renderWidgetLine}
             />

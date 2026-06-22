@@ -58,6 +58,10 @@ export function ThreadConversation({
   };
 
   const count = thread.comments.length;
+  const openable =
+    thread.repo && thread.file && thread.line !== null
+      ? { repo: thread.repo, file: thread.file, line: thread.line }
+      : null;
 
   return (
     <div className={`inline-thread status-${thread.status}`}>
@@ -174,18 +178,18 @@ export function ThreadConversation({
                   Delete
                 </button>
               )}
-              {editors.length > 0 && thread.file && thread.line !== null && (
+              {editors.length > 0 && openable && (
                 <button
                   className="ghost"
                   disabled={busy}
-                  title={`Open ${thread.file}:${thread.line} in ${editors[0]}`}
+                  title={`Open ${openable.file}:${openable.line} in ${editors[0]}`}
                   onClick={() =>
                     run(() =>
                       api.open({
-                        repo: thread.repo,
+                        repo: openable.repo,
                         worktree: thread.worktree,
-                        file: thread.file!,
-                        line: thread.line!,
+                        file: openable.file,
+                        line: openable.line,
                         editor: editors[0]!,
                       }),
                     )

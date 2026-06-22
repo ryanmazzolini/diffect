@@ -42,6 +42,9 @@ export function CommentForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const rangeText =
+    endLine && endLine !== line ? `lines ${line} to ${endLine}` : `line ${line}`;
+
   const submit = async () => {
     if (!body.trim()) return;
     setSubmitting(true);
@@ -51,6 +54,7 @@ export function CommentForm({
         repo,
         worktree,
         target,
+        targetLevel: "file",
         file,
         side,
         line,
@@ -68,6 +72,9 @@ export function CommentForm({
 
   return (
     <div className="comment-form">
+      {endLine && endLine !== line && (
+        <div className="comment-form-title">Add a comment on {rangeText}</div>
+      )}
       <MarkdownEditor
         autoFocus
         placeholder={`Comment on ${file}:${line}${

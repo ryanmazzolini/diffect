@@ -1,7 +1,8 @@
 import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import type { ServerResponse } from "node:http";
 import { DAEMON_EVENTS, type DaemonEventType } from "@diffect/shared";
-import { repoStoreDir } from "./store/paths.js";
+import { repoStoreDir, spaceStoreDir } from "./store/paths.js";
+import { workspacePaths } from "./reviews/refresh.js";
 import type { Workspace } from "./workspace.js";
 
 export type { DaemonEventType };
@@ -43,9 +44,17 @@ export class EventHub {
   }
 
   private attachWatches(): void {
-    // Review stores: one central log per repo now lives outside the worktree.
-    // Any write there means threads changed. Create each dir first so the watch
-    // attaches before the first comment (fs.watch needs an existing path).
+    // Review stores: one central log per selected space, plus legacy per-repo
+    // logs, live outside the worktree. Any write there means threads changed.
+    for (const path of workspacePaths(this.ws)) {
+      const store = spaceStoreDir(path);
+      try {
+        mkdirSync(store, { recursive: true });
+      } catch {
+        /* best effort */
+      }
+      this.addWatch(store, () => this.emit(DAEMON_EVENTS.threadChanged));
+    }
     for (const repo of this.ws.repos) {
       const store = repoStoreDir(repo.root);
       try {

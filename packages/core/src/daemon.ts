@@ -30,13 +30,16 @@ import {
   createThread,
   deleteThread,
   resolveThread,
+  spaceThreadStore,
   UnknownThreadError,
   UnscopedSessionError,
+  type ThreadStoreRef,
 } from "./reviews/event-log.js";
 import {
-  findRepoRootForThread,
+  findStoreForThread,
   loadAllThreads,
   loadRefreshedThreads,
+  workspacePaths,
 } from "./reviews/refresh.js";
 import { EventHub } from "./events.js";
 import {
@@ -277,11 +280,13 @@ async function threadCollectionRoutes(
     // "resolved" stays accepted as a silent alias for the renamed "closed" status.
     const status = rawStatus === "resolved" ? "closed" : rawStatus;
     const repoFilter = url.searchParams.get("repo");
+    const spaceFilter = url.searchParams.get("space");
     const worktreeFilter = url.searchParams.get("worktree");
     const sessionFilter = url.searchParams.get("session");
     let threads = await loadRefreshedThreads(ctx.ws);
     if (status) threads = threads.filter((t) => t.status === status);
     if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
+    if (spaceFilter) threads = threads.filter((t) => t.spacePath === resolve(spaceFilter));
     if (worktreeFilter)
       threads = threads.filter((t) => t.worktree === worktreeFilter);
     if (sessionFilter)
@@ -305,13 +310,52 @@ async function createThreadRoute(
     sendJson(res, 400, { error: "body is required" });
     return true;
   }
-  const resolved = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
+  const targetLevel = body.file
+    ? "file"
+    : body.targetLevel === "space"
+      ? "space"
+      : "repo";
+  const spacePath = body.spacePath
+    ? resolveSpacePath(ctx, res, body.spacePath)
+    : null;
+  if (body.spacePath && !spacePath) return true;
+
+  if (targetLevel === "space") {
+    if (!spacePath) {
+      sendJson(res, 400, { error: "spacePath is required for space comments" });
+      return true;
+    }
+    const thread = await createThread(
+      spaceThreadStore(spacePath),
+      {
+        ...body,
+        repo: null,
+        worktree: null,
+        targetLevel,
+        file: null,
+        side: null,
+        line: null,
+        endLine: null,
+        anchor: null,
+        scope: null,
+        sessionId: null,
+        snapshotId: null,
+      },
+      ctx.now(),
+    );
+    thread.spacePath = spacePath;
+    ctx.events.notify(DAEMON_EVENTS.threadChanged);
+    sendJson(res, 201, thread);
+    return true;
+  }
+
+  const resolved = resolveRepoTarget(ctx, res, body.repo ?? undefined, body.worktree ?? null);
   if (!resolved) return true;
   const { repo, treeRoot } = resolved;
-  // Bind the thread to the changeset it was filed under: resolve the scope
-  // (target spec → base/head + session) server-side, anchor against the scope's
-  // base, and persist both so the comment belongs to the branch/scope, not the
-  // worktree directory.
+  // Bind repo/file comments to the changeset they were filed under: resolve the
+  // scope (target spec → base/head + session) server-side, anchor file comments
+  // against the scope's base, and persist both so the comment belongs to the
+  // branch/scope, not the worktree directory.
   const scope = await resolveScope(
     treeRoot,
     normalizeTarget(body.target),
@@ -320,13 +364,16 @@ async function createThreadRoute(
   const anchor = await buildAnchor(treeRoot, scope.baseSha, body);
   // Record which snapshot (iteration) of the scope the comment was filed against.
   const snapshotId = await snapshotIdForState(treeRoot, scope);
-  // The store is keyed by the repo's PRIMARY root so all worktrees share one log
-  // (the worktree name lives on the thread); treeRoot is only for anchoring.
+  const store = spacePath ? spaceThreadStore(spacePath) : repo.root;
   const thread = await createThread(
-    repo.root,
-    { ...body, anchor, scope, sessionId: sessionIdForScope(scope), snapshotId },
+    store,
+    { ...body, repo: repo.name, targetLevel, anchor, scope, sessionId: sessionIdForScope(scope), snapshotId },
     ctx.now(),
   );
+  if (spacePath) {
+    thread.spacePath = spacePath;
+    ctx.events.notify(DAEMON_EVENTS.threadChanged);
+  }
   sendJson(res, 201, thread);
   return true;
 }
@@ -350,7 +397,7 @@ async function threadItemRoutes(
       return true;
     }
     await withThread(res, async () =>
-      addComment(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+      addComment(await requireThreadStore(ctx, id), id, body, ctx.now()),
     );
     return true;
   }
@@ -360,7 +407,7 @@ async function threadItemRoutes(
     const id = decodeURIComponent(resolveMatch[1]!);
     const body = (await readJsonBody<ResolveThreadRequest>(req)) ?? {};
     await withThread(res, async () =>
-      resolveThread(await requireRepoRoot(ctx, id), id, body, ctx.now()),
+      resolveThread(await requireThreadStore(ctx, id), id, body, ctx.now()),
     );
     return true;
   }
@@ -380,7 +427,7 @@ async function deleteThreadRoute(
 ): Promise<boolean> {
   const body = (await readJsonBody<DeleteThreadRequest>(req)) ?? {};
   try {
-    await deleteThread(await requireRepoRoot(ctx, id), id, body, ctx.now());
+    await deleteThread(await requireThreadStore(ctx, id), id, body, ctx.now());
     sendJson(res, 200, { ok: true });
   } catch (err) {
     if (err instanceof UnknownThreadError) {
@@ -775,10 +822,26 @@ function header(value: string | string[] | undefined): string | undefined {
  * repo in the workspace. Throws UnknownThreadError (→ 404 via withThread) when
  * no repo claims it, so mutations carrying only an id route to the right log.
  */
-async function requireRepoRoot(ctx: RouteContext, id: string): Promise<string> {
-  const root = await findRepoRootForThread(ctx.ws, id);
-  if (!root) throw new UnknownThreadError(id);
-  return root;
+async function requireThreadStore(
+  ctx: RouteContext,
+  id: string,
+): Promise<ThreadStoreRef> {
+  const store = await findStoreForThread(ctx.ws, id);
+  if (!store) throw new UnknownThreadError(id);
+  return store;
+}
+
+function resolveSpacePath(
+  ctx: RouteContext,
+  res: ServerResponse,
+  path: string,
+): string | null {
+  const abs = resolve(path);
+  if (!workspacePaths(ctx.ws).includes(abs)) {
+    sendJson(res, 400, { error: `unknown space: ${path}` });
+    return null;
+  }
+  return abs;
 }
 
 /**

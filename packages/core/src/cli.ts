@@ -8,7 +8,7 @@ import {
   UnknownThreadError,
 } from "./reviews/event-log.js";
 import {
-  findRepoRootForThread,
+  findStoreForThread,
   loadRefreshedThreads,
 } from "./reviews/refresh.js";
 import { buildAnchor } from "./reviews/anchors.js";
@@ -37,11 +37,11 @@ async function resolveWorkspaceRoot(start: string): Promise<string> {
  * Resolve which repo's central store owns a thread id (for reply/resolve/dismiss,
  * which carry only an id). Discovers the workspace from cwd, then scans repos.
  */
-async function requireThreadRepoRoot(id: string): Promise<string> {
+async function requireThreadStore(id: string) {
   const ws = await discoverWorkspace(await resolveWorkspaceRoot(process.cwd()));
-  const repoRoot = await findRepoRootForThread(ws, id);
-  if (!repoRoot) fail(`unknown thread: ${id}`);
-  return repoRoot;
+  const store = await findStoreForThread(ws, id);
+  if (!store) fail(`unknown thread: ${id}`);
+  return store;
 }
 
 interface Flags {
@@ -169,7 +169,7 @@ async function cmdList(argv: string[]): Promise<number> {
     return 0;
   }
   for (const t of threads) {
-    const loc = t.file ? `${t.file}:${t.line ?? "?"}` : "(general)";
+    const loc = t.file ? `${t.file}:${t.line ?? "?"}` : `(${t.targetLevel})`;
     const sev = t.severity ? `[${t.severity}] ` : "";
     const stale = t.anchorState === "stale" ? " (stale)" : "";
     const first = t.comments[0]?.body.split("\n")[0] ?? "";
@@ -284,8 +284,8 @@ async function cmdReply(argv: string[]): Promise<number> {
   const body = flags.options.get("body");
   if (!id) fail('usage: diffect reply <thread-id> --body "…"');
   if (!body) fail("--body is required");
-  const repoRoot = await requireThreadRepoRoot(id);
-  await mutate(() => addComment(repoRoot, id, { author: authorFrom(flags), body }, now()));
+  const store = await requireThreadStore(id);
+  await mutate(() => addComment(store, id, { author: authorFrom(flags), body }, now()));
   return 0;
 }
 
@@ -293,10 +293,10 @@ async function cmdResolve(argv: string[]): Promise<number> {
   const flags = parseFlags(argv, new Set());
   const id = flags.positionals[0];
   if (!id) fail('usage: diffect resolve <thread-id> [--summary "…"]');
-  const repoRoot = await requireThreadRepoRoot(id);
+  const store = await requireThreadStore(id);
   await mutate(() =>
     resolveThread(
-      repoRoot,
+      store,
       id,
       { author: authorFrom(flags), summary: flags.options.get("summary") ?? null },
       now(),

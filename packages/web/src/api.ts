@@ -136,10 +136,11 @@ export const api = {
     ).then((r) => json<RefSearchResults>(r));
   },
 
-  threads: (opts: { status?: string; repo?: string; worktree?: string | null } = {}) => {
+  threads: (opts: { status?: string; repo?: string; space?: string; worktree?: string | null } = {}) => {
     const q = new URLSearchParams();
     if (opts.status) q.set("status", opts.status);
     if (opts.repo) q.set("repo", opts.repo);
+    if (opts.space) q.set("space", opts.space);
     if (opts.worktree) q.set("worktree", opts.worktree);
     const qs = q.toString();
     return fetch(`/threads${qs ? `?${qs}` : ""}`).then((r) => json<Thread[]>(r));

@@ -27,8 +27,17 @@ import { ThreadList } from "./components/ThreadList.js";
 import { Topbar } from "./components/Topbar.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
+import { GeneralCommentForm } from "./components/GeneralCommentForm.js";
 
 type StatusFilter = ThreadStatus | "all";
+type GeneralCommentTarget = {
+  targetLevel: "space" | "repo";
+  repo: string | null;
+  spacePath: string;
+  worktree: string | null;
+  target: string;
+  label: string;
+};
 const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 // Stable empty references so memoized children don't re-render on the null paths.
 const EMPTY_FILES: DiffFile[] = [];
@@ -99,6 +108,10 @@ function sameSet(a: Set<string>, b: Set<string>): boolean {
 // backslash); falls back to the raw string where CSS.escape is unavailable.
 function cssEscape(s: string): string {
   return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s;
+}
+function basename(p: string): string {
+  const parts = p.split(/[/\\]/).filter(Boolean);
+  return parts.at(-1) ?? p;
 }
 // Stable empty thread array so a repo with no scoped threads projects a constant
 // reference (the memoized module / inbox don't re-render on the empty path).
@@ -194,6 +207,7 @@ export function App() {
     [],
   );
   const [addOpen, setAddOpen] = useState(false);
+  const [generalComment, setGeneralComment] = useState<GeneralCommentTarget | null>(null);
   // Per-repo per-file "viewed" sets, projected to `viewed` for the active repo.
   const [viewedByRepo, setViewedByRepo] = useState<Map<string, Set<string>>>(
     () => new Map(),
@@ -262,6 +276,7 @@ export function App() {
         : null,
     [activeEntry?.path, visibleRepos, workspace],
   );
+  const activeSpacePath = visibleWorkspace?.root ?? null;
   // N≥2 ⇒ the stacked "modules view" (one diff list per repo, sharing a scroll
   // container); N≤1 ⇒ the literal single pane. A presentational switch only: every
   // selector/effect below still treats the single repo as the N=1 case.
@@ -993,12 +1008,13 @@ export function App() {
   const sessionCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const t of threads) {
+      if (t.spacePath && t.spacePath !== activeSpacePath) continue;
       if (t.repo !== repo) continue;
       const key = t.sessionId ?? LEGACY_KEY;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;
-  }, [threads, repo]);
+  }, [threads, repo, activeSpacePath]);
   const legacyCount = sessionCounts.get(LEGACY_KEY) ?? 0;
 
   // Open-thread count per session — the open-only sibling of `sessionCounts`. The
@@ -1007,12 +1023,13 @@ export function App() {
   const openCountsBySession = useMemo(() => {
     const counts = new Map<string, number>();
     for (const t of threads) {
+      if (t.spacePath && t.spacePath !== activeSpacePath) continue;
       if (t.repo !== repo || t.status !== "open") continue;
       const key = t.sessionId ?? LEGACY_KEY;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;
-  }, [threads, repo]);
+  }, [threads, repo, activeSpacePath]);
 
   // The settled session the user is looking at — the one "Mark complete" would
   // archive. Only the diff's own settled session qualifies: not mid-selection (the
@@ -1085,6 +1102,7 @@ export function App() {
       let total = 0;
       let open = 0;
       for (const t of threads) {
+        if (t.spacePath && t.spacePath !== activeSpacePath) continue;
         if (t.repo !== name || t.sessionId !== session.id) continue;
         total++;
         if (t.status === "open") open++;
@@ -1108,6 +1126,7 @@ export function App() {
     pendingByRepo,
     selections,
     archivedByRepo,
+    activeSpacePath,
   ]);
 
   // Per-repo scoped thread lists: each repo's threads filtered to its own current
@@ -1127,6 +1146,7 @@ export function App() {
       map.set(
         r.name,
         threads.filter((t) => {
+          if (t.spacePath && t.spacePath !== activeSpacePath) return false;
           if (t.repo !== r.name) return false;
           // The unscoped bucket shows pre-scope (v1) threads and nothing else;
           // session views show their own session and never the legacy threads.
@@ -1137,22 +1157,32 @@ export function App() {
       );
     }
     return map;
-  }, [threads, visibleRepos, showUnscopedByRepo, pendingByRepo, diffs]);
+  }, [threads, visibleRepos, showUnscopedByRepo, pendingByRepo, diffs, activeSpacePath]);
   // Active repo's scoped threads — byte-identical to the pre-lift `scopedThreads`
   // (its internal rSession for the active repo equals `currentSession`). Drives the
   // active-repo views: the iteration timeline, the per-file thread badges, the
   // legacy hint, and the sidebar.
   const scopedThreads =
     (repo ? scopedThreadsByRepo.get(repo) : undefined) ?? EMPTY_THREADS;
-  // Threads the visible diff surface owns: at N≥2 the union across all modules (the
-  // inbox spans repos), at N=1 just the active repo's. Drives the filter-bar counts
-  // and the thread list.
-  const paneThreads = useMemo(
+  const spaceThreads = useMemo(
     () =>
-      stacked
+      activeSpacePath
+        ? threads.filter(
+            (t) => t.targetLevel === "space" && t.spacePath === activeSpacePath,
+          )
+        : EMPTY_THREADS,
+    [threads, activeSpacePath],
+  );
+  // Threads the visible diff surface owns: space-level comments plus, at N≥2, the
+  // union across all modules; at N=1, the active repo's scoped comments.
+  const paneThreads = useMemo(
+    () => [
+      ...spaceThreads,
+      ...(stacked
         ? visibleRepos.flatMap((r) => scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS)
-        : scopedThreads,
-    [stacked, visibleRepos, scopedThreadsByRepo, scopedThreads],
+        : scopedThreads),
+    ],
+    [spaceThreads, stacked, visibleRepos, scopedThreadsByRepo, scopedThreads],
   );
   const byStatus = useMemo(
     () =>
@@ -1171,6 +1201,37 @@ export function App() {
   );
   const editors = useMemo(() => workspace?.editors ?? EMPTY_EDITORS, [workspace]);
   const openAdd = useCallback(() => setAddOpen(true), []);
+  const openRepoComment = useCallback(
+    (repoName: string) => {
+      if (!visibleWorkspace) return;
+      const sel = selections.get(repoName) ?? { worktree: null, target: DEFAULT_TARGET };
+      setGeneralComment({
+        targetLevel: "repo",
+        repo: repoName,
+        spacePath: visibleWorkspace.root,
+        worktree: sel.worktree,
+        target: sel.target,
+        label: repoName,
+      });
+    },
+    [selections, visibleWorkspace],
+  );
+  const openSpaceComment = useCallback(() => {
+    if (!visibleWorkspace) return;
+    setGeneralComment({
+      targetLevel: "space",
+      repo: null,
+      spacePath: visibleWorkspace.root,
+      worktree: null,
+      target: DEFAULT_TARGET,
+      label: basename(visibleWorkspace.root),
+    });
+  }, [visibleWorkspace]);
+  const closeGeneralComment = useCallback(() => setGeneralComment(null), []);
+  const generalCommentCreated = useCallback(() => {
+    setGeneralComment(null);
+    void refreshThreads();
+  }, [refreshThreads]);
   // One stable closure for "back to diff" so it doesn't defeat memo() on the
   // heavy DiffView/Sidebar panels — a fresh arrow each render made them
   // re-run on every scroll-spy active-file tick, resize commit, and filter click.
@@ -1384,6 +1445,30 @@ export function App() {
           value={stacked ? null : (diff?.currentSnapshotId ?? null)}
         >
         <aside className="thread-pane">
+          <div className="thread-pane-actions">
+            <button type="button" className="ghost" onClick={openSpaceComment}>
+              Comment on space
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => openRepoComment(repo)}
+            >
+              Comment on repo
+            </button>
+          </div>
+          {generalComment && (
+            <GeneralCommentForm
+              repo={generalComment.repo}
+              spacePath={generalComment.spacePath}
+              worktree={generalComment.worktree}
+              target={generalComment.target}
+              targetLevel={generalComment.targetLevel}
+              label={generalComment.label}
+              onCancel={closeGeneralComment}
+              onCreated={generalCommentCreated}
+            />
+          )}
           <div className="filter-bar">
             {STATUS_FILTERS.map((f) => (
               <button
