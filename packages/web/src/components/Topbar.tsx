@@ -3,6 +3,7 @@ import type { RefList, WorkspaceEntry, WorkspaceInfo } from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import type { Density } from "../density.js";
 import { Icon } from "../icons.js";
+import diffectIconUrl from "../../../desktop/src-tauri/icons/icon.png";
 import { getStored, setStored } from "../storage.js";
 import { DiffStat } from "./DiffStat.js";
 import { TargetPicker } from "./TargetPicker.js";
@@ -134,10 +135,7 @@ export function Topbar({
         >
           <Icon name="three-bars" />
         </button>
-        <span className="brand" role="img" aria-label="Diffect">
-          <span className="brand-bar brand-add" />
-          <span className="brand-bar brand-del" />
-        </span>
+        <img className="brand" src={diffectIconUrl} alt="Diffect" />
         <WorkspacePicker
           workspace={workspace}
           entries={entries}

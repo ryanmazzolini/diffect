@@ -448,28 +448,11 @@ body.modal-open {
   white-space: nowrap;
 }
 .brand {
-  display: inline-flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
+  display: block;
   width: 26px;
   height: 26px;
   flex: none;
   border-radius: var(--r);
-  background: #1c2a3d;
-  padding: 6px;
-}
-.brand-bar {
-  display: block;
-  width: 100%;
-  height: 5px;
-  border-radius: 1px;
-}
-.brand-add {
-  background: #4bdc83;
-}
-.brand-del {
-  background: #fb6f72;
 }
 .workspace-path {
   color: var(--muted);
