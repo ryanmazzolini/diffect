@@ -1373,8 +1373,6 @@ export function App() {
         deletions={totalDeletions}
         filesChanged={headerFiles.length}
         viewedCount={viewedCount}
-        paneCollapsed={paneCollapsed}
-        onTogglePane={toggleCollapsed}
         workspaceRailOpen={workspaceRailOpen}
         onToggleWorkspaceRail={toggleWorkspaceRail}
       />
@@ -1485,106 +1483,130 @@ export function App() {
             onChanged={refreshThreads}
           />
         )}
-        {!paneCollapsed && (
-          <div
-            className="pane-resizer"
-            onMouseDown={startResize}
-            title="Drag to resize"
-          />
-        )}
-        {!paneCollapsed && (
-        // The thread pane carries its own snapshot context: the active diff's at
-        // N=1 (byte-identical to before), null at N≥2 — the aggregated inbox spans
-        // repos, so there's no single snapshot to mark "earlier iteration" against.
-        <CurrentSnapshotContext.Provider
-          value={stacked ? null : (diff?.currentSnapshotId ?? null)}
-        >
-        <aside className="thread-pane">
-          <div className="thread-pane-actions">
-            <button type="button" className="ghost" onClick={openSpaceComment}>
-              Comment on space
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => openRepoComment(repo)}
-            >
-              Comment on repo
-            </button>
-          </div>
-          {generalComment && (
-            <GeneralCommentForm
-              repo={generalComment.repo}
-              spacePath={generalComment.spacePath}
-              worktree={generalComment.worktree}
-              target={generalComment.target}
-              targetLevel={generalComment.targetLevel}
-              label={generalComment.label}
-              onCancel={closeGeneralComment}
-              onCreated={generalCommentCreated}
+        {paneCollapsed ? (
+          <button
+            type="button"
+            className="thread-reopen"
+            onClick={toggleCollapsed}
+            title="Show threads sidebar"
+            aria-label="Show threads sidebar"
+          >
+            <Icon name="sidebar-collapse" size={15} />
+          </button>
+        ) : (
+          <>
+            <div
+              className="pane-resizer"
+              onMouseDown={startResize}
+              title="Drag to resize"
             />
-          )}
-          <div className="filter-bar">
-            {STATUS_FILTERS.map((f) => (
-              <button
-                key={f}
-                className={`filter ${filter === f ? "active" : ""}`}
-                onClick={() => setFilter(f)}
-              >
-                {f}
-                <span className="filter-count">{statusCounts[f]}</span>
-              </button>
-            ))}
-          </div>
-          {/* The "looks complete" banner is the N=1 chrome for completion. In the
-              modules view each module's status crumb owns Mark complete/Revive, so
-              the global banner (which can only speak for the active repo) yields to
-              the per-module crumbs to avoid a duplicate, repo-ambiguous affordance. */}
-          {!stacked && sessionDone && completableSession && (
-            <div className="complete-banner" role="status">
-              <Icon name="check" size={14} className="complete-icon" />
-              <span className="complete-msg">
-                Every comment here is resolved — this review looks complete.
-              </span>
-              <button
-                type="button"
-                className="complete-action"
-                onClick={markComplete}
-              >
-                Mark complete
-              </button>
-              <button
-                type="button"
-                className="icon-btn complete-dismiss"
-                aria-label="Dismiss suggestion"
-                title="Dismiss"
-                onClick={() => dismissComplete(completableSession.id)}
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-          )}
-          {!showUnscoped && scopedThreads.length === 0 && legacyCount > 0 && (
-            <button
-              type="button"
-              className="unscoped-hint"
-              onClick={selectLegacy}
+            {/* The thread pane carries its own snapshot context: the active diff's at
+                N=1 (byte-identical to before), null at N≥2 — the aggregated inbox spans
+                repos, so there's no single snapshot to mark "earlier iteration" against. */}
+            <CurrentSnapshotContext.Provider
+              value={stacked ? null : (diff?.currentSnapshotId ?? null)}
             >
-              <Icon name="git-branch" size={14} />
-              <span>
-                {legacyCount} unscoped comment{legacyCount === 1 ? "" : "s"} from
-                before reviews were branch-scoped — view them
-              </span>
-            </button>
-          )}
-          <ThreadList
-            threads={byStatus}
-            editors={editors}
-            showRepo={stacked}
-            onChanged={refreshThreads}
-          />
-        </aside>
-        </CurrentSnapshotContext.Provider>
+              <aside className="thread-pane">
+                <div className="thread-pane-head">
+                  <span className="thread-pane-title">Threads</span>
+                  <button
+                    type="button"
+                    className="thread-pane-toggle"
+                    onClick={toggleCollapsed}
+                    title="Hide threads sidebar"
+                    aria-label="Hide threads sidebar"
+                  >
+                    <Icon name="sidebar-expand" size={14} />
+                  </button>
+                </div>
+                <div className="thread-pane-body">
+                  <div className="thread-pane-actions">
+                    <button type="button" className="ghost" onClick={openSpaceComment}>
+                      Comment on space
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => openRepoComment(repo)}
+                    >
+                      Comment on repo
+                    </button>
+                  </div>
+                  {generalComment && (
+                    <GeneralCommentForm
+                      repo={generalComment.repo}
+                      spacePath={generalComment.spacePath}
+                      worktree={generalComment.worktree}
+                      target={generalComment.target}
+                      targetLevel={generalComment.targetLevel}
+                      label={generalComment.label}
+                      onCancel={closeGeneralComment}
+                      onCreated={generalCommentCreated}
+                    />
+                  )}
+                  <div className="filter-bar">
+                    {STATUS_FILTERS.map((f) => (
+                      <button
+                        key={f}
+                        className={`filter ${filter === f ? "active" : ""}`}
+                        onClick={() => setFilter(f)}
+                      >
+                        {f}
+                        <span className="filter-count">{statusCounts[f]}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {/* The "looks complete" banner is the N=1 chrome for completion. In the
+                      modules view each module's status crumb owns Mark complete/Revive, so
+                      the global banner (which can only speak for the active repo) yields to
+                      the per-module crumbs to avoid a duplicate, repo-ambiguous affordance. */}
+                  {!stacked && sessionDone && completableSession && (
+                    <div className="complete-banner" role="status">
+                      <Icon name="check" size={14} className="complete-icon" />
+                      <span className="complete-msg">
+                        Every comment here is resolved — this review looks complete.
+                      </span>
+                      <button
+                        type="button"
+                        className="complete-action"
+                        onClick={markComplete}
+                      >
+                        Mark complete
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn complete-dismiss"
+                        aria-label="Dismiss suggestion"
+                        title="Dismiss"
+                        onClick={() => dismissComplete(completableSession.id)}
+                      >
+                        <Icon name="x" size={14} />
+                      </button>
+                    </div>
+                  )}
+                  {!showUnscoped && scopedThreads.length === 0 && legacyCount > 0 && (
+                    <button
+                      type="button"
+                      className="unscoped-hint"
+                      onClick={selectLegacy}
+                    >
+                      <Icon name="git-branch" size={14} />
+                      <span>
+                        {legacyCount} unscoped comment{legacyCount === 1 ? "" : "s"} from
+                        before reviews were branch-scoped — view them
+                      </span>
+                    </button>
+                  )}
+                  <ThreadList
+                    threads={byStatus}
+                    editors={editors}
+                    showRepo={stacked}
+                    onChanged={refreshThreads}
+                  />
+                </div>
+              </aside>
+            </CurrentSnapshotContext.Provider>
+          </>
         )}
         </main>
       </div>

@@ -5,13 +5,13 @@ test("collapses the thread pane and persists the choice", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".thread-pane")).toBeVisible();
 
-  await page.getByRole("button", { name: "Toggle threads panel" }).click();
+  await page.getByRole("button", { name: "Hide threads sidebar" }).click();
   await expect(page.locator(".thread-pane")).toHaveCount(0);
 
   await page.reload();
   await expect(page.locator(".thread-pane")).toHaveCount(0); // stayed collapsed
 
-  await page.getByRole("button", { name: "Toggle threads panel" }).click();
+  await page.getByRole("button", { name: "Show threads sidebar" }).click();
   await expect(page.locator(".thread-pane")).toBeVisible();
 });
 

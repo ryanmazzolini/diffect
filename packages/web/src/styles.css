@@ -1040,7 +1040,7 @@ body.modal-open {
   border-right: 1px solid var(--border);
   background: var(--bg-elev);
   overflow: auto;
-  padding: 8px 6px;
+  padding: 0 6px 8px;
   font-size: 12.5px;
 }
 .sidebar-panel-head {
@@ -1051,8 +1051,9 @@ body.modal-open {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin: -8px -6px 6px;
-  padding: 8px 8px 7px 10px;
+  height: 42px;
+  margin: 0 -6px 6px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
 }
@@ -1428,8 +1429,57 @@ body.modal-open {
 .thread-pane {
   border-left: 1px solid var(--border);
   overflow: auto;
-  padding: 12px;
   background: var(--bg);
+}
+.thread-pane-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.thread-pane-title {
+  font-weight: 650;
+  color: var(--text);
+}
+.thread-pane-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.thread-pane-toggle:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.thread-pane-body {
+  padding: 12px;
+}
+.thread-reopen {
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10px;
+}
+.thread-reopen:hover {
+  color: var(--text);
+  background: var(--panel-2);
 }
 .thread-pane-actions {
   display: flex;

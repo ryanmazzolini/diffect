@@ -80,8 +80,6 @@ interface Props {
   deletions: number;
   filesChanged: number;
   viewedCount: number;
-  paneCollapsed: boolean;
-  onTogglePane: () => void;
   workspaceRailOpen: boolean;
   onToggleWorkspaceRail: () => void;
 }
@@ -115,8 +113,6 @@ export function Topbar({
   deletions,
   filesChanged,
   viewedCount,
-  paneCollapsed,
-  onTogglePane,
   workspaceRailOpen,
   onToggleWorkspaceRail,
 }: Props) {
@@ -170,15 +166,6 @@ export function Topbar({
           aria-label="Toggle color theme"
         >
           <Icon name={theme === "dark" ? "sun" : "moon"} />
-        </button>
-        <button
-          type="button"
-          className="icon-btn pane-toggle"
-          onClick={onTogglePane}
-          title={paneCollapsed ? "Show threads panel" : "Hide threads panel"}
-          aria-label="Toggle threads panel"
-        >
-          <Icon name={paneCollapsed ? "sidebar-expand" : "sidebar-collapse"} />
         </button>
       </div>
 

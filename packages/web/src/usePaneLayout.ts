@@ -36,7 +36,7 @@ export function usePaneLayout(container: RefObject<HTMLElement | null>): {
     collapsed,
     toggleCollapsed: () => setCollapsed((c) => !c),
     startResize,
-    columns: collapsed ? "1fr" : "minmax(0, 1fr) 6px var(--thread-w, 340px)",
+    columns: collapsed ? "minmax(0, 1fr) 34px" : "minmax(0, 1fr) 6px var(--thread-w, 340px)",
     width,
   };
 }
