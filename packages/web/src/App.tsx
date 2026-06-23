@@ -24,7 +24,7 @@ import { usePaneLayout } from "./usePaneLayout.js";
 import { useResizable } from "./useResizable.js";
 import { ModuleSection } from "./components/ModuleSection.js";
 import { ThreadList } from "./components/ThreadList.js";
-import { Topbar } from "./components/Topbar.js";
+import { Topbar, WorkspaceRail } from "./components/Topbar.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 import { GeneralCommentForm } from "./components/GeneralCommentForm.js";
@@ -181,6 +181,7 @@ export function App() {
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const [workspaceRailOpen, setWorkspaceRailOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => getStored("diffect-sidebar-collapsed") === "1",
   );
@@ -326,6 +327,8 @@ export function App() {
       setStored("diffect-sidebar-collapsed", c ? "0" : "1");
       return !c;
     });
+  const toggleWorkspaceRail = () => setWorkspaceRailOpen((open) => !open);
+  const closeWorkspaceRail = useCallback(() => setWorkspaceRailOpen(false), []);
 
   const loadWorkspaces = useCallback(() => {
     api.workspaces().then(setEntries).catch(() => setEntries([]));
@@ -1372,10 +1375,32 @@ export function App() {
         viewedCount={viewedCount}
         paneCollapsed={paneCollapsed}
         onTogglePane={toggleCollapsed}
-        onToggleSidebar={toggleSidebar}
+        workspaceRailOpen={workspaceRailOpen}
+        onToggleWorkspaceRail={toggleWorkspaceRail}
       />
       <div className="workbench" ref={workbenchRef} style={paneVars}>
-        {!sidebarCollapsed && (
+        {workspaceRailOpen && (
+          <WorkspaceRail
+            workspace={visibleWorkspace}
+            entries={entries}
+            activeWorkspacePath={activeEntry?.path ?? visibleWorkspace.root}
+            changedFilesByRepo={changedFilesByRepo}
+            onSelectWorkspace={selectWorkspace}
+            onAddWorkspace={openAdd}
+            onClose={closeWorkspaceRail}
+          />
+        )}
+        {sidebarCollapsed ? (
+          <button
+            type="button"
+            className="sidebar-reopen"
+            onClick={toggleSidebar}
+            title="Show files sidebar"
+            aria-label="Show files sidebar"
+          >
+            <Icon name="sidebar-expand" size={15} />
+          </button>
+        ) : (
           <>
             <Sidebar
               repo={repo}
@@ -1395,6 +1420,7 @@ export function App() {
               activeFile={activeFile}
               onSelectFile={selectFile}
               onShowDiff={backToDiff}
+              onCollapse={toggleSidebar}
             />
             <div
               className="sidebar-resizer"

@@ -45,6 +45,15 @@ function workspaceMeta(
   return `${repoCount} · ${changed} changed file${changed === 1 ? "" : "s"}`;
 }
 
+interface WorkspaceNavProps {
+  workspace: WorkspaceInfo;
+  entries: WorkspaceEntry[];
+  activeWorkspacePath: string;
+  changedFilesByRepo: Map<string, number>;
+  onSelectWorkspace: (path: string) => void;
+  onAddWorkspace: () => void;
+}
+
 interface Props {
   workspace: WorkspaceInfo;
   entries: WorkspaceEntry[];
@@ -73,7 +82,8 @@ interface Props {
   viewedCount: number;
   paneCollapsed: boolean;
   onTogglePane: () => void;
-  onToggleSidebar: () => void;
+  workspaceRailOpen: boolean;
+  onToggleWorkspaceRail: () => void;
 }
 
 /**
@@ -107,7 +117,8 @@ export function Topbar({
   viewedCount,
   paneCollapsed,
   onTogglePane,
-  onToggleSidebar,
+  workspaceRailOpen,
+  onToggleWorkspaceRail,
 }: Props) {
   const activeRepo = workspace.repos.find((r) => r.name === repo);
   const hasFiles = filesChanged > 0;
@@ -119,9 +130,11 @@ export function Topbar({
         <button
           type="button"
           className="icon-btn hamburger"
-          onClick={onToggleSidebar}
-          title="Toggle sidebar"
-          aria-label="Toggle sidebar"
+          onClick={onToggleWorkspaceRail}
+          title="Toggle workspaces"
+          aria-label="Toggle workspaces"
+          aria-expanded={workspaceRailOpen}
+          aria-controls="workspace-rail"
         >
           <Icon name="three-bars" />
         </button>
@@ -256,14 +269,7 @@ function WorkspacePicker({
   changedFilesByRepo,
   onSelectWorkspace,
   onAddWorkspace,
-}: {
-  workspace: WorkspaceInfo;
-  entries: WorkspaceEntry[];
-  activeWorkspacePath: string;
-  changedFilesByRepo: Map<string, number>;
-  onSelectWorkspace: (path: string) => void;
-  onAddWorkspace: () => void;
-}) {
+}: WorkspaceNavProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -302,6 +308,17 @@ function WorkspacePicker({
   const close = () => {
     if (detailsRef.current) detailsRef.current.open = false;
   };
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const details = detailsRef.current;
+      if (!details || !details.open) return;
+      if (event.target instanceof Node && !details.contains(event.target)) close();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
   const select = (path: string) => {
     const next = { ...recency, [path]: Date.now() };
     setRecency(next);
@@ -370,5 +387,119 @@ function WorkspacePicker({
         </button>
       </div>
     </details>
+  );
+}
+
+export function WorkspaceRail({
+  workspace,
+  entries,
+  activeWorkspacePath,
+  changedFilesByRepo,
+  onSelectWorkspace,
+  onAddWorkspace,
+  onClose,
+}: WorkspaceNavProps & { onClose: () => void }) {
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [recency, setRecency] = useState(loadWorkspaceRecency);
+  const fallbackEntry = useMemo<WorkspaceEntry>(
+    () => ({ path: workspace.root, repos: workspace.repos }),
+    [workspace.repos, workspace.root],
+  );
+  const allEntries = entries.length > 0 ? entries : [fallbackEntry];
+  const active =
+    allEntries.find((entry) => entry.path === activeWorkspacePath) ?? fallbackEntry;
+
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    setRecency((prev) => {
+      const next = { ...prev, [activeWorkspacePath]: Date.now() };
+      setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [activeWorkspacePath]);
+
+  const sorted = useMemo(() => {
+    const originalOrder = new Map(allEntries.map((entry, index) => [entry.path, index]));
+    return [...allEntries].sort(
+      (a, b) =>
+        (recency[b.path] ?? 0) - (recency[a.path] ?? 0) ||
+        (originalOrder.get(a.path) ?? 0) - (originalOrder.get(b.path) ?? 0),
+    );
+  }, [allEntries, recency]);
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? sorted.filter((entry) =>
+        `${basename(entry.path)} ${entry.path}`.toLowerCase().includes(needle),
+      )
+    : sorted;
+
+  const select = (path: string) => {
+    const next = { ...recency, [path]: Date.now() };
+    setRecency(next);
+    setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
+    onSelectWorkspace(path);
+    onClose();
+  };
+
+  return (
+    <aside id="workspace-rail" className="workspace-rail" aria-label="Workspaces">
+      <div className="workspace-rail-head">
+        <span className="workspace-rail-title">Workspaces</span>
+        <button
+          type="button"
+          className="workspace-rail-close"
+          onClick={onClose}
+          title="Close workspaces"
+          aria-label="Close workspaces"
+        >
+          <Icon name="x" size={13} />
+        </button>
+      </div>
+      <label className="workspace-search">
+        <Icon name="search" size={13} />
+        <input
+          ref={searchRef}
+          aria-label="Search workspaces"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search workspaces…"
+        />
+      </label>
+      <div className="workspace-options">
+        {filtered.length === 0 ? (
+          <div className="workspace-empty">No workspaces found</div>
+        ) : (
+          filtered.map((entry) => (
+            <button
+              type="button"
+              key={entry.path}
+              className={`workspace-option ${entry.path === active.path ? "active" : ""}`}
+              onClick={() => select(entry.path)}
+            >
+              <span className="workspace-option-name">{basename(entry.path)}</span>
+              <span className="workspace-option-meta">
+                {workspaceMeta(entry, changedFilesByRepo)}
+              </span>
+              <span className="workspace-option-path">{entry.path}</span>
+            </button>
+          ))
+        )}
+      </div>
+      <button
+        type="button"
+        className="workspace-add"
+        onClick={() => {
+          onClose();
+          onAddWorkspace();
+        }}
+      >
+        <Icon name="plus" size={13} />
+        Add workspace
+      </button>
+    </aside>
   );
 }

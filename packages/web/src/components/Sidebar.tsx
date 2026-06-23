@@ -46,6 +46,7 @@ interface Props {
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onShowDiff: () => void;
+  onCollapse: () => void;
 }
 
 
@@ -111,6 +112,7 @@ export const Sidebar = memo(function Sidebar({
   activeFile,
   onSelectFile,
   onShowDiff,
+  onCollapse,
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
   const treeEntries = useMemo(
@@ -123,6 +125,18 @@ export const Sidebar = memo(function Sidebar({
 
   return (
     <nav className="sidebar">
+      <div className="sidebar-panel-head">
+        <span className="sidebar-panel-title">Files</span>
+        <button
+          type="button"
+          className="sidebar-panel-toggle"
+          onClick={onCollapse}
+          title="Hide files sidebar"
+          aria-label="Hide files sidebar"
+        >
+          <Icon name="sidebar-collapse" size={14} />
+        </button>
+      </div>
       {showRepoList && (
         <>
           <div className="sidebar-head sidebar-top-head">
@@ -144,7 +158,7 @@ export const Sidebar = memo(function Sidebar({
       {showFiles && (
         <>
           <div className="sidebar-head files-head">
-            <span>Files</span>
+            <span>{fileMode === "all" ? "All files" : "Changed"}</span>
             <span className="files-head-actions">
               {fileMode === "diff" && (
                 <ReviewProgress

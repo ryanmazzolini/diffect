@@ -608,6 +608,51 @@ body.modal-open {
   background: var(--panel-2);
   color: var(--text);
 }
+.workspace-rail {
+  width: 260px;
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px;
+  font-size: 12px;
+}
+.workspace-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+}
+.workspace-rail-title {
+  font-weight: 650;
+}
+.workspace-rail-close,
+.sidebar-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.workspace-rail-close:hover,
+.sidebar-panel-toggle:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.workspace-rail .workspace-options {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
 .repo-count {
   font-family: var(--mono);
   font-size: 11px;
@@ -997,6 +1042,39 @@ body.modal-open {
   overflow: auto;
   padding: 8px 6px;
   font-size: 12.5px;
+}
+.sidebar-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -8px -6px 6px;
+  padding: 8px 8px 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.sidebar-panel-title {
+  font-weight: 650;
+  color: var(--text);
+}
+.sidebar-reopen {
+  flex: 0 0 34px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10px;
+}
+.sidebar-reopen:hover {
+  color: var(--text);
+  background: var(--panel-2);
 }
 /* Drag handle between the sidebar and the diff/thread area. */
 .sidebar-resizer {

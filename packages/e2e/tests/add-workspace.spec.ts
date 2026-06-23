@@ -1,5 +1,14 @@
 import { test, expect } from "@playwright/test";
 
+test("workspace picker closes when clicking outside", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".workspace-trigger").click();
+  await expect(page.locator(".workspace-picker[open]")).toHaveCount(1);
+
+  await page.locator(".workspace-path").click();
+  await expect(page.locator(".workspace-picker[open]")).toHaveCount(0);
+});
+
 test("add-workspace dialog lists recommendations and adds on select", async ({
   page,
 }) => {

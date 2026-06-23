@@ -21,12 +21,18 @@ test("sidebar shows the file tree, toggles and persists", async ({ page }) => {
   await expect(page.locator(".tree-file", { hasText: "README.md" })).toBeVisible();
   await expect(page.locator('.tree-file:has-text("README.md") .status-unchanged')).toBeVisible();
 
-  // Hamburger collapses the sidebar and the choice persists across reload.
-  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  // Hamburger opens the hidden workspace rail, not the file sidebar.
+  await page.getByRole("button", { name: "Toggle workspaces" }).click();
+  await expect(page.locator(".workspace-rail")).toBeVisible();
+  await page.getByRole("button", { name: "Close workspaces" }).click();
+  await expect(page.locator(".workspace-rail")).toHaveCount(0);
+
+  // The files sub-sidebar has its own collapse control, persisted across reload.
+  await page.getByRole("button", { name: "Hide files sidebar" }).click();
   await expect(page.locator(".sidebar")).toHaveCount(0);
   await page.reload();
   await expect(page.locator(".sidebar")).toHaveCount(0);
-  await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  await page.getByRole("button", { name: "Show files sidebar" }).click();
   await expect(page.locator(".sidebar")).toBeVisible();
 });
 
