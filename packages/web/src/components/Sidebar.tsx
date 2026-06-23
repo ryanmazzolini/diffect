@@ -11,28 +11,22 @@ import type {
   RepoSummary,
   ReviewScope,
   ReviewSession,
-  WorkspaceEntry,
 } from "@diffect/shared";
 import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
 import {
   buildPathTree,
   type FileTreeEntry,
-  type TreeFile,
   type TreeFileStatus,
   type TreeNode,
 } from "../fileTree.js";
 
 interface Props {
-  entries: WorkspaceEntry[];
-  activeWorkspacePath: string;
   repo: string;
   /** Id of the session the active diff resolved to — remounts the file tree on review switch. */
   currentSession: string | null;
   /** The unscoped/legacy bucket is open; no session entry is highlighted. */
   showUnscoped: boolean;
-  /** Changed file count per repo, when that repo's diff has loaded. */
-  changedFilesByRepo: Map<string, number>;
   /** Sessions archived for the active repo (durable + optimistic), routed to a
    *  collapsed Archived group instead of the active list. */
   archivedSessions: ReviewSession[];
@@ -40,9 +34,9 @@ interface Props {
   sessionCounts: Map<string, number>;
   /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
   legacyCount: number;
-  onSelectWorkspace: (path: string) => void;
+  repos: RepoSummary[];
   onSelectRepo: (repo: string) => void;
-  onReviveSession: (session: ReviewSession) => void;
+  onSelectSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
   files: DiffFile[];
   allFiles: string[];
@@ -52,11 +46,8 @@ interface Props {
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onShowDiff: () => void;
-  onAddWorkspace: () => void;
 }
 
-const LEGACY_KEY = "__legacy__";
-const EMPTY_SESSIONS: ReviewSession[] = [];
 
 /**
  * Human label for a review session, derived from its scope so the client never
@@ -83,17 +74,8 @@ function sessionLabel(scope: ReviewScope): string {
   }
 }
 
-/** Secondary muted line: a work session's PR-like base, else nothing. */
-function sessionDetail(scope: ReviewScope): string | null {
-  if (scope.kind === "work" && scope.branch && scope.baseRef !== scope.headRef) {
-    return `vs ${scope.baseRef}`;
-  }
+function sessionDetail(_scope: ReviewScope): string | null {
   return null;
-}
-
-function basename(p: string): string {
-  const parts = p.split(/[/\\]/).filter(Boolean);
-  return parts[parts.length - 1] ?? p;
 }
 
 function diffFileEntries(files: DiffFile[]): FileTreeEntry[] {
@@ -109,21 +91,18 @@ function allFileEntries(paths: string[], changed: DiffFile[]): FileTreeEntry[] {
   return [...byPath.values()];
 }
 
-/** Left navigation: spaces/threads → repos → files. Memoized so a diff/thread
- * change doesn't re-render the whole nav. */
+/** Left navigation: workspace → repos (when needed) → files. Memoized so a
+ * diff/thread change doesn't re-render the whole nav. */
 export const Sidebar = memo(function Sidebar({
-  entries,
-  activeWorkspacePath,
   repo,
+  repos,
   currentSession,
   showUnscoped,
-  changedFilesByRepo,
   archivedSessions,
   sessionCounts,
   legacyCount,
-  onSelectWorkspace,
   onSelectRepo,
-  onReviveSession,
+  onSelectSession,
   onSelectLegacy,
   files,
   allFiles,
@@ -132,158 +111,88 @@ export const Sidebar = memo(function Sidebar({
   activeFile,
   onSelectFile,
   onShowDiff,
-  onAddWorkspace,
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
-  const [viewMode, setViewMode] = useState<"tree" | "list">("tree");
   const treeEntries = useMemo(
     () => (fileMode === "all" ? allFileEntries(allFiles, files) : diffFileEntries(files)),
     [allFiles, fileMode, files],
   );
   const showFiles = files.length > 0 || allFiles.length > 0;
-  const activeWorkspace = useMemo(
-    () =>
-      entries.find((ws) => ws.path === activeWorkspacePath) ??
-      entries.find((ws) => ws.repos.some((r) => r.name === repo)) ??
-      null,
-    [activeWorkspacePath, entries, repo],
-  );
-  const spaceCount = entries.length;
+  const showRepoList = repos.length > 1;
+  const showRecovery = legacyCount > 0 || archivedSessions.length > 0;
 
   return (
     <nav className="sidebar">
-      <div className="sidebar-head">
-        <span>Spaces / Threads</span>
-        <button
-          type="button"
-          className="icon-btn sidebar-add"
-          title="Add a workspace"
-          aria-label="Add a workspace"
-          onClick={onAddWorkspace}
-        >
-          <Icon name="plus" size={14} />
-        </button>
-      </div>
-      <ThreadSpaceList
-        entries={entries}
-        activeWorkspacePath={activeWorkspacePath}
-        activeRepo={repo}
-        changedFilesByRepo={changedFilesByRepo}
-        onSelectWorkspace={onSelectWorkspace}
-      />
-
-      {activeWorkspace && (
+      {showRepoList && (
         <>
-          <div className="sidebar-head">
-            <span>Repos in review</span>
+          <div className="sidebar-head sidebar-top-head">
+            <span>Repos</span>
           </div>
           <div className="ws-group">
-            {activeWorkspace.repos.map((r) => (
+            {repos.map((r) => (
               <RepoItem
                 key={r.name}
                 repo={r}
                 active={r.name === repo}
-                showUnscoped={showUnscoped}
-                archivedSessions={r.name === repo ? archivedSessions : EMPTY_SESSIONS}
-                sessionCounts={sessionCounts}
-                legacyCount={legacyCount}
                 onSelectRepo={onSelectRepo}
-                onReviveSession={onReviveSession}
-                onSelectLegacy={onSelectLegacy}
               />
             ))}
           </div>
         </>
       )}
 
-      <div className="sidebar-head connections-head">
-        <span>Connections</span>
-      </div>
-      <div className="connections-list">
-        <div className="connection-row">
-          <span className="connection-dot" aria-hidden="true" />
-          <span className="connection-name">Local</span>
-          <span className="connection-meta">{spaceCount} spaces</span>
-        </div>
-      </div>
-
       {showFiles && (
         <>
-          <div className="sidebar-head">
+          <div className="sidebar-head files-head">
             <span>Files</span>
-            {fileMode === "diff" && (
-              <ReviewProgress
-                files={files}
-                viewed={viewed}
-                activeFile={activeFile}
-                onSelectFile={onSelectFile}
-              />
-            )}
-          </div>
-          <div className="file-mode-toggle" role="group" aria-label="Review scope">
-            <button
-              type="button"
-              className={`file-mode ${fileMode === "diff" ? "active" : ""}`}
-              aria-pressed={fileMode === "diff"}
-              onClick={() => {
-                setFileMode("diff");
-                onShowDiff();
-              }}
-            >
-              Diff
-            </button>
-            <button
-              type="button"
-              className={`file-mode ${fileMode === "all" ? "active" : ""}`}
-              aria-pressed={fileMode === "all"}
-              onClick={() => setFileMode("all")}
-            >
-              All files
-            </button>
-          </div>
-          <div className="ft-toolbar">
-            <span className="ttl">{fileMode === "all" ? "All files" : "Changed"}</span>
-            <div className="seg" role="group" aria-label="File view">
+            <span className="files-head-actions">
+              {fileMode === "diff" && (
+                <ReviewProgress
+                  files={files}
+                  viewed={viewed}
+                  activeFile={activeFile}
+                  onSelectFile={onSelectFile}
+                />
+              )}
               <button
                 type="button"
-                className={viewMode === "tree" ? "on" : ""}
-                aria-pressed={viewMode === "tree"}
-                onClick={() => setViewMode("tree")}
+                className="file-scope-link"
+                onClick={() => {
+                  if (fileMode === "all") {
+                    setFileMode("diff");
+                    onShowDiff();
+                  } else {
+                    setFileMode("all");
+                  }
+                }}
               >
-                Tree
+                {fileMode === "all" ? "Changed files" : "All files"}
               </button>
-              <button
-                type="button"
-                className={viewMode === "list" ? "on" : ""}
-                aria-pressed={viewMode === "list"}
-                onClick={() => setViewMode("list")}
-              >
-                List
-              </button>
-            </div>
+            </span>
           </div>
           {/* key remounts the tree on repo/mode switch so collapse state and
               the memoized tree re-initialize for the right file set. */}
-          {viewMode === "tree" ? (
-            <FileTree
-              key={`${repo}:${fileMode}:${currentSession ?? ""}`}
-              repo={repo}
-              entries={treeEntries}
-              viewed={viewed}
-              threadCounts={threadCounts}
-              activeFile={activeFile}
-              onSelectFile={onSelectFile}
-            />
-          ) : (
-            <FileList
-              entries={treeEntries}
-              viewed={viewed}
-              threadCounts={threadCounts}
-              activeFile={activeFile}
-              onSelectFile={onSelectFile}
-            />
-          )}
+          <FileTree
+            key={`${repo}:${fileMode}:${currentSession ?? ""}`}
+            repo={repo}
+            entries={treeEntries}
+            viewed={viewed}
+            threadCounts={threadCounts}
+            activeFile={activeFile}
+            onSelectFile={onSelectFile}
+          />
         </>
+      )}
+
+      {showRecovery && (
+        <ReviewRecovery
+          archivedSessions={archivedSessions}
+          sessionCounts={sessionCounts}
+          legacyCount={legacyCount}
+          showUnscoped={showUnscoped}
+          onSelectSession={onSelectSession}
+          onSelectLegacy={onSelectLegacy}
+        />
       )}
     </nav>
   );
@@ -334,61 +243,6 @@ function ReviewProgress({
         {done}/{total}
       </span>
     </button>
-  );
-}
-
-function ThreadSpaceList({
-  entries,
-  activeWorkspacePath,
-  activeRepo,
-  changedFilesByRepo,
-  onSelectWorkspace,
-}: {
-  entries: WorkspaceEntry[];
-  activeWorkspacePath: string;
-  activeRepo: string;
-  changedFilesByRepo: Map<string, number>;
-  onSelectWorkspace: (path: string) => void;
-}) {
-  if (entries.length === 0) {
-    return <div className="open-review-empty">No spaces</div>;
-  }
-
-  return (
-    <div className="open-review-list">
-      {entries.map((ws) => {
-        const active =
-          ws.path === activeWorkspacePath || ws.repos.some((r) => r.name === activeRepo);
-        const loaded = ws.repos.some((r) => changedFilesByRepo.has(r.name));
-        const changed = ws.repos.reduce(
-          (n, r) => n + (changedFilesByRepo.get(r.name) ?? 0),
-          0,
-        );
-        const repoCount = `${ws.repos.length} repo${ws.repos.length === 1 ? "" : "s"}`;
-        const changedLabel = loaded
-          ? changed === 0
-            ? "no changes"
-            : `${changed} changed file${changed === 1 ? "" : "s"}`
-          : null;
-        return (
-          <button
-            key={ws.path}
-            type="button"
-            className={`open-review space-review ${active ? "active" : ""}`}
-            onClick={() => onSelectWorkspace(ws.path)}
-            title={ws.path}
-          >
-            <span className="open-review-dot" aria-hidden="true" />
-            <span className="open-review-copy">
-              <span className="open-review-name">{basename(ws.path)}</span>
-              <span className="open-review-meta">
-                {repoCount}{changedLabel ? ` · ${changedLabel}` : ""}
-              </span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
@@ -599,61 +453,6 @@ function FileBadges({
   );
 }
 
-/** Flat list view: filename + muted parent path, in tree (folders-first) order. */
-function FileList({
-  entries,
-  viewed,
-  threadCounts,
-  activeFile,
-  onSelectFile,
-}: {
-  entries: FileTreeEntry[];
-  viewed: Set<string>;
-  threadCounts: Map<string, number>;
-  activeFile: string | null;
-  onSelectFile: (path: string) => void;
-}) {
-  const files = useMemo(() => flattenTree(buildPathTree(entries)), [entries]);
-  return (
-    <div className="file-list">
-      {files.map((node) => {
-        const slash = node.path.lastIndexOf("/");
-        const dir = slash >= 0 ? node.path.slice(0, slash) : "";
-        return (
-          <button
-            type="button"
-            key={node.path}
-            className={`lfile${node.path === activeFile ? " active" : ""}${
-              node.file?.ignored ? " ignored" : ""
-            }`}
-            title={node.file?.ignored ? `${node.path} — ignored by git` : node.path}
-            onClick={() => onSelectFile(node.path)}
-          >
-            <span className="lname">{node.name}</span>
-            {dir && <span className="lpath">{dir}</span>}
-            <FileBadges
-              status={node.status}
-              file={node.file}
-              viewed={viewed.has(node.path)}
-              threads={threadCounts.get(node.path) ?? 0}
-            />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Depth-first flatten of the built tree into files, preserving display order. */
-function flattenTree(nodes: TreeNode[]): TreeFile[] {
-  const out: TreeFile[] = [];
-  for (const node of nodes) {
-    if (node.type === "file") out.push(node);
-    else out.push(...flattenTree(node.children));
-  }
-  return out;
-}
-
 function statusIcon(status: TreeFileStatus): IconName {
   switch (status) {
     case "added":
@@ -675,121 +474,78 @@ function statusIcon(status: TreeFileStatus): IconName {
 function RepoItem({
   repo,
   active,
-  showUnscoped,
-  archivedSessions,
-  sessionCounts,
-  legacyCount,
   onSelectRepo,
-  onReviveSession,
-  onSelectLegacy,
 }: {
   repo: RepoSummary;
   active: boolean;
-  showUnscoped: boolean;
-  archivedSessions: ReviewSession[];
-  sessionCounts: Map<string, number>;
-  legacyCount: number;
   onSelectRepo: (repo: string) => void;
-  onReviveSession: (session: ReviewSession) => void;
-  onSelectLegacy: () => void;
 }) {
-  // The branch of the primary checkout — what "this repo" is on. Shown as a muted
-  // subtitle so a repo whose sole session is implicit (no list rendered) still
-  // surfaces its branch on the repo row itself.
   const primaryBranch =
     repo.worktrees.find((w) => w.root === repo.root)?.branch ??
     repo.worktrees[0]?.branch ??
     null;
 
-  // The space/thread row is the review. Keep only special buckets nested here so
-  // repo rows stay compact.
-  const showSessions = active && (legacyCount > 0 || archivedSessions.length > 0);
-
   return (
-    <div>
-      <button
-        type="button"
-        className={`repo-item ${active ? "active" : ""}`}
-        onClick={() => onSelectRepo(repo.name)}
-      >
-        <span className="repo-name">{repo.name}</span>
-        {primaryBranch && (
-          <span className="repo-branch" title={`On branch ${primaryBranch}`}>
-            <Icon name="git-branch" size={11} className="repo-branch-icon" />
-            {primaryBranch}
-          </span>
-        )}
-      </button>
-      {showSessions && (
-        <div className="session-list">
-          {legacyCount > 0 && (
-            <SessionItem
-              label="Unscoped"
-              detail="pre-scope comments"
-              count={legacyCount}
-              active={showUnscoped}
-              onClick={onSelectLegacy}
-            />
-          )}
-          {archivedSessions.length > 0 && (
-            <ArchivedGroup
-              sessions={archivedSessions}
-              sessionCounts={sessionCounts}
-              onRevive={onReviveSession}
-            />
-          )}
-        </div>
+    <button
+      type="button"
+      className={`repo-item ${active ? "active" : ""}`}
+      onClick={() => onSelectRepo(repo.name)}
+    >
+      <span className="repo-name">{repo.name}</span>
+      {primaryBranch && (
+        <span className="repo-branch" title={`On branch ${primaryBranch}`}>
+          <Icon name="git-branch" size={11} className="repo-branch-icon" />
+          {primaryBranch}
+        </span>
       )}
-    </div>
+    </button>
   );
 }
 
-/**
- * Collapsed disclosure of a repo's archived (completed) reviews. Default-closed
- * so finished work stays out of the way; expands to one SessionItem per archived
- * session, each with a Revive action. Archived rows are not navigable — an
- * off-checkout `work` session would re-stamp a different id if selected (its id
- * tracks the live branch) — so Revive (which POSTs the stored scope, server
- * re-derives the id) is the only action.
- */
-function ArchivedGroup({
-  sessions,
+function ReviewRecovery({
+  archivedSessions,
   sessionCounts,
-  onRevive,
+  legacyCount,
+  showUnscoped,
+  onSelectSession,
+  onSelectLegacy,
 }: {
-  sessions: ReviewSession[];
+  archivedSessions: ReviewSession[];
   sessionCounts: Map<string, number>;
-  onRevive: (session: ReviewSession) => void;
+  legacyCount: number;
+  showUnscoped: boolean;
+  onSelectSession: (session: ReviewSession) => void;
+  onSelectLegacy: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const total = legacyCount + archivedSessions.length;
   return (
-    <div className="archived-group">
-      <button
-        type="button"
-        className="archived-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <Icon
-          name={open ? "chevron-down" : "chevron-right"}
-          size={12}
-          className="archived-chevron"
-        />
-        <span className="archived-label">Archived</span>
-        <span className="archived-count">{sessions.length}</span>
-      </button>
-      {open &&
-        sessions.map((s) => (
+    <details className="review-recovery">
+      <summary>
+        <span>Completed reviews</span>
+        <span className="archived-count">{total}</span>
+      </summary>
+      <div className="session-list recovery-list">
+        {legacyCount > 0 && (
+          <SessionItem
+            label="Unscoped"
+            detail="pre-scope comments"
+            count={legacyCount}
+            active={showUnscoped}
+            onClick={onSelectLegacy}
+          />
+        )}
+        {archivedSessions.map((s) => (
           <SessionItem
             key={s.id}
             label={sessionLabel(s.scope)}
             detail={sessionDetail(s.scope)}
             count={sessionCounts.get(s.id) ?? 0}
             active={false}
-            onRevive={() => onRevive(s)}
+            onClick={() => onSelectSession(s)}
           />
         ))}
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -799,54 +555,14 @@ function SessionItem({
   count,
   active,
   onClick,
-  onRevive,
 }: {
   label: string;
   detail: string | null;
   count: number;
   active: boolean;
   onClick?: () => void;
-  /** When set, this is an archived row: rendered static (not navigable) with a
-   *  Revive action instead of a row click. */
-  onRevive?: () => void;
 }) {
   const title = detail ? `${label} — ${detail}` : label;
-  const head = (
-    <>
-      <Icon name="git-branch" size={11} className="session-icon" />
-      <span className="session-name">{label}</span>
-      {detail && <span className="session-detail">{detail}</span>}
-    </>
-  );
-  const countPill = count > 0 && (
-    <span className="session-count" title={`${count} comment${count === 1 ? "" : "s"}`}>
-      {count}
-    </span>
-  );
-
-  // Archived rows can't nest a Revive button inside a row button (invalid HTML),
-  // and aren't navigable anyway, so they render as a static div. The count + Revive
-  // ride in a right-pinned cluster so the action sits at the edge with or without a
-  // count.
-  if (onRevive) {
-    return (
-      <div className="session-item archived" title={title}>
-        {head}
-        <span className="archived-actions">
-          {countPill}
-          <button
-            type="button"
-            className="session-revive"
-            onClick={onRevive}
-            title="Revive this review"
-          >
-            Revive
-          </button>
-        </span>
-      </div>
-    );
-  }
-
   return (
     <button
       type="button"
@@ -854,8 +570,14 @@ function SessionItem({
       onClick={onClick}
       title={title}
     >
-      {head}
-      {countPill}
+      <Icon name="git-branch" size={11} className="session-icon" />
+      <span className="session-name">{label}</span>
+      {detail && <span className="session-detail">{detail}</span>}
+      {count > 0 && (
+        <span className="session-count" title={`${count} comment${count === 1 ? "" : "s"}`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }

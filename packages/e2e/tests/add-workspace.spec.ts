@@ -4,7 +4,8 @@ test("add-workspace dialog lists recommendations and adds on select", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.locator(".sidebar-add").click();
+  await page.locator(".workspace-trigger").click();
+  await page.locator(".workspace-add").click();
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -23,7 +24,8 @@ test("add-workspace dialog opens the folder browser and Esc closes", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.locator(".sidebar-add").click();
+  await page.locator(".workspace-trigger").click();
+  await page.locator(".workspace-add").click();
 
   await page.getByRole("button", { name: "Browse…" }).click();
   await expect(page.locator(".aw-browser")).toBeVisible();

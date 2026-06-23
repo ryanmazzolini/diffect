@@ -11,10 +11,10 @@ import { test, expect } from "@playwright/test";
 
 test("renders the workspace identity and one module per repo", async ({ page }) => {
   await page.goto("/");
-  // N≥2 swaps the bare repo path for a workspace crumb plus a repo count.
-  await expect(page.locator(".workspace-crumb")).toBeVisible();
+  // N≥2 keeps the workspace picker/path in the topbar plus a repo count.
+  await expect(page.locator(".workspace-trigger")).toBeVisible();
+  await expect(page.locator(".workspace-path")).toBeVisible();
   await expect(page.locator(".repo-count")).toHaveText("2 repos");
-  await expect(page.locator(".workspace-path")).toHaveCount(0);
 
   // One stacked module per repo, each labelled with its repo name.
   await expect(page.locator('.module[data-repo="alpha"]')).toBeVisible();
@@ -116,39 +116,15 @@ test("collapsing a module hides its diff body but not its sibling", async ({ pag
   await expect(page.locator('.module[data-repo="beta"] .mod-body')).toBeVisible();
 });
 
-test("the module rail mirrors the modules, jumps between them, and the topbar sheds its per-repo controls", async ({ page }) => {
+test("multi-repo topbar sheds per-repo controls", async ({ page }) => {
   await page.goto("/");
-  // The passive rail sits atop the sidebar: one row per repo, titled with the count.
-  const rail = page.locator(".module-rail");
-  await expect(rail).toBeVisible();
-  await expect(rail.locator(".mr-title")).toContainText("Modules · 2");
-  await expect(rail.locator(".mr-row")).toHaveCount(2);
-  await expect(rail.locator(".mr-row .mr-name").nth(0)).toHaveText("alpha");
-  await expect(rail.locator(".mr-row .mr-name").nth(1)).toHaveText("beta");
-  // The workspace rollup summarises the whole view.
-  await expect(rail.locator(".mr-rollup .rollup-bar")).toBeVisible();
 
   // N≥2 sheds the topbar's per-repo controls — the base…compare picker now lives in
-  // each module header and viewed progress in the headers + rail. The global
+  // each module header and viewed progress in the module headers. The global
   // diff-display segments (unified/split, density) stay. (Both remain at N=1.)
   await expect(page.locator(".rh-subbar .target-picker")).toHaveCount(0);
   await expect(page.locator(".rh-subbar .metaitem")).toHaveCount(0);
   await expect(page.locator(".rh-subbar .seg")).toHaveCount(2);
-
-  // A rail row jumps to (focuses) its module, exactly like a sidebar repo click.
-  // Guard on the stack actually overflowing first, else the scroll is a no-op and
-  // the scroll-spy just re-picks the topmost module (a sub-second load race).
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const m = document.querySelector(".modmain");
-        return m ? m.scrollHeight - m.clientHeight : 0;
-      }),
-    )
-    .toBeGreaterThan(0);
-  await rail.locator(".mr-row", { hasText: "beta" }).click();
-  await expect(page.locator('.module[data-repo="beta"]')).toHaveClass(/focused/);
-  await expect(rail.locator(".mr-row.here .mr-name")).toHaveText("beta");
 });
 
 test("a module's ref picker popover escapes the module scroll clip", async ({ page }) => {
@@ -201,14 +177,11 @@ test("a module's status crumb walks its review lifecycle", async ({ page }) => {
   await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');
   const crumb = alpha.locator(".status-crumb");
-  const railDot = page
-    .locator(".module-rail .mr-row", { hasText: "alpha" })
-    .locator(".mr-dot");
 
   // Idle: alpha has a diff but no comments yet.
   await expect(crumb).toContainText("Not started");
 
-  // Post a comment on alpha → in progress, reflected in both the crumb and rail dot.
+  // Post a comment on alpha → in progress.
   // Wait for the stack to gain height first (rows only mount once scrolled in).
   await expect
     .poll(() =>
@@ -230,7 +203,6 @@ test("a module's status crumb walks its review lifecycle", async ({ page }) => {
 
   await expect(crumb).toContainText("In progress");
   await expect(crumb.locator(".sc-dot.progress")).toBeVisible();
-  await expect(railDot).toHaveClass(/progress/);
 
   // Close the thread → ready (all resolved), with a Mark complete affordance.
   const card = page
@@ -239,11 +211,18 @@ test("a module's status crumb walks its review lifecycle", async ({ page }) => {
   await card.getByRole("button", { name: "Close", exact: true }).first().click();
   await expect(crumb).toContainText("Ready");
   await expect(crumb.locator(".sc-dot.ready")).toBeVisible();
-  await expect(railDot).toHaveClass(/ready/);
 
   // Mark complete from the crumb → archived, with a Revive affordance.
   await crumb.getByRole("button", { name: "Mark complete" }).click();
   await expect(crumb).toContainText("Archived");
   await expect(crumb.locator(".sc-dot.arch")).toBeVisible();
   await expect(crumb.getByRole("button", { name: "Revive" })).toBeVisible();
+
+  // Sidebar history is navigational, not a revive action: clicking the archived
+  // review opens its closed thread in the thread pane.
+  await page.locator(".review-recovery > summary").click();
+  await page.locator(".review-recovery .session-item").first().click();
+  await expect(
+    page.locator(".thread-pane .thread-card", { hasText: "crumb walk" }),
+  ).toBeVisible();
 });

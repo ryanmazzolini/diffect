@@ -157,6 +157,9 @@ export function App() {
   const [pendingByRepo, setPendingByRepo] = useState<
     Map<string, string | null>
   >(() => new Map());
+  const [threadSessionByRepo, setThreadSessionByRepo] = useState<
+    Map<string, string | null>
+  >(() => new Map());
   // Bumped on every sidebar selection to force a diff reload even when the
   // resulting (worktree, target) equals the current one. Without it, re-selecting
   // the active session is a state no-op: no fetch fires, so the optimistic
@@ -251,6 +254,7 @@ export function App() {
     EMPTY_VIEWED) as Set<string>;
   const showUnscoped = repo ? (showUnscopedByRepo.get(repo) ?? false) : false;
   const pendingSession = repo ? (pendingByRepo.get(repo) ?? null) : null;
+  const threadSession = repo ? (threadSessionByRepo.get(repo) ?? null) : null;
 
   // Latest workspace/selections for callbacks that must read current state without
   // subscribing to it (the SSE fan-out, the per-repo refreshers, the viewed
@@ -297,6 +301,11 @@ export function App() {
   }, []);
   const setPendingFor = useCallback((forRepo: string, id: string | null) => {
     setPendingByRepo((prev) =>
+      (prev.get(forRepo) ?? null) === id ? prev : new Map(prev).set(forRepo, id),
+    );
+  }, []);
+  const setThreadSessionFor = useCallback((forRepo: string, id: string | null) => {
+    setThreadSessionByRepo((prev) =>
       (prev.get(forRepo) ?? null) === id ? prev : new Map(prev).set(forRepo, id),
     );
   }, []);
@@ -592,6 +601,7 @@ export function App() {
     (forRepo: string, next: string) => {
       setUnscopedFor(forRepo, false);
       setPendingFor(forRepo, null);
+      setThreadSessionFor(forRepo, null);
       setSelections((prev) =>
         new Map(prev).set(forRepo, {
           worktree: prev.get(forRepo)?.worktree ?? null,
@@ -599,7 +609,7 @@ export function App() {
         }),
       );
     },
-    [setUnscopedFor, setPendingFor],
+    [setUnscopedFor, setPendingFor, setThreadSessionFor],
   );
   // The Topbar picker retargets the active repo — the literal old `changeTarget`,
   // now `changeTargetFor` bound to the active repo (the N=1 case).
@@ -613,8 +623,21 @@ export function App() {
   const selectLegacy = useCallback(() => {
     if (!repo) return;
     setPendingFor(repo, null);
+    setThreadSessionFor(repo, null);
     setUnscopedFor(repo, true);
-  }, [repo, setPendingFor, setUnscopedFor]);
+  }, [repo, setPendingFor, setThreadSessionFor, setUnscopedFor]);
+
+  const selectReviewSession = useCallback(
+    (session: ReviewSession) => {
+      if (!repo) return;
+      setUnscopedFor(repo, false);
+      setPendingFor(repo, null);
+      setThreadSessionFor(repo, session.id);
+      setFilter("all");
+      if (paneCollapsed) toggleCollapsed();
+    },
+    [paneCollapsed, repo, setPendingFor, setThreadSessionFor, setUnscopedFor, toggleCollapsed],
+  );
 
   // Archive (`archived: true`) or revive (`archived: false`) a session. Optimistic:
   // record the override so the banner/sidebar flip immediately, POST the scope (the
@@ -650,12 +673,6 @@ export function App() {
       void setArchivedFor(repo, session, archived);
     },
     [repo, setArchivedFor],
-  );
-  const reviveSession = useCallback(
-    (session: ReviewSession) => {
-      void setArchived(session, false);
-    },
-    [setArchived],
   );
   // Dismissals are keyed by `${repo}:${sessionId}` so the same session id surfaced
   // from two repos doesn't share a dismissal (ids aren't repo-qualified).
@@ -899,8 +916,9 @@ export function App() {
   // selection is in flight we honor the optimistic `pendingSession` so the
   // highlight + thread filter switch instantly (Fix 1 guarantees it round-trips);
   // the unscoped bucket overrides everything, so its threads aren't a session.
-  const currentSession =
-    !showUnscoped && pendingSession ? pendingSession : (diff?.sessionId ?? null);
+  const currentSession = !showUnscoped
+    ? threadSession ?? pendingSession ?? (diff?.sessionId ?? null)
+    : null;
 
   // The sidebar renders sessions off the `entries` (workspaces) feed, so resolve
   // the active repo from the SAME source to keep server-session ids consistent.
@@ -1037,7 +1055,7 @@ export function App() {
   // bucket (not a session; its null scope the server refuses anyway). It carries
   // the scope the archive POST needs.
   const completableSession =
-    !showUnscoped && !pendingSession ? diffSession : null;
+    !showUnscoped && !pendingSession && !threadSession ? diffSession : null;
   // Detection keyed on review *activity*, not tree state (plan/critic fix #1): this
   // review collected at least one comment, every one is now resolved, it isn't
   // already archived, and its suggestion hasn't been dismissed.
@@ -1140,9 +1158,11 @@ export function App() {
     for (const r of visibleRepos) {
       const rShow = showUnscopedByRepo.get(r.name) ?? false;
       const rPending = pendingByRepo.get(r.name) ?? null;
+      const rThreadSession = threadSessionByRepo.get(r.name) ?? null;
       // Mirror the active-repo `currentSession` derivation, per repo.
-      const rSession =
-        !rShow && rPending ? rPending : (diffs.get(r.name)?.sessionId ?? null);
+      const rSession = !rShow
+        ? rThreadSession ?? rPending ?? (diffs.get(r.name)?.sessionId ?? null)
+        : null;
       map.set(
         r.name,
         threads.filter((t) => {
@@ -1157,7 +1177,15 @@ export function App() {
       );
     }
     return map;
-  }, [threads, visibleRepos, showUnscopedByRepo, pendingByRepo, diffs, activeSpacePath]);
+  }, [
+    threads,
+    visibleRepos,
+    showUnscopedByRepo,
+    pendingByRepo,
+    threadSessionByRepo,
+    diffs,
+    activeSpacePath,
+  ]);
   // Active repo's scoped threads — byte-identical to the pre-lift `scopedThreads`
   // (its internal rSession for the active repo equals `currentSession`). Drives the
   // active-repo views: the iteration timeline, the per-file thread badges, the
@@ -1320,6 +1348,11 @@ export function App() {
       )}
       <Topbar
         workspace={visibleWorkspace}
+        entries={entries}
+        activeWorkspacePath={activeEntry?.path ?? visibleWorkspace.root}
+        changedFilesByRepo={changedFilesByRepo}
+        onSelectWorkspace={selectWorkspace}
+        onAddWorkspace={openAdd}
         repo={repo}
         worktree={worktree}
         target={target}
@@ -1345,18 +1378,15 @@ export function App() {
         {!sidebarCollapsed && (
           <>
             <Sidebar
-              entries={entries}
-              activeWorkspacePath={activeEntry?.path ?? visibleWorkspace.root}
               repo={repo}
+              repos={visibleRepos}
               currentSession={currentSession}
               showUnscoped={showUnscoped}
-              changedFilesByRepo={changedFilesByRepo}
               archivedSessions={archivedSessions}
               sessionCounts={sessionCounts}
               legacyCount={legacyCount}
-              onSelectWorkspace={selectWorkspace}
               onSelectRepo={selectRepo}
-              onReviveSession={reviveSession}
+              onSelectSession={selectReviewSession}
               onSelectLegacy={selectLegacy}
               files={sidebarFiles}
               allFiles={allFiles}
@@ -1365,7 +1395,6 @@ export function App() {
               activeFile={activeFile}
               onSelectFile={selectFile}
               onShowDiff={backToDiff}
-              onAddWorkspace={openAdd}
             />
             <div
               className="sidebar-resizer"

@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 
-test("sidebar shows the repo and a file tree, toggles and persists", async ({ page }) => {
+test("sidebar shows the file tree, toggles and persists", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".sidebar")).toBeVisible();
-  await expect(page.locator(".repo-item").first()).toBeVisible();
+  await expect(page.locator(".workspace-trigger")).toBeVisible();
 
   // The changed-file tree lists the root file and a (collapsed-chain) folder.
   await expect(page.locator(".tree-file", { hasText: "calc.js" })).toBeVisible();
