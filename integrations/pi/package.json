@@ -1,6 +1,7 @@
 {
   "name": "diffect-pi",
   "private": true,
+  "license": "Apache-2.0",
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["./diffect.ts"]
