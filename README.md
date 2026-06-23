@@ -1,43 +1,31 @@
+<p align="center">
+  <img src="packages/desktop/src-tauri/icons/icon.png" alt="Diffect logo" width="96" height="96">
+</p>
+
 # Diffect
 
 [![CI](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml/badge.svg)](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml)
 
-Local-first code review. Review state is a local append-only event log under
-`~/.config/diffect/` — no database, no account, no server-owned automation — so
-the browser UI, the CLI, the desktop app, and agents are equal peers over the
-same files.
+Browser + desktop code review for repos, worktrees, and multi-repo AI coding
+spaces.
+
+Diffect runs beside the code — on your laptop, dev box, or trusted remote host —
+and opens a GitHub-style review UI in the browser or desktop app.
+
+- review `work`, `staged`, `unstaged`, refs, or base↔compare ranges
+- review one repo or a whole folder of repos/worktrees as one task space
+- leave durable inline comments that re-anchor or go stale as code changes
+- let agents read and update the same threads; pi is the first integration
+- keep review state in local files under `~/.config/diffect/`
+
+<p align="center">
+  <img src="docs/Screenshot.png" alt="Diffect review UI showing a diff with inline comments and a thread sidebar" width="900">
+</p>
 
 ## Status
 
-Diffect is pre-1.0. It is useful for local review today, but the public release
-surface is still settling.
-
-Built:
-
-- **`diffectd`** — serves the browser review UI and a JSON/SSE API from the
-  machine where your repos live.
-- **`diffect`** — the CLI; reads and writes the review store directly.
-- **Diffect Desktop** — a Tauri shell that starts a private local daemon.
-- **pi integration** — opens Diffect from pi and lets agents read/write review
-  threads.
-
-Not built yet: AI review passes, GitHub sync, remote auth, signed/notarized
-desktop releases, and auto-updates.
-
-## What it does
-
-Review one or more git repos across one or more workspaces at once — add them
-from the sidebar dialog, which suggests recent projects from Claude Code / pi
-sessions and includes an in-app folder browser (worktrees included). A
-collapsible file tree shows per-file diffstats; pick any target — `work`,
-`staged`, `unstaged`, a ref, or a GitHub-style base↔compare range.
-
-Comment on a line, a selected range, or any file in the repo. The composer is
-GitHub-style markdown with write/preview and image attachments. Comments
-re-anchor as code changes and are flagged *stale* when their range disappears —
-never silently dropped. Close or delete threads; mark files viewed; navigate
-with `j`/`k`. The browser updates live over SSE and can open `file:line` in your
-editor.
+Diffect is experimental but usable from a source checkout. Hosted review, GitHub
+sync, auth, signed installers, and auto-updates are not built yet.
 
 ## Layout
 
@@ -133,6 +121,12 @@ Apache-2.0. See [LICENSE](LICENSE).
 
 ## Related projects
 
+- [hunk](https://github.com/modem-dev/hunk) — terminal review UI for
+  agent-authored changesets.
+- [herdr](https://github.com/ogulcancelik/herdr) — terminal workspace manager
+  for AI coding agents.
+- [cmux](https://github.com/manaflow-ai/cmux) — macOS terminal/workspace for AI
+  coding agents.
 - [diffity](https://diffity.com) by [Kamran Ahmed](https://kamranahmed.se) — a
-  GitHub-style git diff viewer in the browser. Diffect's diff view is modeled on
-  it, then adds a local-first review layer shared by the CLI and agents.
+  GitHub-style git diff viewer in the browser. Diffect's diff view started
+  there, then added local review state shared by the UI, CLI, and agents.
