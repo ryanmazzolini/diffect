@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="packages/desktop/src-tauri/icons/icon.png" alt="Diffect logo" width="96" height="96">
-</p>
-
-# Diffect
+# <img src="packages/desktop/src-tauri/icons/icon.png" alt="" width="36" height="36"> Diffect
 
 [![CI](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml/badge.svg)](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml)
 
