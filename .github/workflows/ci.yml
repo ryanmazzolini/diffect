@@ -16,6 +16,8 @@ jobs:
   js:
     name: JS, web, and e2e
     runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.49.1-noble
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,12 +27,12 @@ jobs:
       - run: corepack prepare pnpm@11.2.2 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @diffect/e2e exec playwright install --with-deps chromium
       - run: pnpm --filter @diffect/e2e test
 
   tauri:
     name: Tauri cargo check
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: |
