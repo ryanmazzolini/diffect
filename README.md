@@ -90,9 +90,9 @@ with `--repo`/`--worktree`.
 ## Develop
 
 ```sh
-pnpm build
-pnpm --filter @diffect/e2e test
-cargo check --manifest-path packages/desktop/src-tauri/Cargo.toml
+mise run build
+mise run test
+mise run desktop:check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor notes and
@@ -128,5 +128,5 @@ Apache-2.0. See [LICENSE](LICENSE).
 - [cmux](https://github.com/manaflow-ai/cmux) — macOS terminal/workspace for AI
   coding agents.
 - [diffity](https://diffity.com) by [Kamran Ahmed](https://kamranahmed.se) — a
-  GitHub-style git diff viewer in the browser. Diffect's diff view started
-  there, then added local review state shared by the UI, CLI, and agents.
+  GitHub-style git diff viewer in the browser, and the visual inspiration for
+  Diffect's diff view.

@@ -7,14 +7,9 @@ Thanks for helping improve Diffect.
 ```sh
 mise install
 pnpm install
-pnpm build
-pnpm --filter @diffect/e2e test
-```
-
-For the desktop shell:
-
-```sh
-cargo check --manifest-path packages/desktop/src-tauri/Cargo.toml
+mise run build
+mise run test
+mise run desktop:check
 ```
 
 ## Before opening a PR
@@ -22,9 +17,9 @@ cargo check --manifest-path packages/desktop/src-tauri/Cargo.toml
 Run the broad checks, not targeted one-offs:
 
 ```sh
-pnpm build
-pnpm --filter @diffect/e2e test
-cargo check --manifest-path packages/desktop/src-tauri/Cargo.toml
+mise run build
+mise run test
+mise run desktop:check
 ```
 
 ## Dependencies
