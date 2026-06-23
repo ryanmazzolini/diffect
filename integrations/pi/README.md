@@ -12,17 +12,28 @@ Install this local pi package, then `/reload` and use:
 /diffect
 ```
 
-It finds the current git repo, reuses the running `diffectd` from
+It finds the current Diffect workspace, reuses the running `diffectd` from
 `~/.config/diffect/daemon.json` when present (including the Tauri app's ephemeral
-port), otherwise starts one, registers the repo as a workspace, and opens Diffect
-at:
+port), otherwise starts one, registers the workspace, and opens Diffect at:
 
 ```text
 /?repo=<repo>&worktree=<worktree>&target=work
 ```
 
-Use `/diffect staged`, `/diffect unstaged`, or `/diffect main..feature` to open a
-specific review target. It tries the desktop app first:
+Workspace choice is session-scoped. The first `/diffect` checks saved session
+state, recent absolute paths in the pi session, ticket-worktree spaces shaped
+like `.../worktrees/<ticket>/<repo>`, and finally the current directory. If more
+than one workspace fits, it shows a picker and saves the choice for the session.
+
+Use `/diffect-space` to change the saved workspace. Use `/diffect staged`,
+`/diffect unstaged`, or `/diffect main..feature` to open a specific review
+target.
+
+Use `/diffect-review` to ask the agent to read open Diffect feedback for the
+inferred workspace. Use `/diffect-review proactive` to ask it to inspect changes
+and leave Diffect comments without editing files.
+
+It tries the desktop app first:
 
 - `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set
 - the local dev binary at `packages/desktop/src-tauri/target/{debug,release}/diffect-desktop`
