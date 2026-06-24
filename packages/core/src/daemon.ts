@@ -46,6 +46,7 @@ import { EventHub } from "./events.js";
 import {
   detectEditors,
   openInEditor,
+  openWorkspaceInEditor,
   PathEscapeError,
   UnknownEditorError,
 } from "./editor.js";
@@ -670,14 +671,32 @@ async function editorRoute(
 ): Promise<boolean> {
   if (!(method === "POST" && path === "/open")) return false;
   const body = await readJsonBody<OpenRequest>(req);
-  if (!body || !body.file || typeof body.line !== "number" || !body.editor) {
-    sendJson(res, 400, { error: "file, line, and editor are required" });
+  if (!body?.editor) {
+    sendJson(res, 400, { error: "editor is required" });
     return true;
   }
-  const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
-  if (!target) return true;
   try {
-    await openInEditor(target.treeRoot, body.file, body.line, body.editor);
+    if (body.workspacePath) {
+      const workspacePath = resolve(body.workspacePath);
+      const workspace = ctx.workspaces.find((w) => w.root === workspacePath);
+      if (!workspace) {
+        sendJson(res, 404, { error: `unknown workspace: ${body.workspacePath}` });
+        return true;
+      }
+      await openWorkspaceInEditor(workspace.root, body.editor);
+    } else {
+      if (!body.repo) {
+        sendJson(res, 400, { error: "repo or workspacePath is required" });
+        return true;
+      }
+      const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
+      if (!target) return true;
+      if (body.file) {
+        await openInEditor(target.treeRoot, body.file, body.line ?? 1, body.editor);
+      } else {
+        await openWorkspaceInEditor(target.treeRoot, body.editor);
+      }
+    }
     sendJson(res, 200, { ok: true });
   } catch (err) {
     // Bad input (unsupported editor, path escaping the repo) is a 400, not a 500.

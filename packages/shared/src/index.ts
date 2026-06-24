@@ -345,10 +345,11 @@ export interface WorkspaceMutationRequest {
 }
 
 export interface OpenRequest {
-  repo: string;
+  repo?: string;
   worktree?: string | null;
-  file: string;
-  line: number;
+  workspacePath?: string;
+  file?: string;
+  line?: number;
   editor: string;
 }
 

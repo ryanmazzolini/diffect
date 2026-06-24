@@ -21,7 +21,12 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { execFile } from "node:child_process";
-import { openInEditor, PathEscapeError, UnknownEditorError } from "../src/editor.js";
+import {
+  openInEditor,
+  openWorkspaceInEditor,
+  PathEscapeError,
+  UnknownEditorError,
+} from "../src/editor.js";
 
 describe("openInEditor guards", () => {
   beforeEach(() => vi.mocked(execFile).mockClear());
@@ -64,9 +69,24 @@ describe("openInEditor guards", () => {
       // The path guard passes, so it resolves; the spawn is stubbed, so the only
       // observable effect is the argv it would have launched.
       await expect(openInEditor(dir, "a.txt", 2, "code")).resolves.toBeUndefined();
-      const [cmd, args] = vi.mocked(execFile).mock.calls[0]!;
+      const [cmd, args] = vi.mocked(execFile).mock.calls.at(-1)!;
       expect(cmd).toBe("code");
       expect(args).toEqual(["-g", expect.stringMatching(/a\.txt:2$/)]);
+    });
+
+    it("opens a workspace root without a line argument", async () => {
+      await expect(openWorkspaceInEditor(dir, "cursor")).resolves.toBeUndefined();
+      const [cmd, args] = vi.mocked(execFile).mock.calls.at(-1)!;
+      expect(cmd).toBe("cursor");
+      expect(args).toEqual([dir]);
+    });
+
+    it("opens JetBrains files with --line", async () => {
+      await writeFile(join(dir, "a.txt"), "x\n");
+      await expect(openInEditor(dir, "a.txt", 3, "webstorm")).resolves.toBeUndefined();
+      const [cmd, args] = vi.mocked(execFile).mock.calls.at(-1)!;
+      expect(cmd).toBe("webstorm");
+      expect(args).toEqual(["--line", "3", expect.stringMatching(/a\.txt$/)]);
     });
   });
 });
