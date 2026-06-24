@@ -11,6 +11,7 @@ import type {
   ThreadStatus,
   WorkspaceEntry,
   WorkspaceInfo,
+  WorktreeSummary,
 } from "@diffect/shared";
 import { api } from "./api.js";
 import { Icon } from "./icons.js";
@@ -112,6 +113,13 @@ function cssEscape(s: string): string {
 function basename(p: string): string {
   const parts = p.split(/[/\\]/).filter(Boolean);
   return parts.at(-1) ?? p;
+}
+function selectedWorktreeSummary(
+  repo: RepoSummary,
+  worktree: string | null,
+): WorktreeSummary | null {
+  if (worktree) return repo.worktrees.find((w) => w.name === worktree) ?? null;
+  return repo.worktrees.find((w) => w.root === repo.root) ?? repo.worktrees[0] ?? null;
 }
 // Stable empty thread array so a repo with no scoped threads projects a constant
 // reference (the memoized module / inbox don't re-render on the empty path).
@@ -1434,36 +1442,42 @@ export function App() {
             snapshot context, so the diff side always sees its own repo's snapshot. */}
         {stacked ? (
           <section className="modmain" ref={diffPaneRef}>
-            {visibleRepos.map((r, i) => (
-              <ModuleSection
-                key={r.name}
-                stacked
-                band={i % 2 === 0 ? 1 : 2}
-                focused={r.name === repo}
-                repo={r.name}
-                worktree={selections.get(r.name)?.worktree ?? null}
-                diff={diffs.get(r.name) ?? null}
-                threads={scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS}
-                editors={editors}
-                viewed={(viewedByRepo.get(r.name) ?? EMPTY_VIEWED) as Set<string>}
-                split={splitView}
-                wrap={wrapLines}
-                theme={theme}
-                target={selections.get(r.name)?.target ?? DEFAULT_TARGET}
-                refs={refsByRepo.get(r.name) ?? null}
-                defaultBranch={r.defaultBranch}
-                onTarget={changeTargetFor}
-                lifecycle={lifecycleByRepo.get(r.name)?.state ?? "idle"}
-                lifecycleSession={lifecycleByRepo.get(r.name)?.session ?? null}
-                onArchive={setArchivedFor}
-                collapsed={collapsedRepos.has(r.name)}
-                onToggleCollapse={toggleCollapseFor}
-                onToggleViewed={toggleViewedFor}
-                previewFile={r.name === repo ? previewFile : null}
-                onBackToDiff={backToDiff}
-                onChanged={refreshThreads}
-              />
-            ))}
+            {visibleRepos.map((r, i) => {
+              const moduleWorktree = selections.get(r.name)?.worktree ?? null;
+              const worktreeSummary = selectedWorktreeSummary(r, moduleWorktree);
+              return (
+                <ModuleSection
+                  key={r.name}
+                  stacked
+                  band={i % 2 === 0 ? 1 : 2}
+                  focused={r.name === repo}
+                  repo={r.name}
+                  worktree={moduleWorktree}
+                  branch={worktreeSummary?.branch ?? null}
+                  pullRequest={worktreeSummary?.pullRequest ?? null}
+                  diff={diffs.get(r.name) ?? null}
+                  threads={scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS}
+                  editors={editors}
+                  viewed={(viewedByRepo.get(r.name) ?? EMPTY_VIEWED) as Set<string>}
+                  split={splitView}
+                  wrap={wrapLines}
+                  theme={theme}
+                  target={selections.get(r.name)?.target ?? DEFAULT_TARGET}
+                  refs={refsByRepo.get(r.name) ?? null}
+                  defaultBranch={r.defaultBranch}
+                  onTarget={changeTargetFor}
+                  lifecycle={lifecycleByRepo.get(r.name)?.state ?? "idle"}
+                  lifecycleSession={lifecycleByRepo.get(r.name)?.session ?? null}
+                  onArchive={setArchivedFor}
+                  collapsed={collapsedRepos.has(r.name)}
+                  onToggleCollapse={toggleCollapseFor}
+                  onToggleViewed={toggleViewedFor}
+                  previewFile={r.name === repo ? previewFile : null}
+                  onBackToDiff={backToDiff}
+                  onChanged={refreshThreads}
+                />
+              );
+            })}
           </section>
         ) : (
           <ModuleSection

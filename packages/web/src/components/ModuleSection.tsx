@@ -7,6 +7,7 @@ import {
 } from "react";
 import type {
   DiffFile,
+  PullRequestLink,
   RefList,
   RepoDiff,
   ReviewSession,
@@ -24,6 +25,7 @@ import { Icon } from "../icons.js";
 import { DiffView } from "./DiffView.js";
 import { DiffStat } from "./DiffStat.js";
 import { TargetPicker } from "./TargetPicker.js";
+import { PullRequestBadge } from "./Topbar.js";
 
 // Stable empty reference so the memoized file derivation doesn't churn on the
 // null-diff path.
@@ -47,6 +49,8 @@ interface Props {
   band?: 1 | 2;
   repo: string;
   worktree: string | null;
+  branch?: string | null;
+  pullRequest?: PullRequestLink | null;
   diff: RepoDiff | null;
   /** Threads already scoped to this module's repo + session by App. */
   threads: Thread[];
@@ -99,6 +103,8 @@ export const ModuleSection = memo(function ModuleSection({
   band = 1,
   repo,
   worktree,
+  branch = null,
+  pullRequest = null,
   diff,
   threads,
   editors,
@@ -189,6 +195,8 @@ export const ModuleSection = memo(function ModuleSection({
       files={files}
       viewed={viewed}
       worktree={worktree}
+      branch={branch}
+      pullRequest={pullRequest}
       target={target}
       refs={refs}
       defaultBranch={defaultBranch}
@@ -215,6 +223,8 @@ function StackedModule({
   files,
   viewed,
   worktree,
+  branch,
+  pullRequest,
   target,
   refs,
   defaultBranch,
@@ -232,6 +242,8 @@ function StackedModule({
   files: DiffFile[];
   viewed: Set<string>;
   worktree: string | null;
+  branch: string | null;
+  pullRequest: PullRequestLink | null;
   target: string;
   refs: RefList | null;
   defaultBranch: string | null;
@@ -273,6 +285,10 @@ function StackedModule({
             <Icon name="git-branch" size={12} className="fork" />
             <span className="mod-name">{repo}</span>
           </span>
+          <span className="mh-branch" title={branch ? `Branch ${branch}` : "Detached HEAD"}>
+            {branch ?? "detached"}
+          </span>
+          <PullRequestBadge pullRequest={pullRequest} />
           <span className="mh-state-wrap">
             <span
               className="status-crumb"

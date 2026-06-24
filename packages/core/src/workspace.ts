@@ -7,6 +7,7 @@ import {
   resolveDefaultBranch,
   resolveWorkBase,
 } from "./git/diff.js";
+import { pullRequestForBranch } from "./git/pull-request.js";
 import { normalizeTarget } from "./git/target.js";
 import { resolveScope, sessionIdForScope } from "./reviews/scope.js";
 import { loadArchivedSessions } from "./reviews/event-log.js";
@@ -242,29 +243,53 @@ async function deriveWorktreeSessions(
   return all.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 }
 
+function isDefaultBranch(
+  branch: string | null,
+  defaultBranch: string | null,
+): boolean {
+  return (
+    !!branch &&
+    !!defaultBranch &&
+    (branch === defaultBranch || defaultBranch.endsWith(`/${branch}`))
+  );
+}
+
 /** Summarize a set of repos (base/default-branch/worktrees) for the API. */
 export async function summarizeRepos(
   repos: DiscoveredRepo[],
 ): Promise<RepoSummary[]> {
   return Promise.all(
-    repos.map(async (r) => ({
-      name: r.name,
-      root: r.root,
-      base: await resolveWorkBase(r.root),
-      defaultBranch: await resolveDefaultBranch(r.root),
-      worktrees: await Promise.all(
-        r.worktrees.map(async (w) => ({
-          name: w.name,
-          root: w.root,
-          branch: await resolveCurrentBranch(w.root),
-        })),
-      ),
-      sessions: await deriveWorktreeSessions(r),
-      // Archived reviews ride on the summary so the client can route them into a
-      // collapsed group; the archive overlay wins, so an archived id is excluded
-      // from `sessions` client-side (Slice 4).
-      archivedSessions: await loadArchivedSessions(r.root),
-    })),
+    repos.map(async (r) => {
+      const [base, defaultBranch] = await Promise.all([
+        resolveWorkBase(r.root),
+        resolveDefaultBranch(r.root),
+      ]);
+      return {
+        name: r.name,
+        root: r.root,
+        base,
+        defaultBranch,
+        worktrees: await Promise.all(
+          r.worktrees.map(async (w) => {
+            const branch = await resolveCurrentBranch(w.root);
+            return {
+              name: w.name,
+              root: w.root,
+              branch,
+              pullRequest:
+                branch && !isDefaultBranch(branch, defaultBranch)
+                  ? await pullRequestForBranch(w.root, branch)
+                  : null,
+            };
+          }),
+        ),
+        sessions: await deriveWorktreeSessions(r),
+        // Archived reviews ride on the summary so the client can route them into a
+        // collapsed group; the archive overlay wins, so an archived id is excluded
+        // from `sessions` client-side (Slice 4).
+        archivedSessions: await loadArchivedSessions(r.root),
+      };
+    }),
   );
 }
 
