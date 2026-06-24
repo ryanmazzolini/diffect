@@ -45,7 +45,8 @@ export async function pullRequestForBranch(
   if (cached && cached.expiresAt > now) return cached.value;
 
   const value = await fetchPullRequest(gh, branch).catch(() => null);
-  cache.set(key, { expiresAt: now + CACHE_TTL_MS, value });
+  if (value) cache.set(key, { expiresAt: now + CACHE_TTL_MS, value });
+  else cache.delete(key);
   return value;
 }
 

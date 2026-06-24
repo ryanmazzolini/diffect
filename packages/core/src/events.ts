@@ -68,6 +68,11 @@ export class EventHub {
     // Worktrees: a source change may change the diff. Recursive watch covers
     // nested files; git's own writes under .git are filtered out below.
     for (const repo of this.ws.repos) {
+      this.addWatch(repo.commonDir, (filename) => {
+        if (!isGitStatePath(filename)) return;
+        this.emit(DAEMON_EVENTS.diffChanged);
+        this.emit(DAEMON_EVENTS.workspaceChanged);
+      });
       for (const wt of repo.worktrees) {
         this.addWatch(wt.root, (filename) => {
           if (isIgnoredPath(filename)) return;
@@ -149,6 +154,17 @@ export class EventHub {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
   }
+}
+
+/** Paths under the shared git dir that affect labels, refs, or PR links. */
+function isGitStatePath(filename: string | null): boolean {
+  if (!filename) return true; // unknown file: notify to be safe
+  const parts = filename.split(/[/\\]/);
+  return (
+    parts.at(-1) === "HEAD" ||
+    parts[0] === "refs" ||
+    filename === "packed-refs"
+  );
 }
 
 /** Paths under a worktree whose changes should not trigger diff.changed. */

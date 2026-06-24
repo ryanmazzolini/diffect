@@ -911,6 +911,8 @@ export function App() {
         refreshWorkspaceSoon();
         setLive("Diff updated");
       } else if (type === DAEMON_EVENTS.workspaceChanged) {
+        // Git HEAD/ref changes affect branch labels, PR links, and picker refs.
+        loadedRefsRef.current.clear();
         // An explicit workspace change is rarer and structural — refresh now.
         r.refreshWorkspace();
         r.loadWorkspaces();
