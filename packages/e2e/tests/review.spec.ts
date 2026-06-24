@@ -34,6 +34,31 @@ test("creates an inline comment and it appears in the inbox", async ({ page }) =
   await expect(page.locator(".thread-pane")).toContainText("overflow for large ints");
 });
 
+test("thread pane comments jump to their inline thread", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".tree-file", { hasText: "math.js" }).click();
+
+  const math = page.locator(".file", { hasText: "math.js" });
+  const row = math.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
+  await row.hover();
+  await row.locator("button.diff-add-widget").first().click();
+  await page.locator(".comment-form textarea").fill("jump back to math");
+  await page.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
+
+  await page.locator(".tree-file", { hasText: "calc.js" }).click();
+  await expect(page.locator(".tree-file.active")).toContainText("calc.js");
+  await expect(
+    page.locator(".thread-pane .thread-actions").getByRole("button", { name: /^Open$/ }),
+  ).toHaveCount(0);
+
+  await page.locator(".thread-pane .t-comment", { hasText: "jump back to math" }).click();
+
+  await expect(page.locator(".tree-file.active")).toContainText("math.js");
+  await expect(
+    page.locator(".diff-pane .inline-thread", { hasText: "jump back to math" }).first(),
+  ).toBeVisible();
+});
+
 test("resolves a thread and the open count drops", async ({ page }) => {
   await page.goto("/");
   // Create a thread first.

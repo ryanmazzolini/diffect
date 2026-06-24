@@ -54,7 +54,6 @@ interface Props {
   diff: RepoDiff | null;
   /** Threads already scoped to this module's repo + session by App. */
   threads: Thread[];
-  editors: string[];
   viewed: Set<string>;
   split: boolean;
   wrap: boolean;
@@ -106,7 +105,6 @@ export const ModuleSection = memo(function ModuleSection({
   pullRequest = null,
   diff,
   threads,
-  editors,
   viewed,
   split,
   wrap,
@@ -163,7 +161,6 @@ export const ModuleSection = memo(function ModuleSection({
         diff={diff}
         files={files}
         threads={threads}
-        editors={editors}
         viewed={viewed}
         split={split}
         wrap={wrap}

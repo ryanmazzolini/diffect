@@ -6,15 +6,15 @@ import { ThreadConversation } from "./ThreadConversation.js";
 // unrelated bit of app state changed — only when its own thread list does.
 export const ThreadList = memo(function ThreadList({
   threads,
-  editors = [],
   showRepo = false,
   onChanged,
+  onNavigate,
 }: {
   threads: Thread[];
-  editors?: string[];
   /** Show the repo (and worktree) on each card — used for the cross-repo inbox. */
   showRepo?: boolean;
   onChanged: () => void;
+  onNavigate?: (thread: Thread) => void;
 }) {
   if (threads.length === 0) {
     return (
@@ -38,7 +38,11 @@ export const ThreadList = memo(function ThreadList({
             )}
             <span className="loc">{threadLocation(t)}</span>
           </div>
-          <ThreadConversation thread={t} editors={editors} onChanged={onChanged} />
+          <ThreadConversation
+            thread={t}
+            onChanged={onChanged}
+            onNavigate={t.file ? () => onNavigate?.(t) : undefined}
+          />
         </div>
       ))}
     </div>

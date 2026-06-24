@@ -45,7 +45,6 @@ interface Props {
   /** Files in display (tree) order — matches the sidebar so scrolling tracks it. */
   files: DiffFile[];
   threads: Thread[];
-  editors: string[];
   viewed: Set<string>;
   /** Side-by-side rendering when true, inline (unified) when false. */
   split: boolean;
@@ -67,7 +66,6 @@ export const DiffView = memo(function DiffView({
   diff,
   files,
   threads,
-  editors,
   viewed,
   split,
   wrap,
@@ -111,7 +109,6 @@ export const DiffView = memo(function DiffView({
           target={diff.target}
           file={previewFile}
           threads={threadsByFile.get(previewFile) ?? EMPTY_THREADS}
-          editors={editors}
           onBackToDiff={onBackToDiff}
           onChanged={onChanged}
         />
@@ -129,7 +126,6 @@ export const DiffView = memo(function DiffView({
             target={diff.target}
             file={file}
             threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
-            editors={editors}
             viewed={viewed.has(file.path)}
             mode={mode}
             wrap={wrap}
@@ -146,7 +142,6 @@ export const DiffView = memo(function DiffView({
           worktree={worktree}
           file={file}
           threads={fileThreads}
-          editors={editors}
           onChanged={onChanged}
         />
       ))}
@@ -304,7 +299,6 @@ const FileDiff = memo(function FileDiff({
   target,
   file,
   threads,
-  editors,
   viewed,
   mode,
   wrap,
@@ -317,7 +311,6 @@ const FileDiff = memo(function FileDiff({
   target: string;
   file: DiffFile;
   threads: Thread[];
-  editors: string[];
   viewed: boolean;
   mode: DiffModeEnum;
   wrap: boolean;
@@ -528,7 +521,6 @@ const FileDiff = memo(function FileDiff({
           <InlineThread
             key={`${t.id}:${t.status}`}
             thread={t}
-            editors={editors}
             onChanged={() => {
               onChanged();
               onUpdate();
@@ -555,7 +547,7 @@ const FileDiff = memo(function FileDiff({
         )}
       </div>
     ),
-    [closeSelectionComment, editors, file.path, onChanged, repo, target, worktree],
+    [closeSelectionComment, file.path, onChanged, repo, target, worktree],
   );
 
   // The new-comment form, opened by the + button or a drag range selection.
@@ -695,14 +687,12 @@ function OutOfDiffFile({
   worktree,
   file,
   threads,
-  editors,
   onChanged,
 }: {
   repo: string;
   worktree: string | null;
   file: string;
   threads: Thread[];
-  editors: string[];
   onChanged: () => void;
 }) {
   return (
@@ -719,7 +709,6 @@ function OutOfDiffFile({
           worktree={worktree}
           file={file}
           thread={t}
-          editors={editors}
           onChanged={onChanged}
         />
       ))}
@@ -733,14 +722,12 @@ function OutOfDiffThread({
   worktree,
   file,
   thread,
-  editors,
   onChanged,
 }: {
   repo: string;
   worktree: string | null;
   file: string;
   thread: Thread;
-  editors: string[];
   onChanged: () => void;
 }) {
   const lang = langForPath(file);
@@ -767,7 +754,7 @@ function OutOfDiffThread({
         <tr className="inline-thread-row">
           <td className="ln" />
           <td className="code">
-            <InlineThread thread={thread} editors={editors} onChanged={onChanged} />
+            <InlineThread thread={thread} onChanged={onChanged} />
           </td>
         </tr>
       </tbody>
@@ -782,11 +769,9 @@ function OutOfDiffThread({
  */
 function InlineThread({
   thread,
-  editors,
   onChanged,
 }: {
   thread: Thread;
-  editors: string[];
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(thread.status === "open");
@@ -806,7 +791,5 @@ function InlineThread({
       </button>
     );
   }
-  return (
-    <ThreadConversation thread={thread} editors={editors} onChanged={onChanged} />
-  );
+  return <ThreadConversation thread={thread} onChanged={onChanged} />;
 }

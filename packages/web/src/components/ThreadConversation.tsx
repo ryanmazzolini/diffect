@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { useCurrentSnapshot } from "../currentSnapshot.js";
@@ -14,12 +14,12 @@ import { MarkdownEditor } from "./MarkdownEditor.js";
  */
 export function ThreadConversation({
   thread,
-  editors = [],
   onChanged,
+  onNavigate,
 }: {
   thread: Thread;
-  editors?: string[];
   onChanged: () => void;
+  onNavigate?: () => void;
 }) {
   const [replying, setReplying] = useState(false);
   const [reply, setReply, clearReply] = useDraft(`draft-reply:${thread.id}`);
@@ -58,13 +58,9 @@ export function ThreadConversation({
   };
 
   const count = thread.comments.length;
-  const openable =
-    thread.repo && thread.file && thread.line !== null
-      ? { repo: thread.repo, file: thread.file, line: thread.line }
-      : null;
 
   return (
-    <div className={`inline-thread status-${thread.status}`}>
+    <div className={`inline-thread status-${thread.status}`} data-thread-id={thread.id}>
       <div className="thread-head">
         {thread.severity && (
           <span className={`sev sev-${thread.severity}`}>{thread.severity}</span>
@@ -105,7 +101,15 @@ export function ThreadConversation({
           {thread.comments.map((c) => {
             const author = authorView(c.author);
             return (
-              <div className="t-comment" key={c.id}>
+              <div
+                className={`t-comment${onNavigate ? " jumpable" : ""}`}
+                key={c.id}
+                role={onNavigate ? "button" : undefined}
+                tabIndex={onNavigate ? 0 : undefined}
+                title={onNavigate ? "Show this comment in the diff" : undefined}
+                onClick={(event) => maybeNavigate(event, onNavigate)}
+                onKeyDown={(event) => maybeNavigateWithKeyboard(event, onNavigate)}
+              >
                 <div className="c-meta">
                   <span className={`avatar avatar-${author.kind}`} aria-hidden="true">
                     {author.initials}
@@ -178,32 +182,37 @@ export function ThreadConversation({
                   Delete
                 </button>
               )}
-              {editors.length > 0 && openable && (
-                <button
-                  className="ghost"
-                  disabled={busy}
-                  title={`Open ${openable.file}:${openable.line} in ${editors[0]}`}
-                  onClick={() =>
-                    run(() =>
-                      api.open({
-                        repo: openable.repo,
-                        worktree: thread.worktree,
-                        file: openable.file,
-                        line: openable.line,
-                        editor: editors[0]!,
-                      }),
-                    )
-                  }
-                >
-                  Open
-                </button>
-              )}
             </div>
           )}
           {error && <div className="error">{error}</div>}
         </div>
       </div>
     </div>
+  );
+}
+
+function maybeNavigate(event: MouseEvent<HTMLDivElement>, onNavigate?: () => void): void {
+  if (!onNavigate) return;
+  if (isInteractive(event.target)) return;
+  if (window.getSelection()?.toString()) return;
+  onNavigate();
+}
+
+function maybeNavigateWithKeyboard(
+  event: KeyboardEvent<HTMLDivElement>,
+  onNavigate?: () => void,
+): void {
+  if (!onNavigate) return;
+  if (event.currentTarget !== event.target) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  onNavigate();
+}
+
+function isInteractive(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    !!target.closest("a, button, input, textarea, select, [contenteditable='true']")
   );
 }
 

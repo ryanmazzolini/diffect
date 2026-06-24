@@ -2162,6 +2162,18 @@ body.pane-resizing {
 .t-comment {
   padding: 6px 14px 7px;
 }
+.t-comment.jumpable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.t-comment.jumpable:hover,
+.t-comment.jumpable:focus-visible {
+  background: var(--panel-2);
+}
+.t-comment.jumpable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .t-comment + .t-comment {
   border-top: 1px solid var(--border);
 }

@@ -18,7 +18,6 @@ interface Props {
   target: string;
   file: string;
   threads: Thread[];
-  editors: string[];
   onBackToDiff: () => void;
   onChanged: () => void;
 }
@@ -30,7 +29,6 @@ export function FullFilePreview({
   target,
   file,
   threads,
-  editors,
   onBackToDiff,
   onChanged,
 }: Props) {
@@ -103,11 +101,7 @@ export function FullFilePreview({
                     <tr className="inline-thread-row" key={thread.id}>
                       <td className="ln" />
                       <td className="code">
-                        <ThreadConversation
-                          thread={thread}
-                          editors={editors}
-                          onChanged={onChanged}
-                        />
+                        <ThreadConversation thread={thread} onChanged={onChanged} />
                       </td>
                     </tr>
                   ))}

@@ -42,7 +42,6 @@ type GeneralCommentTarget = {
 const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 // Stable empty references so memoized children don't re-render on the null paths.
 const EMPTY_FILES: DiffFile[] = [];
-const EMPTY_EDITORS: string[] = [];
 const EMPTY_SESSIONS: ReviewSession[] = [];
 const EMPTY_ARCHIVED: ArchivedSession[] = [];
 // Shared empty "viewed" set so a repo with no per-file state yet projects a
@@ -357,6 +356,49 @@ export function App() {
       }
     },
     [diff, repo],
+  );
+
+  const scrollThreadIntoView = useCallback((threadId: string) => {
+    let attempts = 0;
+    const findAndScroll = () => {
+      const el = diffPaneRef.current?.querySelector<HTMLElement>(
+        `.inline-thread[data-thread-id="${cssEscape(threadId)}"]`,
+      );
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 12) window.setTimeout(findAndScroll, 80);
+    };
+    requestAnimationFrame(findAndScroll);
+  }, []);
+
+  const navigateToThread = useCallback(
+    (thread: Thread) => {
+      if (!thread.file) return;
+      const threadRepo = thread.repo ?? repo;
+      if (!threadRepo) return;
+      const threadDiff = diffs.get(threadRepo) ?? (threadRepo === repo ? diff : null);
+      const match = threadDiff?.files.find(
+        (f) => f.path === thread.file || f.oldPath === thread.file,
+      );
+      const scrollPath = match?.path ?? thread.file;
+
+      setRepo(threadRepo);
+      setActiveFile(scrollPath);
+      if (match) {
+        setPreviewFile(null);
+        document
+          .getElementById(fileElementId(threadRepo, scrollPath))
+          ?.scrollIntoView({ block: "start" });
+      } else {
+        setPreviewFile(thread.file);
+        diffPaneRef.current?.scrollTo({ top: 0 });
+      }
+      scrollThreadIntoView(thread.id);
+    },
+    [diff, diffs, repo, scrollThreadIntoView],
   );
 
   // Selecting a repo (sidebar click) promotes it to active and, in the stacked
@@ -1234,7 +1276,6 @@ export function App() {
     }),
     [paneThreads],
   );
-  const editors = useMemo(() => workspace?.editors ?? EMPTY_EDITORS, [workspace]);
   const openAdd = useCallback(() => setAddOpen(true), []);
   const openRepoComment = useCallback(
     (repoName: string) => {
@@ -1431,7 +1472,6 @@ export function App() {
                   pullRequest={worktreeSummary?.pullRequest ?? null}
                   diff={diffs.get(r.name) ?? null}
                   threads={scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS}
-                  editors={editors}
                   viewed={(viewedByRepo.get(r.name) ?? EMPTY_VIEWED) as Set<string>}
                   split={splitView}
                   wrap={wrapLines}
@@ -1462,7 +1502,6 @@ export function App() {
             pullRequest={activeWorktree?.pullRequest ?? null}
             diff={diff}
             threads={scopedThreads}
-            editors={editors}
             viewed={viewed}
             split={splitView}
             wrap={wrapLines}
@@ -1596,9 +1635,9 @@ export function App() {
                   )}
                   <ThreadList
                     threads={byStatus}
-                    editors={editors}
                     showRepo={stacked}
                     onChanged={refreshThreads}
+                    onNavigate={navigateToThread}
                   />
                 </div>
               </aside>
