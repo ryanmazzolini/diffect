@@ -116,7 +116,8 @@ privately; see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE). Vendored editor icons are attributed in
+[third-party assets](docs/third-party-assets.md).
 
 ## Related projects
 

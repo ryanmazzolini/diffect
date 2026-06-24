@@ -5,6 +5,7 @@ import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { useLineSelection } from "../useLineSelection.js";
 import { CommentForm } from "./CommentForm.js";
+import { OpenInMenu } from "./OpenInMenu.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
 /** Matches the daemon's per-read line cap (fileRoute clamps to from-1+2000). */
@@ -20,6 +21,10 @@ interface Props {
   threads: Thread[];
   onBackToDiff: () => void;
   onChanged: () => void;
+  editors: string[];
+  editor: string | null;
+  onEditor: (editor: string) => void;
+  onOpenFile: (path: string, line?: number) => void;
 }
 
 /** Full-file preview for commenting on tracked files that are not in the diff. */
@@ -31,6 +36,10 @@ export function FullFilePreview({
   threads,
   onBackToDiff,
   onChanged,
+  editors,
+  editor,
+  onEditor,
+  onOpenFile,
 }: Props) {
   const lang = langForPath(file);
   const [lines, setLines] = useState<string[] | null>(null);
@@ -53,6 +62,13 @@ export function FullFilePreview({
         <span className="status status-context">context</span>
         <span className="file-path" title={file}>{file}</span>
         <span className="out-of-diff-tag">not in this diff</span>
+        <OpenInMenu
+          className="file-open-in-menu"
+          editors={editors}
+          editor={editor}
+          onEditor={onEditor}
+          primaryAction={() => onOpenFile(file)}
+        />
         <button type="button" className="ghost full-preview-back" onClick={onBackToDiff}>
           <Icon name="chevron-left" size={12} /> Diff
         </button>

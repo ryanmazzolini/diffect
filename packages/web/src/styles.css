@@ -463,6 +463,138 @@ body.modal-open {
   white-space: nowrap;
   max-width: 34vw;
 }
+.open-in-menu {
+  position: relative;
+  flex: none;
+}
+.open-in-trigger {
+  list-style: none;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.open-in-trigger::-webkit-details-marker {
+  display: none;
+}
+.open-in-menu[open] .open-in-trigger,
+.open-in-dropdown[open] .open-in-caret,
+.open-in-trigger:hover {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+}
+.open-in-split {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.open-in-split:hover {
+  border-color: var(--border-strong);
+}
+.open-in-split:has(.open-in-dropdown[open]) {
+  border-color: var(--border-strong);
+}
+.open-in-split .open-in-trigger {
+  height: 28px;
+  border: 0;
+  border-radius: 0;
+}
+.open-in-split .open-in-primary {
+  border-radius: calc(var(--r) - 1px) 0 0 calc(var(--r) - 1px);
+}
+.open-in-split .open-in-dropdown {
+  display: flex;
+}
+.open-in-split .open-in-caret {
+  width: 31px;
+  justify-content: center;
+  padding: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 calc(var(--r) - 1px) calc(var(--r) - 1px) 0;
+}
+.open-in-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 95;
+  width: 245px;
+  padding: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+.open-in-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--r);
+  padding: 7px 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.open-in-item:hover:not(:disabled),
+.open-in-item.active {
+  background: var(--panel-2);
+}
+.open-in-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.open-in-divider {
+  height: 1px;
+  margin: 5px 2px;
+  background: var(--border);
+}
+.open-in-label {
+  padding: 5px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.open-in-check {
+  margin-left: auto;
+  color: var(--success);
+}
+.editor-icon {
+  display: inline-block;
+  flex: none;
+}
+.editor-icon-zed {
+  color: #6e56cf;
+}
+.editor-icon-cursor {
+  color: var(--text);
+}
+.editor-icon-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
 .workspace-picker {
   position: relative;
   flex: none;
@@ -1842,6 +1974,23 @@ body.modal-open {
   align-items: center;
   gap: var(--space-2);
 }
+.file-open-in-menu .open-in-trigger,
+button.ghost.open-file-btn {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.file-open-in-menu.open-in-split .open-in-trigger {
+  height: 24px;
+}
+.file-open-in-menu.open-in-split .open-in-caret {
+  width: 27px;
+  padding: 0;
+}
+.file-open-in-menu .open-in-popover {
+  right: 0;
+}
 .fh-main .diffstat {
   margin-left: auto;
   flex: none;
@@ -2427,6 +2576,32 @@ button.ghost.danger:hover:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.context-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-overlay);
+}
+.context-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  border-radius: calc(var(--r) - 2px);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.context-menu button:hover {
+  background: var(--panel-2);
 }
 
 /* Severity (S1): a coloured dot + ink-coloured word, not a bordered badge. */

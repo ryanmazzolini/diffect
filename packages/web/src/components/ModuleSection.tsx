@@ -81,6 +81,10 @@ interface Props {
   previewFile: string | null;
   onBackToDiff: () => void;
   onChanged: () => void;
+  editors: string[];
+  editor: string | null;
+  onEditor: (editor: string) => void;
+  onOpenFile: (repo: string, worktree: string | null, path: string, line?: number) => void;
 }
 
 /**
@@ -122,6 +126,10 @@ export const ModuleSection = memo(function ModuleSection({
   previewFile,
   onBackToDiff,
   onChanged,
+  editors,
+  editor,
+  onEditor,
+  onOpenFile,
 }: Props) {
   // Files in display (tree) order, derived here so each stacked module owns its
   // own list without App looping hooks; stable per `diff` so the memoized DiffView
@@ -169,6 +177,10 @@ export const ModuleSection = memo(function ModuleSection({
         previewFile={previewFile}
         onBackToDiff={onBackToDiff}
         onChanged={onChanged}
+        editors={editors}
+        editor={editor}
+        onEditor={onEditor}
+        onOpenFile={(path, line) => onOpenFile(repo, worktree, path, line)}
       />
     </CurrentSnapshotContext.Provider>
   );

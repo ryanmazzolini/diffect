@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent,
 } from "react";
 import type {
   DiffFile,
@@ -47,6 +48,8 @@ interface Props {
   onSelectFile: (path: string) => void;
   onShowDiff: () => void;
   onCollapse: () => void;
+  editorLabel: string | null;
+  onOpenFile: (path: string) => void;
 }
 
 
@@ -113,6 +116,8 @@ export const Sidebar = memo(function Sidebar({
   onSelectFile,
   onShowDiff,
   onCollapse,
+  editorLabel,
+  onOpenFile,
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
   const treeEntries = useMemo(
@@ -122,6 +127,29 @@ export const Sidebar = memo(function Sidebar({
   const showFiles = files.length > 0 || allFiles.length > 0;
   const showRepoList = repos.length > 1;
   const showRecovery = legacyCount > 0 || archivedSessions.length > 0;
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  const openContextMenu = (path: string, event: MouseEvent) => {
+    if (!editorLabel) return;
+    event.preventDefault();
+    setMenu({ path, x: event.clientX, y: event.clientY });
+  };
 
   return (
     <nav className="sidebar">
@@ -194,8 +222,29 @@ export const Sidebar = memo(function Sidebar({
             threadCounts={threadCounts}
             activeFile={activeFile}
             onSelectFile={onSelectFile}
+            onContextMenu={openContextMenu}
           />
         </>
+      )}
+
+      {menu && editorLabel && (
+        <div
+          className="context-menu file-context-menu"
+          role="menu"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onOpenFile(menu.path);
+              setMenu(null);
+            }}
+          >
+            Open in {editorLabel}
+          </button>
+        </div>
       )}
 
       {showRecovery && (
@@ -279,6 +328,7 @@ function FileTree({
   threadCounts,
   activeFile,
   onSelectFile,
+  onContextMenu,
 }: {
   repo: string;
   entries: FileTreeEntry[];
@@ -286,6 +336,7 @@ function FileTree({
   threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
+  onContextMenu: (path: string, event: MouseEvent) => void;
 }) {
   const tree = useMemo(() => buildPathTree(entries), [entries]);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(repo));
@@ -320,6 +371,7 @@ function FileTree({
           threadCounts={threadCounts}
           activeFile={activeFile}
           onSelectFile={onSelectFile}
+          onContextMenu={onContextMenu}
         />
       ))}
     </div>
@@ -335,6 +387,7 @@ function TreeRow({
   threadCounts,
   activeFile,
   onSelectFile,
+  onContextMenu,
 }: {
   node: TreeNode;
   depth: number;
@@ -344,6 +397,7 @@ function TreeRow({
   threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
+  onContextMenu: (path: string, event: MouseEvent) => void;
 }) {
   // Indent is driven entirely by --depth (the CSS draws guides + padding); a
   // file's depth is already one past its folder, so no manual chevron offset.
@@ -366,6 +420,7 @@ function TreeRow({
         style={depthVar}
         title={title}
         onClick={() => onSelectFile(node.path)}
+        onContextMenu={(event) => onContextMenu(node.path, event)}
       >
         <Icon
           name={statusIcon(node.status)}
@@ -414,6 +469,7 @@ function TreeRow({
             threadCounts={threadCounts}
             activeFile={activeFile}
             onSelectFile={onSelectFile}
+            onContextMenu={onContextMenu}
           />
         ))}
     </>

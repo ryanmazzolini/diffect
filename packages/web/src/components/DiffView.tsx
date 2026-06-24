@@ -26,6 +26,7 @@ import { fileElementId } from "../fileTree.js";
 import { CommentForm } from "./CommentForm.js";
 import { FullFilePreview } from "./FullFilePreview.js";
 import { DiffStat } from "./DiffStat.js";
+import { OpenInMenu } from "./OpenInMenu.js";
 import { ThreadConversation } from "./ThreadConversation.js";
 
 // Stable empty array so memoized children don't see a fresh [] each render.
@@ -56,6 +57,10 @@ interface Props {
   previewFile: string | null;
   onBackToDiff: () => void;
   onChanged: () => void;
+  editors: string[];
+  editor: string | null;
+  onEditor: (editor: string) => void;
+  onOpenFile: (path: string, line?: number) => void;
 }
 
 // Memoized: re-renders only when the diff/threads/viewed-set actually change —
@@ -74,6 +79,10 @@ export const DiffView = memo(function DiffView({
   previewFile,
   onBackToDiff,
   onChanged,
+  editors,
+  editor,
+  onEditor,
+  onOpenFile,
 }: Props) {
   // One pass to bucket threads by file, kept stable across renders so each file
   // gets a referentially-stable array (memo can then skip unchanged files).
@@ -111,6 +120,10 @@ export const DiffView = memo(function DiffView({
           threads={threadsByFile.get(previewFile) ?? EMPTY_THREADS}
           onBackToDiff={onBackToDiff}
           onChanged={onChanged}
+          editors={editors}
+          editor={editor}
+          onEditor={onEditor}
+          onOpenFile={onOpenFile}
         />
       ) : files.length === 0 ? (
         <div className="empty">
@@ -132,6 +145,10 @@ export const DiffView = memo(function DiffView({
             theme={theme}
             onToggleViewed={onToggleViewed}
             onChanged={onChanged}
+            editors={editors}
+            editor={editor}
+            onEditor={onEditor}
+            onOpenFile={onOpenFile}
           />
         ))
       )}
@@ -143,6 +160,10 @@ export const DiffView = memo(function DiffView({
           file={file}
           threads={fileThreads}
           onChanged={onChanged}
+          editors={editors}
+          editor={editor}
+          onEditor={onEditor}
+          onOpenFile={onOpenFile}
         />
       ))}
     </div>
@@ -305,6 +326,10 @@ const FileDiff = memo(function FileDiff({
   theme,
   onToggleViewed,
   onChanged,
+  editors,
+  editor,
+  onEditor,
+  onOpenFile,
 }: {
   repo: string;
   worktree: string | null;
@@ -317,6 +342,10 @@ const FileDiff = memo(function FileDiff({
   theme: Theme;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
+  editors: string[];
+  editor: string | null;
+  onEditor: (editor: string) => void;
+  onOpenFile: (path: string, line?: number) => void;
 }) {
   // Real old/new content for the diff's two sides, fetched lazily once the body
   // mounts. Giving git-diff-view the content (vs. just the diff) switches it to
@@ -623,6 +652,13 @@ const FileDiff = memo(function FileDiff({
           )}
         </button>
         <div className="right">
+          <OpenInMenu
+            className="file-open-in-menu"
+            editors={editors}
+            editor={editor}
+            onEditor={onEditor}
+            primaryAction={() => onOpenFile(file.path)}
+          />
           <label className="viewed-toggle" title="Mark this file viewed (collapses it)">
             <input
               type="checkbox"
@@ -688,12 +724,20 @@ function OutOfDiffFile({
   file,
   threads,
   onChanged,
+  editors,
+  editor,
+  onEditor,
+  onOpenFile,
 }: {
   repo: string;
   worktree: string | null;
   file: string;
   threads: Thread[];
   onChanged: () => void;
+  editors: string[];
+  editor: string | null;
+  onEditor: (editor: string) => void;
+  onOpenFile: (path: string, line?: number) => void;
 }) {
   return (
     <div className="file out-of-diff" id={fileElementId(repo, file)} data-path={file}>
@@ -701,6 +745,13 @@ function OutOfDiffFile({
         <span className="status status-context">context</span>
         <span className="file-path">{file}</span>
         <span className="out-of-diff-tag">not in this diff</span>
+        <OpenInMenu
+          className="file-open-in-menu"
+          editors={editors}
+          editor={editor}
+          onEditor={onEditor}
+          primaryAction={() => onOpenFile(file)}
+        />
       </div>
       {threads.map((t) => (
         <OutOfDiffThread

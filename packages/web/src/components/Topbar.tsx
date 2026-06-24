@@ -11,6 +11,7 @@ import diffectIconUrl from "../../../desktop/src-tauri/icons/icon.png";
 import { api } from "../api.js";
 import { getStored, setStored } from "../storage.js";
 import { DiffStat } from "./DiffStat.js";
+import { OpenInMenu } from "./OpenInMenu.js";
 
 const WORKSPACE_RECENCY_KEY = "diffect-workspace-recency";
 
@@ -81,6 +82,12 @@ interface Props {
   filesChanged: number;
   workspaceRailOpen: boolean;
   onToggleWorkspaceRail: () => void;
+  editors: string[];
+  editor: string | null;
+  onEditor: (editor: string) => void;
+  onOpenWorkspace: () => void;
+  onOpenCurrentFile: () => void;
+  canOpenCurrentFile: boolean;
 }
 
 /**
@@ -108,6 +115,12 @@ export function Topbar({
   filesChanged,
   workspaceRailOpen,
   onToggleWorkspaceRail,
+  editors,
+  editor,
+  onEditor,
+  onOpenWorkspace,
+  onOpenCurrentFile,
+  canOpenCurrentFile,
 }: Props) {
   const hasFiles = filesChanged > 0;
   const multiRepo = workspace.repos.length > 1;
@@ -146,6 +159,20 @@ export function Topbar({
         {hasFiles && <DiffStat additions={additions} deletions={deletions} />}
 
         <span className="rh-grow" />
+
+        <OpenInMenu
+          editors={editors}
+          editor={editor}
+          onEditor={onEditor}
+          primaryAction={onOpenWorkspace}
+          actions={[
+            {
+              label: "Open current file",
+              onSelect: onOpenCurrentFile,
+              disabled: !canOpenCurrentFile,
+            },
+          ]}
+        />
 
         <button
           type="button"

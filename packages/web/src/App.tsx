@@ -17,6 +17,12 @@ import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import { getStoredTheme, setTheme, type Theme } from "./theme.js";
 import { getStoredDensity, setDensity, type Density } from "./density.js";
+import {
+  editorLabel,
+  loadPreferredEditor,
+  pickEditor,
+  savePreferredEditor,
+} from "./editorPreference.js";
 import { getStored, removeStored, setStored } from "./storage.js";
 import { deriveLifecycle, type Lifecycle } from "./lifecycle.js";
 import { fileElementId, orderedDiffFiles } from "./fileTree.js";
@@ -214,6 +220,7 @@ export function App() {
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
   const [density, setDensityState] = useState<Density>(getStoredDensity);
+  const [preferredEditor, setPreferredEditorState] = useState(loadPreferredEditor);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(initialPlace.file);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
@@ -1394,6 +1401,42 @@ export function App() {
     return map;
   }, [diffs]);
 
+  const editors = visibleWorkspace?.editors ?? workspace?.editors ?? [];
+  const activeEditor = pickEditor(editors, preferredEditor);
+  const activeEditorLabel = activeEditor ? editorLabel(activeEditor) : null;
+  const setPreferredEditor = useCallback((editorName: string) => {
+    setPreferredEditorState(editorName);
+    savePreferredEditor(editorName);
+  }, []);
+  const showOpenError = useCallback((err: unknown) => {
+    setError(err instanceof Error ? err.message : String(err));
+  }, []);
+  const openWorkspaceInEditor = useCallback(() => {
+    if (!activeEditor || !visibleWorkspace) {
+      setError("No supported editor found");
+      return;
+    }
+    void api
+      .open({ editor: activeEditor, workspacePath: activeEntry?.path ?? visibleWorkspace.root })
+      .catch(showOpenError);
+  }, [activeEditor, activeEntry?.path, showOpenError, visibleWorkspace]);
+  const openFileInEditor = useCallback(
+    (repoName: string, fileWorktree: string | null, path: string, line = 1) => {
+      if (!activeEditor) {
+        setError("No supported editor found");
+        return;
+      }
+      void api
+        .open({ editor: activeEditor, repo: repoName, worktree: fileWorktree, file: path, line })
+        .catch(showOpenError);
+    },
+    [activeEditor, showOpenError],
+  );
+  const openCurrentFileInEditor = useCallback(() => {
+    if (!repo || !activeFile) return;
+    openFileInEditor(repo, worktree, activeFile);
+  }, [activeFile, openFileInEditor, repo, worktree]);
+
   // A failed fetch no longer replaces the whole app; it shows a dismissible
   // banner so the current view stays usable and recoverable.
   const toast = error ? (
@@ -1454,6 +1497,12 @@ export function App() {
         filesChanged={headerFiles.length}
         workspaceRailOpen={workspaceRailOpen}
         onToggleWorkspaceRail={toggleWorkspaceRail}
+        editors={editors}
+        editor={activeEditor}
+        onEditor={setPreferredEditor}
+        onOpenWorkspace={openWorkspaceInEditor}
+        onOpenCurrentFile={openCurrentFileInEditor}
+        canOpenCurrentFile={activeFile !== null}
       />
       <div className="workbench" ref={workbenchRef} style={paneVars}>
         {workspaceRailOpen && (
@@ -1498,6 +1547,8 @@ export function App() {
               onSelectFile={selectFile}
               onShowDiff={backToDiff}
               onCollapse={toggleSidebar}
+              editorLabel={activeEditorLabel}
+              onOpenFile={(path) => openFileInEditor(repo, worktree, path)}
             />
             <div
               className="sidebar-resizer"
@@ -1545,6 +1596,10 @@ export function App() {
                   previewFile={r.name === repo ? previewFile : null}
                   onBackToDiff={backToDiff}
                   onChanged={refreshThreads}
+                  editors={editors}
+                  editor={activeEditor}
+                  onEditor={setPreferredEditor}
+                  onOpenFile={openFileInEditor}
                 />
               );
             })}
@@ -1573,6 +1628,10 @@ export function App() {
             previewFile={previewFile}
             onBackToDiff={backToDiff}
             onChanged={refreshThreads}
+            editors={editors}
+            editor={activeEditor}
+            onEditor={setPreferredEditor}
+            onOpenFile={openFileInEditor}
           />
         )}
         {paneCollapsed ? (
