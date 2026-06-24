@@ -45,6 +45,32 @@ interface Props {
   onCancelKey?: () => void;
 }
 
+function moveCaretToLineEdge(
+  textarea: HTMLTextAreaElement,
+  end: boolean,
+  extend: boolean,
+  wholeText: boolean,
+): void {
+  const value = textarea.value;
+  const pos = end ? textarea.selectionEnd : textarea.selectionStart;
+  let next: number;
+  if (wholeText) {
+    next = end ? value.length : 0;
+  } else if (end) {
+    const lineEnd = value.indexOf("\n", pos);
+    next = lineEnd === -1 ? value.length : lineEnd;
+  } else {
+    next = value.lastIndexOf("\n", Math.max(0, pos - 1)) + 1;
+  }
+  if (!extend) {
+    textarea.setSelectionRange(next, next);
+  } else if (end) {
+    textarea.setSelectionRange(textarea.selectionStart, next);
+  } else {
+    textarea.setSelectionRange(next, textarea.selectionEnd);
+  }
+}
+
 /** Sanitized markdown composer with GitHub-ish textarea behavior. */
 export function MarkdownEditor({
   value,
@@ -108,7 +134,12 @@ export function MarkdownEditor({
   };
 
   return (
-    <div className="md-editor">
+    <div
+      className="md-editor"
+      onKeyDown={(e) => {
+        if (e.key === "Home" || e.key === "End") e.stopPropagation();
+      }}
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -136,6 +167,16 @@ export function MarkdownEditor({
         textareaProps={{
           placeholder,
           onKeyDown: (e) => {
+            if (e.key === "Home" || e.key === "End") {
+              e.preventDefault();
+              e.stopPropagation();
+              moveCaretToLineEdge(
+                e.currentTarget,
+                e.key === "End",
+                e.shiftKey,
+                e.metaKey || e.ctrlKey,
+              );
+            }
             if (e.key === "Escape") onCancelKey?.();
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSubmitKey?.();
           },

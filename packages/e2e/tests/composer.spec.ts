@@ -43,6 +43,21 @@ test("numbered lists continue on enter", async ({ page }) => {
   await expect(textarea).toHaveValue("1. first\n2. ");
 });
 
+test("home/end stay inside the markdown editor", async ({ page }) => {
+  await page.goto("/");
+  const form = await openCommentForm(page);
+  const textarea = form.locator("textarea");
+  const pane = page.locator(".diff-pane");
+
+  await textarea.fill("first\nsecond");
+  await textarea.focus();
+  const before = await pane.evaluate((el) => el.scrollTop);
+  await textarea.press("End");
+  await textarea.press("Home");
+
+  await expect.poll(() => pane.evaluate((el) => el.scrollTop)).toBe(before);
+});
+
 test("preview strips unsafe markdown output", async ({ page }) => {
   await page.goto("/");
   const form = await openCommentForm(page);
