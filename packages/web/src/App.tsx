@@ -622,15 +622,6 @@ export function App() {
     },
     [setUnscopedFor, setPendingFor, setThreadSessionFor],
   );
-  // The Topbar picker retargets the active repo — the literal old `changeTarget`,
-  // now `changeTargetFor` bound to the active repo (the N=1 case).
-  const changeTarget = useCallback(
-    (next: string) => {
-      if (repo) changeTargetFor(repo, next);
-    },
-    [repo, changeTargetFor],
-  );
-
   const selectLegacy = useCallback(() => {
     if (!repo) return;
     setPendingFor(repo, null);
@@ -818,7 +809,7 @@ export function App() {
 
   // Module scroll-spy (stacked layout only): as the shared container scrolls,
   // promote the topmost visible module to the active repo so the sidebar highlight,
-  // topbar target picker, and thread filter follow what's on screen. Keyed on the
+  // repo header, and thread filter follow what's on screen. Keyed on the
   // repo-name set so it re-subscribes only when the set of repos changes.
   useEffect(() => {
     if (!stacked) return;
@@ -939,6 +930,9 @@ export function App() {
     () => entries.flatMap((e) => e.repos).find((r) => r.name === repo) ?? null,
     [entries, repo],
   );
+  const activeWorktree = activeRepo
+    ? selectedWorktreeSummary(activeRepo, worktree)
+    : null;
 
   // The active diff's own session, stabilized so a benign refetch re-creating the
   // RepoDiff (and a fresh `scope` object) doesn't churn the sidebar's session memo.
@@ -1278,8 +1272,8 @@ export function App() {
   // re-run on every scroll-spy active-file tick, resize commit, and filter click.
   const backToDiff = useCallback(() => setPreviewFile(null), []);
 
-  // Header/sidebar derived counts — total diffstat, viewed progress, and the
-  // per-file open-thread counts the sidebar tree badges read.
+  // Header/sidebar derived counts — total diffstat and the per-file open-thread
+  // counts the sidebar tree badges read.
   const totalAdditions = useMemo(
     () => headerFiles.reduce((n, f) => n + f.additions, 0),
     [headerFiles],
@@ -1288,22 +1282,6 @@ export function App() {
     () => headerFiles.reduce((n, f) => n + f.deletions, 0),
     [headerFiles],
   );
-  // Viewed progress for the header: aggregate across modules when stacked (each
-  // repo's viewed files against its own set), else the active repo's count.
-  const viewedCount = useMemo(() => {
-    if (!stacked) {
-      return sidebarFiles.reduce((n, f) => (viewed.has(f.path) ? n + 1 : n), 0);
-    }
-    let n = 0;
-    for (const r of visibleRepos) {
-      const rv = viewedByRepo.get(r.name);
-      if (!rv) continue;
-      for (const f of diffs.get(r.name)?.files ?? EMPTY_FILES) {
-        if (rv.has(f.path)) n++;
-      }
-    }
-    return n;
-  }, [stacked, sidebarFiles, viewed, visibleRepos, viewedByRepo, diffs]);
   const threadCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const t of scopedThreads) {
@@ -1366,11 +1344,6 @@ export function App() {
         changedFilesByRepo={changedFilesByRepo}
         onSelectWorkspace={selectWorkspace}
         onAddWorkspace={openAdd}
-        repo={repo}
-        worktree={worktree}
-        target={target}
-        onTarget={changeTarget}
-        refs={refs}
         theme={theme}
         onToggleTheme={toggleTheme}
         density={density}
@@ -1382,7 +1355,6 @@ export function App() {
         additions={totalAdditions}
         deletions={totalDeletions}
         filesChanged={headerFiles.length}
-        viewedCount={viewedCount}
         workspaceRailOpen={workspaceRailOpen}
         onToggleWorkspaceRail={toggleWorkspaceRail}
       />
@@ -1486,6 +1458,8 @@ export function App() {
             paneRef={diffPaneRef}
             repo={repo}
             worktree={worktree}
+            branch={activeWorktree?.branch ?? null}
+            pullRequest={activeWorktree?.pullRequest ?? null}
             diff={diff}
             threads={scopedThreads}
             editors={editors}
@@ -1493,6 +1467,13 @@ export function App() {
             split={splitView}
             wrap={wrapLines}
             theme={theme}
+            target={target}
+            refs={refs}
+            defaultBranch={activeRepo?.defaultBranch ?? null}
+            onTarget={changeTargetFor}
+            lifecycle={lifecycleByRepo.get(repo)?.state ?? "idle"}
+            lifecycleSession={lifecycleByRepo.get(repo)?.session ?? null}
+            onArchive={setArchivedFor}
             onToggleViewed={toggleViewedFor}
             previewFile={previewFile}
             onBackToDiff={backToDiff}

@@ -1,19 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type {
   PullRequestLink,
-  RefList,
-  RepoSummary,
   WorkspaceEntry,
   WorkspaceInfo,
-  WorktreeSummary,
 } from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import type { Density } from "../density.js";
 import { Icon } from "../icons.js";
 import diffectIconUrl from "../../../desktop/src-tauri/icons/icon.png";
+import { api } from "../api.js";
 import { getStored, setStored } from "../storage.js";
 import { DiffStat } from "./DiffStat.js";
-import { TargetPicker } from "./TargetPicker.js";
 
 const WORKSPACE_RECENCY_KEY = "diffect-workspace-recency";
 
@@ -37,15 +34,6 @@ function loadWorkspaceRecency(): Record<string, number> {
   } catch {
     return {};
   }
-}
-
-function selectedWorktree(
-  repo: RepoSummary | undefined,
-  worktree: string | null,
-): WorktreeSummary | null {
-  if (!repo) return null;
-  if (worktree) return repo.worktrees.find((w) => w.name === worktree) ?? null;
-  return repo.worktrees.find((w) => w.root === repo.root) ?? repo.worktrees[0] ?? null;
 }
 
 function workspaceMeta(
@@ -78,11 +66,6 @@ interface Props {
   changedFilesByRepo: Map<string, number>;
   onSelectWorkspace: (path: string) => void;
   onAddWorkspace: () => void;
-  repo: string;
-  worktree: string | null;
-  target: string;
-  onTarget: (target: string) => void;
-  refs: RefList | null;
   theme: Theme;
   onToggleTheme: () => void;
   density: Density;
@@ -96,7 +79,6 @@ interface Props {
   additions: number;
   deletions: number;
   filesChanged: number;
-  viewedCount: number;
   workspaceRailOpen: boolean;
   onToggleWorkspaceRail: () => void;
 }
@@ -113,11 +95,6 @@ export function Topbar({
   changedFilesByRepo,
   onSelectWorkspace,
   onAddWorkspace,
-  repo,
-  worktree,
-  target,
-  onTarget,
-  refs,
   theme,
   onToggleTheme,
   density,
@@ -129,12 +106,9 @@ export function Topbar({
   additions,
   deletions,
   filesChanged,
-  viewedCount,
   workspaceRailOpen,
   onToggleWorkspaceRail,
 }: Props) {
-  const activeRepo = workspace.repos.find((r) => r.name === repo);
-  const activeWorktree = selectedWorktree(activeRepo, worktree);
   const hasFiles = filesChanged > 0;
   const multiRepo = workspace.repos.length > 1;
 
@@ -185,30 +159,6 @@ export function Topbar({
       </div>
 
       <div className="rh-row rh-subbar">
-        {/* N≥2: the per-repo base…compare picker lives in each module header and
-            viewed progress is per-module, so the subbar
-            drops both as redundant — only the global diff-display controls remain.
-            N=1 keeps the picker + viewed count exactly as before; the single repo's
-            review controls have nowhere else to live. */}
-        {!multiRepo && (
-          <>
-            <RepoBranchMeta repo={repo} worktree={activeWorktree} />
-            <TargetPicker
-              repo={repo}
-              worktree={worktree}
-              defaultBranch={activeRepo?.defaultBranch ?? null}
-              target={target}
-              onTarget={onTarget}
-              refs={refs}
-            />
-            {hasFiles && (
-              <span className="metaitem" title="Files marked viewed">
-                {viewedCount}/{filesChanged} viewed
-              </span>
-            )}
-          </>
-        )}
-
         <span className="rh-grow" />
 
         <div className="seg" role="group" aria-label="Diff view mode">
@@ -265,36 +215,23 @@ export function Topbar({
   );
 }
 
-function RepoBranchMeta({
-  repo,
-  worktree,
-}: {
-  repo: string;
-  worktree: WorktreeSummary | null;
-}) {
-  const branch = worktree?.branch ?? "detached";
-  return (
-    <span className="repo-branch-meta" title={`${repo} · ${branch}`}>
-      <span className="repo-branch-name">{repo}</span>
-      <span className="repo-branch-sep">·</span>
-      <Icon name="git-branch" size={12} />
-      <span className="repo-branch-name">{branch}</span>
-      <PullRequestBadge pullRequest={worktree?.pullRequest ?? null} />
-    </span>
-  );
-}
-
 export function PullRequestBadge({
   pullRequest,
 }: {
   pullRequest: PullRequestLink | null;
 }) {
   if (!pullRequest) return null;
+  const open = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    void api
+      .openUrl({ url: pullRequest.url })
+      .catch(() => window.location.assign(pullRequest.url));
+  };
   return (
     <a
       className="pr-link"
       href={pullRequest.url}
-      target="_blank"
+      onClick={open}
       rel="noreferrer noopener"
       title={pullRequest.title ?? `PR #${pullRequest.number}`}
     >

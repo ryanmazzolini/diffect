@@ -352,6 +352,10 @@ export interface OpenRequest {
   editor: string;
 }
 
+export interface OpenUrlRequest {
+  url: string;
+}
+
 export type Severity = "must-fix" | "suggestion" | "nit" | "question";
 // A thread is open or closed. The store records *events* (thread.resolved,
 // and legacy thread.dismissed) — status is computed on replay, both folding to

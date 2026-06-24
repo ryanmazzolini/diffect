@@ -10,6 +10,7 @@ import type {
   FileRange,
   FsListing,
   OpenRequest,
+  OpenUrlRequest,
   RecommendedWorkspace,
   RefList,
   RefSearchResults,
@@ -168,6 +169,13 @@ export const api = {
 
   open: (req: OpenRequest) =>
     fetch("/open", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => json<{ ok: boolean }>(r)),
+
+  openUrl: (req: OpenUrlRequest) =>
+    fetch("/open-url", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(req),
