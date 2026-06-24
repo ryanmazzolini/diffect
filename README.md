@@ -97,13 +97,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor notes and
 ## Where reviews live
 
 Review state is a per-user store at `$XDG_CONFIG_HOME/diffect/` (default
-`~/.config/diffect/`): one append-only `threads.jsonl` per repo, keyed by the
-repo's path, plus a `workspaces.json` registry of known workspace paths. It's
-plain local files — host-private, not committed with your code, and equally
-readable/writable by the CLI, the daemon, desktop, and agents.
+`~/.config/diffect/`). Repo threads live in
+`workspaces/<hash>/threads.jsonl`; space-level threads live in
+`spaces/<hash>/threads.jsonl`; attachments live in `attachments/`; and
+`workspaces.json` records known workspace paths. The hashes are derived from
+absolute paths, but the files stay host-private and are not committed with your
+code.
 
-A legacy in-tree `.reviews/threads.jsonl` from older versions is migrated into
-the store on first access; the original is left as a backup.
+The CLI, daemon, desktop app, and agents all read/write that same store. A
+legacy in-tree `.reviews/threads.jsonl` from older versions is migrated into the
+central store on first access; the original is left as a backup.
 
 ## Networking and security
 
