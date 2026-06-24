@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RefList, WorkspaceEntry, WorkspaceInfo } from "@diffect/shared";
+import type {
+  PullRequestLink,
+  RefList,
+  RepoSummary,
+  WorkspaceEntry,
+  WorkspaceInfo,
+  WorktreeSummary,
+} from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import type { Density } from "../density.js";
 import { Icon } from "../icons.js";
@@ -30,6 +37,15 @@ function loadWorkspaceRecency(): Record<string, number> {
   } catch {
     return {};
   }
+}
+
+function selectedWorktree(
+  repo: RepoSummary | undefined,
+  worktree: string | null,
+): WorktreeSummary | null {
+  if (!repo) return null;
+  if (worktree) return repo.worktrees.find((w) => w.name === worktree) ?? null;
+  return repo.worktrees.find((w) => w.root === repo.root) ?? repo.worktrees[0] ?? null;
 }
 
 function workspaceMeta(
@@ -118,6 +134,7 @@ export function Topbar({
   onToggleWorkspaceRail,
 }: Props) {
   const activeRepo = workspace.repos.find((r) => r.name === repo);
+  const activeWorktree = selectedWorktree(activeRepo, worktree);
   const hasFiles = filesChanged > 0;
   const multiRepo = workspace.repos.length > 1;
 
@@ -175,6 +192,7 @@ export function Topbar({
             review controls have nowhere else to live. */}
         {!multiRepo && (
           <>
+            <RepoBranchMeta repo={repo} worktree={activeWorktree} />
             <TargetPicker
               repo={repo}
               worktree={worktree}
@@ -244,6 +262,44 @@ export function Topbar({
         </div>
       </div>
     </header>
+  );
+}
+
+function RepoBranchMeta({
+  repo,
+  worktree,
+}: {
+  repo: string;
+  worktree: WorktreeSummary | null;
+}) {
+  const branch = worktree?.branch ?? "detached";
+  return (
+    <span className="repo-branch-meta" title={`${repo} · ${branch}`}>
+      <span className="repo-branch-name">{repo}</span>
+      <span className="repo-branch-sep">·</span>
+      <Icon name="git-branch" size={12} />
+      <span className="repo-branch-name">{branch}</span>
+      <PullRequestBadge pullRequest={worktree?.pullRequest ?? null} />
+    </span>
+  );
+}
+
+export function PullRequestBadge({
+  pullRequest,
+}: {
+  pullRequest: PullRequestLink | null;
+}) {
+  if (!pullRequest) return null;
+  return (
+    <a
+      className="pr-link"
+      href={pullRequest.url}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={pullRequest.title ?? `PR #${pullRequest.number}`}
+    >
+      PR #{pullRequest.number}
+    </a>
   );
 }
 

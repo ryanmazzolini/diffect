@@ -658,6 +658,45 @@ body.modal-open {
 .rdelta .minus {
   color: var(--del-ink);
 }
+.repo-branch-meta,
+.mh-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.repo-branch-meta {
+  flex: none;
+  max-width: 34vw;
+}
+.repo-branch-name,
+.mh-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-branch-sep {
+  color: var(--faint);
+}
+.pr-link {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--accent-ink);
+  text-decoration: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pr-link:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
 /* Inline meta chips on the subbar (viewed count, etc.). */
 .metaitem {
   display: inline-flex;
@@ -1576,6 +1615,11 @@ body.modal-open {
 .mh-repo .fork {
   color: var(--faint);
   flex: none;
+}
+.mh-branch {
+  max-width: 180px;
+  flex: 0 1 auto;
+  color: var(--faint);
 }
 .mod-name {
   font-weight: 700;

@@ -147,6 +147,12 @@ export interface ReviewScope {
   branch: string | null;
 }
 
+export interface PullRequestLink {
+  number: number;
+  url: string;
+  title: string | null;
+}
+
 export interface WorktreeSummary {
   name: string;
   root: string;
@@ -156,6 +162,8 @@ export interface WorktreeSummary {
    * derive a review session for it.
    */
   branch: string | null;
+  /** Open GitHub PR for this branch, when one is cheap to discover. */
+  pullRequest: PullRequestLink | null;
 }
 
 /**
