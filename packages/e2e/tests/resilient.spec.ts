@@ -24,3 +24,15 @@ test("an in-progress comment draft survives a reload", async ({ page }) => {
     "draft that should persist",
   );
 });
+
+test("restores the active file after reload", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".tree-file", { hasText: "math.js" }).click();
+  await expect(page.locator(".tree-file.active")).toContainText("math.js");
+
+  await page.reload();
+
+  await expect(page.locator(".tree-file.active")).toContainText("math.js");
+  await expect(page.locator(".diff-pane .file", { hasText: "math.js" }).first()).toBeVisible();
+});

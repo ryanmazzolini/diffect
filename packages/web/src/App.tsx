@@ -54,6 +54,13 @@ interface DeepLinkSelection {
   worktree: string | null;
   target: string;
 }
+interface StoredPlace {
+  workspacePath: string | null;
+  repo: string | null;
+  worktree: string | null;
+  target: string;
+  file: string | null;
+}
 function cleanQueryValue(value: string | null): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -68,6 +75,23 @@ function readInitialDeepLink(): DeepLinkSelection {
     worktree: cleanQueryValue(q.get("worktree")),
     target: cleanQueryValue(q.get("target")) ?? DEFAULT_TARGET,
   };
+}
+const PLACE_KEY = "diffect-place-v1";
+function readStoredPlace(): StoredPlace {
+  try {
+    const parsed = JSON.parse(getStored(PLACE_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object") throw new Error("bad place");
+    const place = parsed as Partial<Record<keyof StoredPlace, unknown>>;
+    return {
+      workspacePath: typeof place.workspacePath === "string" ? place.workspacePath : null,
+      repo: typeof place.repo === "string" ? place.repo : null,
+      worktree: typeof place.worktree === "string" ? place.worktree : null,
+      target: typeof place.target === "string" ? place.target : DEFAULT_TARGET,
+      file: typeof place.file === "string" ? place.file : null,
+    };
+  } catch {
+    return { workspacePath: null, repo: null, worktree: null, target: DEFAULT_TARGET, file: null };
+  }
 }
 // Per-session dismissal of the "looks complete" suggestion. This is a UI
 // preference (correctly browser-local), unlike the archive *fact* itself, which
@@ -126,8 +150,13 @@ const EMPTY_THREADS: Thread[] = [];
 
 export function App() {
   const [initialDeepLink] = useState(readInitialDeepLink);
+  const [initialPlace] = useState(readStoredPlace);
+  const initialRepo = initialDeepLink.repo ?? initialPlace.repo;
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
-  const [repo, setRepo] = useState<string | null>(initialDeepLink.repo);
+  const [repo, setRepo] = useState<string | null>(initialRepo);
+  const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(
+    initialDeepLink.repo ? null : initialPlace.workspacePath,
+  );
   // Per-repo review selection (checkout + target), so each stacked module keeps
   // its own base..compare independently. The active repo's entry is projected to
   // the `worktree`/`target` scalars below, which the rest of the component reads
@@ -137,10 +166,10 @@ export function App() {
     Map<string, { worktree: string | null; target: string }>
   >(() => {
     const m = new Map<string, { worktree: string | null; target: string }>();
-    if (initialDeepLink.repo) {
-      m.set(initialDeepLink.repo, {
-        worktree: initialDeepLink.worktree,
-        target: initialDeepLink.target,
+    if (initialRepo) {
+      m.set(initialRepo, {
+        worktree: initialDeepLink.repo ? initialDeepLink.worktree : initialPlace.worktree,
+        target: initialDeepLink.repo ? initialDeepLink.target : initialPlace.target,
       });
     }
     return m;
@@ -186,7 +215,7 @@ export function App() {
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
   const [density, setDensityState] = useState<Density>(getStoredDensity);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
-  const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [activeFile, setActiveFile] = useState<string | null>(initialPlace.file);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const [workspaceRailOpen, setWorkspaceRailOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -273,8 +302,11 @@ export function App() {
   const selectionsRef = useRef(selections);
   selectionsRef.current = selections;
   const activeEntry = useMemo(
-    () => entries.find((ws) => ws.repos.some((r) => r.name === repo)) ?? null,
-    [entries, repo],
+    () =>
+      entries.find((ws) => ws.path === activeWorkspacePath) ??
+      entries.find((ws) => ws.repos.some((r) => r.name === repo)) ??
+      null,
+    [activeWorkspacePath, entries, repo],
   );
   const visibleRepos = activeEntry?.repos ?? workspace?.repos ?? [];
   const visibleWorkspace = useMemo<WorkspaceInfo | null>(
@@ -296,6 +328,15 @@ export function App() {
   // Stable key over the repo *names* so the module scroll-spy re-subscribes when the
   // set of repos changes, but not when a diff/selection inside one does.
   const repoNamesKey = JSON.stringify(visibleRepos.map((r) => r.name));
+
+  useEffect(() => {
+    const workspacePath = activeEntry?.path ?? activeWorkspacePath ?? workspace?.root ?? null;
+    if (!workspacePath && !repo && !activeFile) return;
+    setStored(
+      PLACE_KEY,
+      JSON.stringify({ workspacePath, repo, worktree, target, file: activeFile }),
+    );
+  }, [activeEntry?.path, activeFile, activeWorkspacePath, repo, target, worktree, workspace?.root]);
 
   // Write the unscoped/pending session UI for a given repo; both no-op when the
   // value is unchanged so a redundant settle (e.g. clearing an already-clear pending
@@ -343,12 +384,13 @@ export function App() {
 
   const selectFile = useCallback(
     (path: string) => {
-      const inDiff = diff?.files.some((f) => f.path === path || f.oldPath === path) ?? false;
-      setActiveFile(path);
-      if (inDiff && repo) {
+      const match = diff?.files.find((f) => f.path === path || f.oldPath === path);
+      const scrollPath = match?.path ?? path;
+      setActiveFile(scrollPath);
+      if (match && repo) {
         setPreviewFile(null);
         document
-          .getElementById(fileElementId(repo, path))
+          .getElementById(fileElementId(repo, scrollPath))
           ?.scrollIntoView({ block: "start" });
       } else {
         setPreviewFile(path);
@@ -422,11 +464,18 @@ export function App() {
   }, []);
   const selectWorkspace = useCallback(
     (path: string) => {
+      setActiveWorkspacePath(path);
       const firstRepo = entries.find((ws) => ws.path === path)?.repos[0]?.name;
       if (firstRepo) selectRepo(firstRepo);
     },
     [entries, selectRepo],
   );
+
+  useEffect(() => {
+    if (!activeEntry || (repo && activeEntry.repos.some((r) => r.name === repo))) return;
+    const firstRepo = activeEntry.repos[0]?.name;
+    if (firstRepo) setRepo(firstRepo);
+  }, [activeEntry, repo]);
   const initialDeepLinkScrolled = useRef(false);
   useEffect(() => {
     const name = initialDeepLink.repo;
@@ -822,6 +871,13 @@ export function App() {
         : sidebarFiles,
     [stacked, visibleRepos, diffs, sidebarFiles],
   );
+
+  const restoredFileRef = useRef(false);
+  useEffect(() => {
+    if (restoredFileRef.current || !initialPlace.file || !diff || !repo) return;
+    restoredFileRef.current = true;
+    selectFile(initialPlace.file);
+  }, [diff, initialPlace.file, repo, selectFile]);
 
   // Scroll-spy: highlight the file in the sidebar that's at the top of the diff
   // pane as the user scrolls, so the tree tracks reading position. Tracks the
