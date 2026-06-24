@@ -16,7 +16,7 @@ jobs:
   js:
     name: JS, web, and e2e
     runs-on: ubuntu-24.04
-    container: mcr.microsoft.com/playwright:v1.49.1-noble
+    container: mcr.microsoft.com/playwright:v1.61.0-noble
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable
-      - run: corepack prepare pnpm@11.2.2 --activate
+      - run: corepack prepare pnpm@11.9.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm --filter @diffect/e2e test

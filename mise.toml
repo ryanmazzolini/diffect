@@ -1,6 +1,6 @@
 [tools]
 node = "24.15.0"
-pnpm = "11.2.2"
+pnpm = "11.9.0"
 # Rust toolchain for the desktop shell (packages/desktop).
 rust = "1.94.1"
 # Deterministic TS/JS static analysis (duplication, complexity, dead code,

@@ -6,7 +6,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@11.2.2",
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0",
+    "vitest": "^4.1.9",
     "@types/node": "^22.10.0"
   }
 }
