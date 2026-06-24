@@ -1,5 +1,9 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { PullRequestLink } from "@diffect/shared";
 import { gitTry } from "./exec.js";
+
+const execFileAsync = promisify(execFile);
 
 const CACHE_TTL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 1_500;
@@ -44,10 +48,24 @@ export async function pullRequestForBranch(
   const cached = cache.get(key);
   if (cached && cached.expiresAt > now) return cached.value;
 
-  const value = await fetchPullRequest(gh, branch).catch(() => null);
+  const value =
+    (await ghPullRequest(repoRoot, branch).catch(() => null)) ??
+    (await fetchPullRequest(gh, branch).catch(() => null));
   if (value) cache.set(key, { expiresAt: now + CACHE_TTL_MS, value });
   else cache.delete(key);
   return value;
+}
+
+async function ghPullRequest(
+  repoRoot: string,
+  branch: string,
+): Promise<PullRequestLink | null> {
+  const { stdout } = await execFileAsync(
+    "gh",
+    ["pr", "view", branch, "--json", "number,url,title"],
+    { cwd: repoRoot, timeout: FETCH_TIMEOUT_MS },
+  );
+  return parsePullRequest(JSON.parse(stdout) as unknown, "url");
 }
 
 async function fetchPullRequest(
@@ -69,14 +87,19 @@ async function fetchPullRequest(
   if (!res.ok) return null;
 
   const data: unknown = await res.json();
-  const first = Array.isArray(data) ? data[0] : null;
-  if (!first || typeof first !== "object") return null;
+  return parsePullRequest(Array.isArray(data) ? data[0] : null, "html_url");
+}
 
-  const pr = first as Record<string, unknown>;
-  return typeof pr.number === "number" && typeof pr.html_url === "string"
+function parsePullRequest(
+  value: unknown,
+  urlKey: "url" | "html_url",
+): PullRequestLink | null {
+  if (!value || typeof value !== "object") return null;
+  const pr = value as Record<string, unknown>;
+  return typeof pr.number === "number" && typeof pr[urlKey] === "string"
     ? {
         number: pr.number,
-        url: pr.html_url,
+        url: pr[urlKey],
         title: typeof pr.title === "string" ? pr.title : null,
       }
     : null;

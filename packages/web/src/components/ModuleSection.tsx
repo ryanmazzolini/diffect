@@ -60,16 +60,15 @@ interface Props {
   wrap: boolean;
   theme: Theme;
   /** This module's review target plus the refs/defaultBranch backing its inline
-   * base…compare picker. Stacked layout only — the N=1 picker lives in the Topbar.
-   * `onTarget` is repo-parameterized so a module retargets only itself. */
+   * base…compare picker. `onTarget` is repo-parameterized so a module retargets
+   * only itself. */
   target?: string;
   refs?: RefList | null;
   defaultBranch?: string | null;
   onTarget?: (repo: string, target: string) => void;
   /** This module's durable review state (the status crumb) plus the session its
-   * Mark complete / Revive action archives or revives. Stacked layout only — the
-   * N=1 completion affordance is the global banner in the thread pane. `onArchive`
-   * is repo-parameterized so a background module finishes its OWN review. */
+   * Mark complete / Revive action archives or revives. `onArchive` is
+   * repo-parameterized so a background module finishes its OWN review. */
   lifecycle?: Lifecycle;
   lifecycleSession?: ReviewSession | null;
   onArchive?: (repo: string, session: ReviewSession, archived: boolean) => void;
@@ -178,11 +177,30 @@ export const ModuleSection = memo(function ModuleSection({
   );
 
   if (!stacked) {
-    // The literal N=1 layout: a single scrollable diff pane, headerless, exactly
-    // as before the modules view existed.
     return (
       <section className="diff-pane" ref={paneRef}>
-        {body}
+        <StackedModule
+          repo={repo}
+          band={band}
+          focused={false}
+          collapsible={false}
+          files={files}
+          viewed={viewed}
+          worktree={worktree}
+          branch={branch}
+          pullRequest={pullRequest}
+          target={target}
+          refs={refs}
+          defaultBranch={defaultBranch}
+          onTarget={handleTarget}
+          lifecycle={lifecycle}
+          canArchive={false}
+          onArchive={handleArchive}
+          collapsed={false}
+          onToggleCollapse={handleToggleCollapse}
+        >
+          {body}
+        </StackedModule>
       </section>
     );
   }
@@ -192,6 +210,7 @@ export const ModuleSection = memo(function ModuleSection({
       repo={repo}
       band={band}
       focused={focused}
+      collapsible
       files={files}
       viewed={viewed}
       worktree={worktree}
@@ -212,14 +231,13 @@ export const ModuleSection = memo(function ModuleSection({
   );
 });
 
-/** A repo module in the stacked layout: a two-line sticky header — line 1 names
- *  the repo (with its wayfinding band, collapse caret, and right-aligned
- *  diffstat/viewed progress), line 2 carries its own inline base…compare target
- *  picker — over a collapsible diff body. */
+/** A repo module: line 1 names repo/branch/PR/status/stats, line 2 carries
+ *  the base…compare picker. Multi-repo adds the band + collapse caret. */
 function StackedModule({
   repo,
   band,
   focused,
+  collapsible,
   files,
   viewed,
   worktree,
@@ -239,6 +257,7 @@ function StackedModule({
   repo: string;
   band: 1 | 2;
   focused: boolean;
+  collapsible: boolean;
   files: DiffFile[];
   viewed: Set<string>;
   worktree: string | null;
@@ -265,22 +284,24 @@ function StackedModule({
 
   return (
     <section
-      className={`module m${band}${focused ? " focused" : ""}${collapsed ? " collapsed" : ""}${!hasFiles ? " empty" : ""}`}
+      className={`module ${collapsible ? `m${band}` : "single"}${focused ? " focused" : ""}${collapsed ? " collapsed" : ""}${!hasFiles ? " is-empty" : ""}`}
       data-repo={repo}
     >
       <header className="mod-head">
         <div className="mh-line1">
-          <span className="mod-band" aria-hidden="true" />
-          <button
-            type="button"
-            className="mh-caret"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? `Expand ${repo}` : `Collapse ${repo}`}
-            title={collapsed ? "Expand this module" : "Collapse this module"}
-            onClick={onToggleCollapse}
-          >
-            <Icon name="chevron-down" size={14} />
-          </button>
+          {collapsible && <span className="mod-band" aria-hidden="true" />}
+          {collapsible && (
+            <button
+              type="button"
+              className="mh-caret"
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? `Expand ${repo}` : `Collapse ${repo}`}
+              title={collapsed ? "Expand this module" : "Collapse this module"}
+              onClick={onToggleCollapse}
+            >
+              <Icon name="chevron-down" size={14} />
+            </button>
+          )}
           <span className="mh-repo">
             <Icon name="git-branch" size={12} className="fork" />
             <span className="mod-name">{repo}</span>
@@ -343,8 +364,7 @@ function StackedModule({
             target={target}
             onTarget={onTarget}
             refs={refs}
-            // Stacked modules live inside `.modmain`'s overflow:auto, which clips
-            // an inline popover — portal it to the body instead.
+            // Repo headers live inside scroll panes, which clip inline popovers.
             portalPopover
           />
         </div>

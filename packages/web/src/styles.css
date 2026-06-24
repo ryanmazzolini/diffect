@@ -658,7 +658,6 @@ body.modal-open {
 .rdelta .minus {
   color: var(--del-ink);
 }
-.repo-branch-meta,
 .mh-branch {
   display: inline-flex;
   align-items: center;
@@ -666,53 +665,27 @@ body.modal-open {
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
-}
-.repo-branch-meta {
-  flex: none;
-  max-width: 34vw;
-}
-.repo-branch-name,
-.mh-branch {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.repo-branch-sep {
-  color: var(--faint);
 }
 .pr-link {
   display: inline-flex;
   align-items: center;
   height: 22px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
+  padding: 0 8px;
+  border: 1px solid var(--accent);
   border-radius: var(--r);
-  color: var(--accent-ink);
+  background: var(--accent);
+  color: var(--on-accent);
   text-decoration: none;
   font-size: 12px;
+  font-weight: 650;
   white-space: nowrap;
 }
 .pr-link:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-/* Inline meta chips on the subbar (viewed count, etc.). */
-.metaitem {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  flex: none;
-}
-.metaitem .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.dot-green {
-  background: var(--success);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 /* Segmented control — density, unified/split, tree/list, diff/all. */
@@ -1534,14 +1507,17 @@ body.modal-open {
 .module:last-child {
   border-bottom: 0;
 }
-.module.empty {
+.module.single {
+  border-bottom: 0;
+}
+.module.is-empty {
   background: var(--bg-elev);
 }
-.module.empty > .mod-head {
+.module.is-empty > .mod-head {
   color: var(--muted);
 }
-.module.empty .mod-name,
-.module.empty .mh-files {
+.module.is-empty .mod-name,
+.module.is-empty .mh-files {
   color: var(--muted);
 }
 /* The module header parks ABOVE file headers in the sticky stack so a file's
@@ -1567,6 +1543,9 @@ body.modal-open {
   gap: 9px;
   height: 38px;
   padding: 0 14px 0 0;
+}
+.module.single .mh-line1 {
+  padding-left: 14px;
 }
 /* A full-height wayfinding spine: a low-sat hue per module (m1/m2), alternating
  * down the stack so two adjacent modules read as distinct surfaces. Independent
@@ -1733,7 +1712,8 @@ body.modal-open {
 /* File sticky headers inside a module park just below the two-line module header
  * (line 1 = 38px + line 2 = 40px) rather than at the container top, so both stay
  * visible while scrolling. */
-.modmain .file-header {
+.modmain .file-header,
+.diff-pane .module .file-header {
   top: 78px;
 }
 /* When a module is collapsed its line 2 is hidden, so the body (and its file

@@ -10,6 +10,7 @@ import {
   type CreateThreadRequest,
   type DeleteThreadRequest,
   type OpenRequest,
+  type OpenUrlRequest,
   type ResolveThreadRequest,
   type WorkspaceEntry,
   type WorkspaceMutationRequest,
@@ -48,6 +49,7 @@ import {
   PathEscapeError,
   UnknownEditorError,
 } from "./editor.js";
+import { openExternalUrl, UnsupportedUrlError } from "./open-url.js";
 import {
   discoverWorkspace,
   findRepo,
@@ -195,6 +197,7 @@ async function handle(
   if (await fileContentRoute(ctx, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
+  if (await externalUrlRoute(ctx, req, res, method, path)) return;
   if (await attachmentRoutes(ctx, req, res, method, path)) return;
   if (await discoveryRoutes(ctx, res, url, method, path)) return;
 
@@ -679,6 +682,37 @@ async function editorRoute(
   } catch (err) {
     // Bad input (unsupported editor, path escaping the repo) is a 400, not a 500.
     if (err instanceof UnknownEditorError || err instanceof PathEscapeError) {
+      sendJson(res, 400, { error: err.message });
+    } else {
+      throw err;
+    }
+  }
+  return true;
+}
+
+/** `POST /open-url` opens a web URL in the host browser. */
+async function externalUrlRoute(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (!(method === "POST" && path === "/open-url")) return false;
+  if (!isLoopback(ctx.host)) {
+    sendJson(res, 403, { error: "opening URLs is only allowed on a loopback-bound daemon" });
+    return true;
+  }
+  const body = await readJsonBody<OpenUrlRequest>(req);
+  if (!body || typeof body.url !== "string") {
+    sendJson(res, 400, { error: "url is required" });
+    return true;
+  }
+  try {
+    await openExternalUrl(body.url);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    if (err instanceof UnsupportedUrlError) {
       sendJson(res, 400, { error: err.message });
     } else {
       throw err;
