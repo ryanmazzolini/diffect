@@ -72,4 +72,19 @@ describe("daemon SSE /events", () => {
     expect(await seen).toBe(true);
     await new Promise<void>((r) => server.close(() => r()));
   });
+
+  it("emits workspace.changed when the checked-out branch changes", async () => {
+    await git(dir, ["branch", "feature"]);
+    const server = await createServer({ workspacePath: dir });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    const res = await fetch(`${base}/events`);
+    const seen = waitForEvent(res.body!, "workspace.changed", 5000);
+    await git(dir, ["switch", "feature"]);
+
+    expect(await seen).toBe(true);
+    await new Promise<void>((r) => server.close(() => r()));
+  });
 });
