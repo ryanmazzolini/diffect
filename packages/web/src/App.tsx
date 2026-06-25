@@ -285,6 +285,8 @@ export function App() {
   const workbenchRef = useRef<HTMLDivElement>(null);
   const programmaticRepoRef = useRef<string | null>(null);
   const programmaticRepoTimerRef = useRef<number | null>(null);
+  const programmaticFileRef = useRef<string | null>(null);
+  const programmaticFileTimerRef = useRef<number | null>(null);
 
   // Active-repo projection of the per-repo maps. Every reader below (memos,
   // effects, render, child props) uses these scalars exactly as before the lift,
@@ -336,14 +338,18 @@ export function App() {
   // set of repos changes, but not when a diff/selection inside one does.
   const repoNamesKey = JSON.stringify(visibleRepos.map((r) => r.name));
 
+  const persistPlace = useCallback(
+    (file: string | null) => {
+      const workspacePath = activeEntry?.path ?? activeWorkspacePath ?? workspace?.root ?? null;
+      if (!workspacePath && !repo && !file) return;
+      setStored(PLACE_KEY, JSON.stringify({ workspacePath, repo, worktree, target, file }));
+    },
+    [activeEntry?.path, activeWorkspacePath, repo, target, worktree, workspace?.root],
+  );
+
   useEffect(() => {
-    const workspacePath = activeEntry?.path ?? activeWorkspacePath ?? workspace?.root ?? null;
-    if (!workspacePath && !repo && !activeFile) return;
-    setStored(
-      PLACE_KEY,
-      JSON.stringify({ workspacePath, repo, worktree, target, file: activeFile }),
-    );
-  }, [activeEntry?.path, activeFile, activeWorkspacePath, repo, target, worktree, workspace?.root]);
+    persistPlace(activeFile);
+  }, [activeFile, persistPlace]);
 
   // Write the unscoped/pending session UI for a given repo; both no-op when the
   // value is unchanged so a redundant settle (e.g. clearing an already-clear pending
@@ -389,11 +395,24 @@ export function App() {
     api.workspaces().then(setEntries).catch(() => setEntries([]));
   }, []);
 
+  const lockProgrammaticFile = useCallback((path: string) => {
+    programmaticFileRef.current = path;
+    if (programmaticFileTimerRef.current !== null) {
+      window.clearTimeout(programmaticFileTimerRef.current);
+    }
+    programmaticFileTimerRef.current = window.setTimeout(() => {
+      if (programmaticFileRef.current === path) programmaticFileRef.current = null;
+      programmaticFileTimerRef.current = null;
+    }, 1500);
+  }, []);
+
   const selectFile = useCallback(
     (path: string) => {
       const match = diff?.files.find((f) => f.path === path || f.oldPath === path);
       const scrollPath = match?.path ?? path;
+      lockProgrammaticFile(scrollPath);
       setActiveFile(scrollPath);
+      persistPlace(scrollPath);
       if (match && repo) {
         setPreviewFile(null);
         document
@@ -404,7 +423,7 @@ export function App() {
         diffPaneRef.current?.scrollTo({ top: 0 });
       }
     },
-    [diff, repo],
+    [diff, lockProgrammaticFile, persistPlace, repo],
   );
 
   const scrollThreadIntoView = useCallback((threadId: string) => {
@@ -435,7 +454,9 @@ export function App() {
       const scrollPath = match?.path ?? thread.file;
 
       setRepo(threadRepo);
+      lockProgrammaticFile(scrollPath);
       setActiveFile(scrollPath);
+      persistPlace(scrollPath);
       if (match) {
         setPreviewFile(null);
         document
@@ -447,7 +468,7 @@ export function App() {
       }
       scrollThreadIntoView(thread.id);
     },
-    [diff, diffs, repo, scrollThreadIntoView],
+    [diff, diffs, lockProgrammaticFile, persistPlace, repo, scrollThreadIntoView],
   );
 
   // Selecting a repo (sidebar click) promotes it to active and, in the stacked
@@ -904,7 +925,10 @@ export function App() {
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
         const path = top?.target.getAttribute("data-path");
-        if (path) setActiveFile(path);
+        if (!path) return;
+        const locked = programmaticFileRef.current;
+        if (locked && path !== locked) return;
+        setActiveFile(path);
       },
       { root, rootMargin: "0px 0px -70% 0px", threshold: 0 },
     );
