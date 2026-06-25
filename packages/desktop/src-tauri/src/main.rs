@@ -13,10 +13,9 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{
-    AppHandle, LogicalPosition, Manager, RunEvent, TitleBarStyle, Url, WebviewUrl,
-    WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::{LogicalPosition, TitleBarStyle};
 use tauri_plugin_opener::OpenerExt;
 
 /// The spawned diffectd. Emptied on shutdown, which also stands the crash
@@ -247,11 +246,8 @@ fn main() {
             // opens in the system browser.
             let app_origin = url.origin();
             let handle = app.handle().clone();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Diffect")
-                .hidden_title(true)
-                .title_bar_style(TitleBarStyle::Overlay)
-                .traffic_light_position(LogicalPosition::new(14.0, 14.0))
                 .inner_size(1280.0, 860.0)
                 .on_navigation(move |target| {
                     if is_loopback(target) || target.origin() == app_origin {
@@ -259,8 +255,13 @@ fn main() {
                     }
                     let _ = handle.opener().open_url(target.as_str(), None::<&str>);
                     false
-                })
-                .build()?;
+                });
+            #[cfg(target_os = "macos")]
+            let builder = builder
+                .hidden_title(true)
+                .title_bar_style(TitleBarStyle::Overlay)
+                .traffic_light_position(LogicalPosition::new(14.0, 14.0));
+            builder.build()?;
             Ok(())
         })
         .build(tauri::generate_context!())
