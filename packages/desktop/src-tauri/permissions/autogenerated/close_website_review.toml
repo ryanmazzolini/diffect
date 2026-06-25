@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-website-review"
+description = "Enables the close_website_review command without any pre-configured scope."
+commands.allow = ["close_website_review"]
+
+[[permission]]
+identifier = "deny-close-website-review"
+description = "Denies the close_website_review command without any pre-configured scope."
+commands.deny = ["close_website_review"]

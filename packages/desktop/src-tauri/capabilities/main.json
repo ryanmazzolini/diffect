@@ -8,6 +8,10 @@
   },
   "permissions": [
     "core:window:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "allow-open-website-review",
+    "allow-position-website-review",
+    "allow-close-website-review",
+    "allow-report-website-pick"
   ]
 }
