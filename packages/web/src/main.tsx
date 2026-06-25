@@ -6,8 +6,10 @@ import { getStoredDensity, setDensity } from "./density.js";
 import "@git-diff-view/react/styles/diff-view.css";
 import "./styles.css";
 
-// Apply the stored theme + density before first paint to avoid a flash of the
-// wrong appearance.
+// Apply shell, theme, and density before first paint to avoid layout/colour flash.
+if (new URLSearchParams(window.location.search).get("shell") === "desktop") {
+  document.documentElement.dataset.shell = "desktop";
+}
 setTheme(getStoredTheme());
 setDensity(getStoredDensity());
 

@@ -91,9 +91,8 @@ interface Props {
 }
 
 /**
- * Application header, in two Linear-clean rows: identity/search on top, review
- * controls below. Workspace switching lives beside the path where users already
- * look for location.
+ * Application header: one compact row for workspace identity and global actions.
+ * Infrequent view preferences live in the Options menu.
  */
 export function Topbar({
   workspace,
@@ -127,7 +126,7 @@ export function Topbar({
 
   return (
     <header className="rheader">
-      <div className="rh-row rh-identity">
+      <div className="rh-row rh-identity" data-tauri-drag-region>
         <button
           type="button"
           className="icon-btn hamburger"
@@ -158,7 +157,7 @@ export function Topbar({
         )}
         {hasFiles && <DiffStat additions={additions} deletions={deletions} />}
 
-        <span className="rh-grow" />
+        <span className="rh-grow" data-tauri-drag-region />
 
         <OpenInMenu
           editors={editors}
@@ -183,62 +182,138 @@ export function Topbar({
         >
           <Icon name={theme === "dark" ? "sun" : "moon"} />
         </button>
-      </div>
 
-      <div className="rh-row rh-subbar">
-        <span className="rh-grow" />
-
-        <div className="seg" role="group" aria-label="Diff view mode">
-          <button
-            type="button"
-            className={!split ? "on" : ""}
-            aria-pressed={!split}
-            onClick={() => split && onToggleSplit()}
-          >
-            Unified
-          </button>
-          <button
-            type="button"
-            className={split ? "on" : ""}
-            aria-pressed={split}
-            onClick={() => !split && onToggleSplit()}
-          >
-            Split
-          </button>
-        </div>
-        <button
-          type="button"
-          className="ghost wrap-toggle"
-          aria-pressed={!wrap}
-          title={
-            wrap
-              ? "Stop wrapping long lines (scroll horizontally)"
-              : "Wrap long lines"
-          }
-          onClick={onToggleWrap}
-        >
-          {wrap ? "No wrap" : "Wrap"}
-        </button>
-        <div className="seg" role="group" aria-label="Density">
-          <button
-            type="button"
-            className={density === "tight" ? "on" : ""}
-            aria-pressed={density === "tight"}
-            onClick={() => onDensity("tight")}
-          >
-            Tight
-          </button>
-          <button
-            type="button"
-            className={density === "compact" ? "on" : ""}
-            aria-pressed={density === "compact"}
-            onClick={() => onDensity("compact")}
-          >
-            Compact
-          </button>
-        </div>
+        <OptionsMenu
+          density={density}
+          onDensity={onDensity}
+          split={split}
+          onToggleSplit={onToggleSplit}
+          wrap={wrap}
+          onToggleWrap={onToggleWrap}
+        />
       </div>
     </header>
+  );
+}
+
+interface OptionsMenuProps {
+  density: Density;
+  onDensity: (density: Density) => void;
+  split: boolean;
+  onToggleSplit: () => void;
+  wrap: boolean;
+  onToggleWrap: () => void;
+}
+
+function OptionsMenu({
+  density,
+  onDensity,
+  split,
+  onToggleSplit,
+  wrap,
+  onToggleWrap,
+}: OptionsMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+  const chooseSplit = (next: boolean) => {
+    if (split !== next) onToggleSplit();
+    close();
+  };
+  const chooseDensity = (next: Density) => {
+    if (density !== next) onDensity(next);
+    close();
+  };
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!open) return;
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) close();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div
+      className="options-menu"
+      ref={menuRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") close();
+      }}
+    >
+      <button
+        type="button"
+        className="options-trigger"
+        title="View options"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>Options</span>
+        <Icon name="chevron-down" size={12} />
+      </button>
+      {open && (
+        <div className="open-in-popover options-popover">
+          <div className="open-in-label">Diff view</div>
+          <div role="group" aria-label="Diff view mode">
+            <OptionsItem active={!split} onSelect={() => chooseSplit(false)}>
+              Unified
+            </OptionsItem>
+            <OptionsItem active={split} onSelect={() => chooseSplit(true)}>
+              Split
+            </OptionsItem>
+          </div>
+          <div className="open-in-divider" />
+          <OptionsItem
+            active={!wrap}
+            onSelect={() => {
+              onToggleWrap();
+              close();
+            }}
+          >
+            No wrap
+          </OptionsItem>
+          <div className="open-in-divider" />
+          <div className="open-in-label">Density</div>
+          <div role="group" aria-label="Density">
+            <OptionsItem
+              active={density === "tight"}
+              onSelect={() => chooseDensity("tight")}
+            >
+              Tight
+            </OptionsItem>
+            <OptionsItem
+              active={density === "compact"}
+              onSelect={() => chooseDensity("compact")}
+            >
+              Compact
+            </OptionsItem>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OptionsItem({
+  active,
+  onSelect,
+  children,
+}: {
+  active: boolean;
+  onSelect: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`open-in-item options-item ${active ? "active" : ""}`}
+      aria-pressed={active}
+      onClick={onSelect}
+    >
+      {active ? <Icon name="check" size={13} className="options-check" /> : <span />}
+      <span>{children}</span>
+    </button>
   );
 }
 

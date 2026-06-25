@@ -43,9 +43,11 @@ test("toggles split (side-by-side) view", async ({ page }) => {
   await page.waitForSelector("tbody.diff-table-body tr");
   await expect(page.locator(".diff-line-old-content")).toHaveCount(0); // unified default
 
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByRole("button", { name: "Split" }).click();
   await expect(page.locator(".diff-line-old-content").first()).toBeVisible();
 
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByRole("button", { name: "Unified" }).click();
   await expect(page.locator(".diff-line-old-content")).toHaveCount(0);
 });
@@ -55,6 +57,7 @@ test("toggles line wrapping", async ({ page }) => {
   await page.waitForSelector("tbody.diff-table-body tr");
   await expect(page.locator(".unified-diff-view-wrap").first()).toBeVisible(); // wrap default
 
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByRole("button", { name: "No wrap" }).click();
   await expect(page.locator(".unified-diff-view-normal").first()).toBeVisible();
 
@@ -66,13 +69,11 @@ test("keeps the diff view controls reachable while scrolling", async ({ page }) 
   await page.goto("/");
   await page.waitForSelector("tbody.diff-table-body tr");
 
-  // The view-mode + wrap controls live in the fixed topbar, not a per-pane action
-  // bar, so the diff pane scrolls internally beneath them and they stay reachable.
+  // The view controls live behind the fixed topbar's Options menu, not a per-pane
+  // action bar, so the diff pane scrolls internally beneath them and they stay reachable.
   const header = page.locator(".rheader");
-  const viewSeg = page.getByRole("group", { name: "Diff view mode" });
-  const wrap = page.locator(".wrap-toggle");
-  await expect(viewSeg).toBeVisible();
-  await expect(wrap).toBeVisible();
+  const options = page.getByRole("button", { name: "Options" });
+  await expect(options).toBeVisible();
   const before = await header.boundingBox();
   expect(before).not.toBeNull();
 
@@ -80,10 +81,12 @@ test("keeps the diff view controls reachable while scrolling", async ({ page }) 
     el.scrollTop = 700;
   });
 
-  // The header doesn't move when the diff scrolls — the controls remain pinned.
+  // The header doesn't move when the diff scrolls — the menu remains pinned.
   const after = await header.boundingBox();
   expect(after).not.toBeNull();
   expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
-  await expect(viewSeg).toBeVisible();
-  await expect(wrap).toBeVisible();
+  await expect(options).toBeVisible();
+  await options.click();
+  await expect(page.getByRole("group", { name: "Diff view mode" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "No wrap" })).toBeVisible();
 });

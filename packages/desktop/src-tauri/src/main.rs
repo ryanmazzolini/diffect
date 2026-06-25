@@ -13,7 +13,10 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, LogicalPosition, Manager, RunEvent, TitleBarStyle, Url, WebviewUrl,
+    WebviewWindowBuilder,
+};
 use tauri_plugin_opener::OpenerExt;
 
 /// The spawned diffectd. Emptied on shutdown, which also stands the crash
@@ -236,7 +239,8 @@ fn main() {
                     }
                 },
             };
-            let url: Url = url.parse()?;
+            let mut url: Url = url.parse()?;
+            url.query_pairs_mut().append_pair("shell", "desktop");
             // The app's own origins stay in the webview: any loopback port
             // (respawns get new ones) plus whatever origin the window was
             // started on. Everything else — links in comments, markdown —
@@ -245,6 +249,9 @@ fn main() {
             let handle = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Diffect")
+                .hidden_title(true)
+                .title_bar_style(TitleBarStyle::Overlay)
+                .traffic_light_position(LogicalPosition::new(14.0, 14.0))
                 .inner_size(1280.0, 860.0)
                 .on_navigation(move |target| {
                     if is_loopback(target) || target.origin() == app_origin {

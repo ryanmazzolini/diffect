@@ -120,11 +120,11 @@ test("multi-repo topbar sheds per-repo controls", async ({ page }) => {
   await page.goto("/");
 
   // N≥2 sheds the topbar's per-repo controls — the base…compare picker now lives in
-  // each module header and viewed progress in the module headers. The global
-  // diff-display segments (unified/split, density) stay. (Both remain at N=1.)
-  await expect(page.locator(".rh-subbar .target-picker")).toHaveCount(0);
-  await expect(page.locator(".rh-subbar .metaitem")).toHaveCount(0);
-  await expect(page.locator(".rh-subbar .seg")).toHaveCount(2);
+  // each module header and viewed progress in the module headers. Global view
+  // preferences live in the topbar Options menu.
+  await expect(page.locator(".rheader .target-picker")).toHaveCount(0);
+  await expect(page.locator(".rheader .metaitem")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Options" })).toBeVisible();
 });
 
 test("a module's ref picker popover escapes the module scroll clip", async ({ page }) => {

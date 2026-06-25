@@ -90,6 +90,7 @@ export function OpenInMenu({
           type="button"
           className="open-in-trigger open-in-primary"
           title={label}
+          aria-label={label}
           onClick={primaryAction}
         >
           <EditorIcon editor={editor} size={16} />

@@ -31,6 +31,7 @@ for (const theme of ["dark", "light"] as const) {
 
 test("no serious/critical a11y violations in split view", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "Options" }).click();
   await page.getByRole("button", { name: "Split" }).click();
   await expect(page.locator(".diff-line-old-content").first()).toBeVisible();
 
