@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-report-website-pick"
+description = "Enables the report_website_pick command without any pre-configured scope."
+commands.allow = ["report_website_pick"]
+
+[[permission]]
+identifier = "deny-report-website-pick"
+description = "Denies the report_website_pick command without any pre-configured scope."
+commands.deny = ["report_website_pick"]

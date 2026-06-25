@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ThreadTargetLevel } from "@diffect/shared";
 import { api } from "../api.js";
 import { useDraft } from "../useDraft.js";
@@ -11,6 +11,7 @@ interface Props {
   target: string;
   targetLevel: Exclude<ThreadTargetLevel, "file">;
   label: string;
+  initialBody?: string;
   onCancel: () => void;
   onCreated: () => void;
 }
@@ -22,6 +23,7 @@ export function GeneralCommentForm({
   target,
   targetLevel,
   label,
+  initialBody,
   onCancel,
   onCreated,
 }: Props) {
@@ -30,6 +32,10 @@ export function GeneralCommentForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialBody && !body.trim()) setBody(initialBody);
+  }, [body, initialBody, setBody]);
 
   const submit = async () => {
     if (!body.trim()) return;

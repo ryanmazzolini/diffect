@@ -13,9 +13,13 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, RunEvent, Url, WebviewUrl,
+    WebviewWindowBuilder,
+};
 #[cfg(target_os = "macos")]
-use tauri::{LogicalPosition, TitleBarStyle};
+use tauri::TitleBarStyle;
 use tauri_plugin_opener::OpenerExt;
 
 /// The spawned diffectd. Emptied on shutdown, which also stands the crash
@@ -206,6 +210,261 @@ fn desktop_url(mut url: Url) -> Url {
         .append_pair("shell", "desktop")
         .append_pair("platform", std::env::consts::OS);
     url
+
+fn is_reviewable_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && is_loopback(url)
+}
+
+const WEBSITE_REVIEW_LABEL: &str = "website-review";
+const PICK_SCHEME: &str = "diffect-pick";
+const PICK_TITLE_PREFIX: &str = "__DIFFECT_PICK__";
+const WEBSITE_PICKER_SCRIPT: &str = r#"
+(() => {
+  if (window.__diffectWebsitePicker) return;
+  window.__diffectWebsitePicker = true;
+
+  const cssEscape = (value) => {
+    if (window.CSS && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  };
+  const selectorFor = (element) => {
+    if (element.id) return `#${cssEscape(element.id)}`;
+    const parts = [];
+    for (let node = element; node && node.nodeType === Node.ELEMENT_NODE && parts.length < 5; node = node.parentElement) {
+      let part = node.localName;
+      if (!part) break;
+      if (node.classList.length) part += `.${Array.from(node.classList).slice(0, 2).map(cssEscape).join(".")}`;
+      const siblings = node.parentElement ? Array.from(node.parentElement.children).filter((child) => child.localName === node.localName) : [];
+      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      parts.unshift(part);
+    }
+    return parts.join(" > ");
+  };
+  const cleanText = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 500);
+
+  const style = document.createElement("style");
+  style.textContent = `.__diffect-picker-hover { outline: 2px solid #7c3aed !important; outline-offset: 2px !important; }`;
+  document.documentElement.appendChild(style);
+
+  let pickCount = 0;
+  const sendPick = (element) => {
+    const rect = element.getBoundingClientRect();
+    const payload = {
+      kind: "element",
+      pickId: ++pickCount,
+      url: location.href,
+      title: document.title,
+      selector: selectorFor(element),
+      text: cleanText(element.innerText || element.textContent),
+      bounds: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      },
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1
+      }
+    };
+    const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+    if (invoke) {
+      invoke("report_website_pick", { payload }).catch(() => {
+        document.title = `__DIFFECT_PICK__${encodeURIComponent(JSON.stringify(payload))}`;
+      });
+    } else {
+      document.title = `__DIFFECT_PICK__${encodeURIComponent(JSON.stringify(payload))}`;
+    }
+  };
+
+  let hover = null;
+  document.addEventListener("pointerover", (event) => {
+    if (!(event.target instanceof Element)) return;
+    if (hover) hover.classList.remove("__diffect-picker-hover");
+    hover = event.target;
+    hover.classList.add("__diffect-picker-hover");
+  }, true);
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!(event.target instanceof Element) || event.button !== 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    sendPick(event.target);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+})();
+"#;
+
+fn dispatch_website_pick_value(handle: &AppHandle, value: serde_json::Value) -> Result<(), String> {
+    let Some(url) = value.get("url").and_then(|v| v.as_str()) else {
+        return Err("website pick payload missing URL".into());
+    };
+    let url: Url = url.parse().map_err(|e| format!("invalid picked URL: {e}"))?;
+    if !is_reviewable_url(&url) {
+        return Err("ignored non-loopback website pick".into());
+    }
+    let json = serde_json::to_string(&value).map_err(|e| e.to_string())?;
+    let Some(main) = handle.get_webview("main") else {
+        return Err("main webview is not available".into());
+    };
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent('diffect:website-pick', {{ detail: {json} }}));"
+    );
+    main.eval(script).map_err(|e| e.to_string())?;
+    if let Some(window) = handle.get_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+fn dispatch_website_pick(handle: &AppHandle, payload: &str) {
+    let decoded = Url::parse(&format!("http://diffect.local/?payload={payload}"))
+        .ok()
+        .and_then(|url| {
+            url.query_pairs()
+                .find(|(key, _)| key == "payload")
+                .map(|(_, value)| value.into_owned())
+        })
+        .unwrap_or_else(|| payload.to_string());
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&decoded) else {
+        eprintln!("diffect-desktop: ignored malformed website pick payload");
+        return;
+    };
+    if let Err(e) = dispatch_website_pick_value(handle, value) {
+        eprintln!("diffect-desktop: ignored website pick: {e}");
+    }
+}
+
+#[tauri::command]
+fn report_website_pick(
+    handle: AppHandle,
+    webview: tauri::Webview,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    if webview.label() != WEBSITE_REVIEW_LABEL {
+        return Err("website picks may only come from the Website Review webview".into());
+    }
+    dispatch_website_pick_value(&handle, payload)
+}
+
+fn handle_review_navigation(handle: &AppHandle, target: &Url) -> bool {
+    if target.scheme() == PICK_SCHEME {
+        if let Some((_, payload)) = target.query_pairs().find(|(key, _)| key == "payload") {
+            dispatch_website_pick(handle, payload.as_ref());
+        }
+        return false;
+    }
+    if is_reviewable_url(target) {
+        return true;
+    }
+    let _ = handle.opener().open_url(target.as_str(), None::<&str>);
+    false
+}
+
+fn review_size(width: f64, height: f64) -> Result<LogicalSize<f64>, String> {
+    if width < 100.0 || height < 100.0 {
+        return Err("Website Review needs at least a 100×100 viewport".into());
+    }
+    Ok(LogicalSize::new(width, height))
+}
+
+fn move_review_webview(
+    handle: &AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let webview = handle
+        .get_webview(WEBSITE_REVIEW_LABEL)
+        .ok_or("Website Review is not open")?;
+    webview
+        .set_position(LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    webview
+        .set_size(review_size(width, height)?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_website_review(
+    handle: AppHandle,
+    url: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let url: Url = url.parse().map_err(|e| format!("invalid URL: {e}"))?;
+    if !is_reviewable_url(&url) {
+        return Err("Website Review only opens http(s) loopback URLs".into());
+    }
+
+    if let Some(webview) = handle.get_webview(WEBSITE_REVIEW_LABEL) {
+        move_review_webview(&handle, x, y, width, height)?;
+        webview.navigate(url).map_err(|e| e.to_string())?;
+        let _ = webview.show();
+        let _ = webview.set_focus();
+        return Ok(());
+    }
+
+    let window = handle
+        .get_window("main")
+        .ok_or("main window is not available")?;
+    let nav_handle = handle.clone();
+    let new_window_handle = handle.clone();
+    let title_handle = handle.clone();
+    let builder = WebviewBuilder::new(WEBSITE_REVIEW_LABEL, WebviewUrl::External(url))
+        .on_navigation(move |target| handle_review_navigation(&nav_handle, target))
+        .on_new_window(move |target, _| {
+            handle_review_navigation(&new_window_handle, &target);
+            NewWindowResponse::Deny
+        })
+        .on_document_title_changed(move |_webview, title| {
+            if let Some(payload) = title.strip_prefix(PICK_TITLE_PREFIX) {
+                dispatch_website_pick(&title_handle, payload);
+            }
+        })
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished)
+                && is_reviewable_url(payload.url())
+            {
+                let _ = webview.eval(WEBSITE_PICKER_SCRIPT);
+            }
+        });
+    window
+        .add_child(
+            builder,
+            LogicalPosition::new(x, y),
+            review_size(width, height)?,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn position_website_review(
+    handle: AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    move_review_webview(&handle, x, y, width, height)
+}
+
+#[tauri::command]
+fn close_website_review(handle: AppHandle) -> Result<(), String> {
+    if let Some(webview) = handle.get_webview(WEBSITE_REVIEW_LABEL) {
+        webview.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn focus_window(handle: &AppHandle, requested: Option<Url>) {
@@ -218,8 +477,31 @@ fn focus_window(handle: &AppHandle, requested: Option<Url>) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn website_review_allows_only_loopback_http_urls() {
+        assert!(is_reviewable_url(&"http://127.0.0.1:5173".parse().unwrap()));
+        assert!(is_reviewable_url(
+            &"https://localhost:3000".parse().unwrap()
+        ));
+        assert!(!is_reviewable_url(&"https://example.com".parse().unwrap()));
+        assert!(!is_reviewable_url(
+            &"file:///tmp/index.html".parse().unwrap()
+        ));
+    }
+}
+
 fn main() {
     let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            open_website_review,
+            position_website_review,
+            close_website_review,
+            report_website_pick
+        ])
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // A second launch focuses the existing window instead of racing
             // a second daemon into the same store. If pi passed a loopback URL,

@@ -1960,6 +1960,67 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   margin-right: auto;
   color: var(--success);
 }
+.website-review-launcher {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 0 0 10px;
+  padding: 8px;
+  background: var(--panel-2);
+}
+.website-review-launcher label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.website-review-row {
+  display: flex;
+  gap: 6px;
+}
+.website-review-row input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px 8px;
+}
+.website-review-panel {
+  position: fixed;
+  z-index: 30;
+  inset: 78px 18px 18px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 36%);
+}
+.website-review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.website-review-toolbar span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 12px;
+}
+.website-review-viewport {
+  min-height: 0;
+  background: white;
+}
+}
 
 /* ============ Modules view (N≥2): stacked per-repo diff sections ============ */
 /* The shared scroll container for the stacked layout — mirrors .diff-pane so j/k
