@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import type { Author, Severity, Side, Thread, ThreadStatus } from "@diffect/shared";
+import type { Author, PrDraftUpdateRequest, Severity, Side, Thread, ThreadStatus } from "@diffect/shared";
 import {
   addComment,
   createThread,
@@ -17,7 +17,9 @@ import {
   sessionIdForScope,
   snapshotIdForState,
 } from "./reviews/scope.js";
+import { resolveCurrentBranch } from "./git/diff.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
+import { readPrDraft, updatePrDraft } from "./store/pr-draft.js";
 import { discoverWorkspace, resolveRepoRoot } from "./workspace.js";
 import { gitTry } from "./git/exec.js";
 
@@ -305,6 +307,41 @@ async function cmdResolve(argv: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdPr(argv: string[]): Promise<number> {
+  const flags = parseFlags(argv, new Set(["json"]));
+  const action = flags.positionals[0] ?? "get";
+  const root = await resolveWorkspaceRoot(process.cwd());
+  const ws = await discoverWorkspace(root);
+  const repo = requireRepo(ws, flags);
+  const worktree = flags.options.get("worktree") ?? null;
+  const treeRoot = resolveRepoRoot(ws, repo.name, worktree);
+  const repoRoot = resolveRepoRoot(ws, repo.name, null);
+  if (!treeRoot || !repoRoot) fail(`unknown worktree: ${worktree}`);
+  const scope = {
+    workspacePath: ws.root,
+    repo: repo.name,
+    repoRoot,
+    worktree,
+    branch: await resolveCurrentBranch(treeRoot),
+  };
+
+  if (action === "get") {
+    process.stdout.write(JSON.stringify(await readPrDraft(scope), null, 2) + "\n");
+    return 0;
+  }
+
+  if (action === "update") {
+    const patch: PrDraftUpdateRequest = {};
+    if (flags.options.has("title")) patch.title = flags.options.get("title") ?? "";
+    if (flags.options.has("body")) patch.body = flags.options.get("body") ?? "";
+    if (patch.title === undefined && patch.body === undefined) fail("--title or --body is required");
+    process.stdout.write(JSON.stringify(await updatePrDraft(scope, patch, now()), null, 2) + "\n");
+    return 0;
+  }
+
+  fail('usage: diffect pr [get|update] [--repo R] [--worktree W] [--title "…"] [--body "…"]');
+}
+
 async function mutate(op: () => Promise<Thread>): Promise<void> {
   try {
     printThread(await op());
@@ -324,6 +361,7 @@ Usage:
   diffect general [--repo R] [--worktree W] [--agent NAME] --body "…"
   diffect reply   <thread-id> [--agent NAME] --body "…"
   diffect resolve <thread-id> [--summary "…"] [--agent NAME]
+  diffect pr      [get|update] [--repo R] [--worktree W] [--title "…"] [--body "…"]
 
 The CLI reads and writes the central review store directly and works whether or
 not diffectd is running. Use --agent NAME to author a thread or reply as an agent. --repo
@@ -345,6 +383,8 @@ async function main(): Promise<number> {
       return cmdReply(rest);
     case "resolve":
       return cmdResolve(rest);
+    case "pr":
+      return cmdPr(rest);
     case undefined:
     case "help":
     case "--help":

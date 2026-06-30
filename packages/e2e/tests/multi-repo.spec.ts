@@ -38,6 +38,37 @@ test("each module shows only its own repo's diff", async ({ page }) => {
   await expect(beta.locator(".file-path", { hasText: "alpha.js" })).toHaveCount(0);
 });
 
+test("PR Draft keeps one draft per repo", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "PR Draft" }).click();
+  const alpha = page.locator(".pr-draft-card", { hasText: "alpha" });
+  const beta = page.locator(".pr-draft-card", { hasText: "beta" });
+
+  await expect(alpha).toBeVisible();
+  await expect(beta).toBeVisible();
+  await alpha.getByPlaceholder("PR title").fill("Alpha PR");
+  await alpha.getByPlaceholder("Summarize the change, validation, risks, and screenshots.").fill("alpha body");
+  await alpha.getByRole("button", { name: "Save" }).click();
+
+  await expect(beta.getByPlaceholder("PR title")).toHaveValue("");
+  await beta.getByPlaceholder("PR title").fill("Beta PR");
+  await beta.getByPlaceholder("Summarize the change, validation, risks, and screenshots.").fill("beta body");
+  await beta.getByRole("button", { name: "Save" }).click();
+
+  await expect(alpha.getByPlaceholder("PR title")).toHaveValue("Alpha PR");
+  await expect(alpha.getByPlaceholder("Summarize the change, validation, risks, and screenshots.")).toHaveValue(
+    "alpha body",
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const draft = await fetch("/pr-draft?repo=beta").then((r) => r.json());
+        return `${draft.repo}\n${draft.title}\n${draft.body}`;
+      }),
+    )
+    .toBe("beta\nBeta PR\nbeta body");
+});
+
 test("selecting a repo in the sidebar focuses its module", async ({ page }) => {
   await page.goto("/");
   // Wait until the stacked content actually overflows the scroll container. Until

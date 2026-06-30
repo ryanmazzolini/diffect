@@ -249,6 +249,7 @@ fn main() {
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Diffect")
                 .inner_size(1280.0, 860.0)
+                .disable_drag_drop_handler()
                 .on_navigation(move |target| {
                     if is_loopback(target) || target.origin() == app_origin {
                         return true;

@@ -61,6 +61,7 @@ diffect_list_feedback
 diffect_comment
 diffect_reply
 diffect_resolve
+diffect_pr
 ```
 
 The normal loop stays boring:
@@ -77,6 +78,12 @@ Agents can create their own normal comments too:
 ```sh
 diffect comment --file src/api.ts --line 42 --severity must-fix \
   --agent pi --body "This dereferences a possibly-null user."
+```
+
+`diffect_pr` reads or updates the local PR Draft packet. Pass `repo` in multi-repo workspaces:
+
+```json
+{ "action": "update", "repo": "web", "title": "Fix auth redirect", "body": "## Summary\n..." }
 ```
 
 No apply daemon, no cloud runner, no separate AI findings store.

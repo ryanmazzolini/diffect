@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import MDEditor, {
   commands,
   type ICommand,
@@ -32,7 +32,7 @@ const EDITOR_COMMANDS: ICommand[] = [
   commands.checkedListCommand,
 ];
 
-const PREVIEW_COMMANDS: ICommand[] = [commands.codeEdit, commands.codePreview];
+type EditorMode = "edit" | "preview";
 
 interface Props {
   value: string;
@@ -43,6 +43,9 @@ interface Props {
   onSubmitKey?: () => void;
   /** Escape. */
   onCancelKey?: () => void;
+  height?: number;
+  ariaLabel?: string;
+  disabled?: boolean;
 }
 
 function moveCaretToLineEdge(
@@ -79,6 +82,9 @@ export function MarkdownEditor({
   autoFocus,
   onSubmitKey,
   onCancelKey,
+  height = 96,
+  ariaLabel,
+  disabled,
 }: Props) {
   const editorRef = useRef<RefMDEditor>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,6 +92,9 @@ export function MarkdownEditor({
   const pendingSel = useRef<[number, number] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [mode, setMode] = useState<EditorMode>("edit");
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const dragDepth = useRef(0);
 
   valueRef.current = value;
 
@@ -125,19 +134,55 @@ export function MarkdownEditor({
     setUploading(false);
   };
 
+  const hasFiles = (e: DragEvent<HTMLDivElement>) =>
+    e.dataTransfer.files.length > 0 || Array.from(e.dataTransfer.types).includes("Files");
+
+  const resetDrag = () => {
+    dragDepth.current = 0;
+    setDraggingFiles(false);
+  };
+
   const attachCommand: ICommand = {
     name: "attach",
     keyCommand: "attach",
     buttonProps: { "aria-label": "Attach a file", title: "Attach a file" },
     icon: <Icon name="paperclip" size={14} />,
-    execute: () => fileInputRef.current?.click(),
+    execute: () => {
+      if (!disabled) fileInputRef.current?.click();
+    },
   };
 
   return (
     <div
-      className="md-editor"
+      className={`md-editor${draggingFiles ? " is-dragging" : ""}`}
       onKeyDown={(e) => {
         if (e.key === "Home" || e.key === "End") e.stopPropagation();
+      }}
+      onDragEnterCapture={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepth.current += 1;
+        setDraggingFiles(true);
+      }}
+      onDragOverCapture={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = disabled ? "none" : "copy";
+      }}
+      onDragLeaveCapture={(e) => {
+        if (!hasFiles(e)) return;
+        e.stopPropagation();
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDraggingFiles(false);
+      }}
+      onDropCapture={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        resetDrag();
+        if (!disabled) void uploadFiles(e.dataTransfer.files);
       }}
     >
       <input
@@ -145,26 +190,49 @@ export function MarkdownEditor({
         type="file"
         multiple
         hidden
+        disabled={disabled}
         onChange={(e) => {
           void uploadFiles(e.target.files);
           e.target.value = "";
         }}
       />
+      <div className="md-editor-tabs" role="tablist" aria-label="Markdown mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "edit"}
+          onClick={() => setMode("edit")}
+          disabled={disabled && mode !== "edit"}
+        >
+          Write
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "preview"}
+          onClick={() => setMode("preview")}
+          disabled={disabled && mode !== "preview"}
+        >
+          Preview
+        </button>
+      </div>
       <MDEditor
         ref={editorRef}
         value={value}
         onChange={(next) => onChange(next ?? "")}
         autoFocus={autoFocus}
-        preview="edit"
-        height={96}
+        preview={mode}
+        height={height}
         minHeight={56}
         visibleDragbar={false}
         commands={EDITOR_COMMANDS}
-        extraCommands={[attachCommand, commands.divider, ...PREVIEW_COMMANDS]}
+        extraCommands={[attachCommand]}
         components={{
           preview: (source) => <Markdown>{source}</Markdown>,
         }}
         textareaProps={{
+          "aria-label": ariaLabel,
+          disabled,
           placeholder,
           onKeyDown: (e) => {
             if (e.key === "Home" || e.key === "End") {
@@ -184,13 +252,6 @@ export function MarkdownEditor({
             if (e.clipboardData.files.length > 0) {
               e.preventDefault();
               void uploadFiles(e.clipboardData.files);
-            }
-          },
-          onDragOver: (e) => e.preventDefault(),
-          onDrop: (e) => {
-            if (e.dataTransfer.files.length > 0) {
-              e.preventDefault();
-              void uploadFiles(e.dataTransfer.files);
             }
           },
         }}

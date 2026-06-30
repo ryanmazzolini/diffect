@@ -1614,6 +1614,64 @@ html[data-shell="desktop"] .rh-identity {
   padding: 0 0 80px;
   background: var(--panel);
 }
+.review-main-shell {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  overflow: hidden;
+}
+.pane-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.main-pane-tabs {
+  padding: 8px 10px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.pane-tab {
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 7px 12px 8px;
+  font: inherit;
+}
+.pane-tab:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.pane-tab.active {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border);
+  font-weight: 650;
+}
+.review-main-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.review-main-content > .diff-pane,
+.review-main-content > .modmain {
+  flex: 1;
+  min-width: 0;
+}
+.review-main-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
 .thread-pane {
   border-left: 1px solid var(--border);
   overflow: auto;
@@ -1676,6 +1734,76 @@ html[data-shell="desktop"] .rh-identity {
 }
 .thread-pane-actions .ghost {
   flex: 1;
+}
+.pr-draft-panel,
+.pr-draft-editor,
+.pr-draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.pr-draft-intro {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.pr-draft-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background: var(--panel);
+}
+.pr-draft-headline,
+.pr-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pr-draft-headline {
+  justify-content: flex-end;
+}
+.pr-draft-headline h3 {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+.pr-copy:disabled {
+  opacity: 0.45;
+}
+.pr-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+.pr-field input,
+.pr-field select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+}
+.pr-field input:focus,
+.pr-field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.pr-updated,
+.pr-copied {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pr-actions {
+  justify-content: flex-end;
+}
+.pr-copied {
+  margin-right: auto;
+  color: var(--success);
 }
 
 /* ============ Modules view (N≥2): stacked per-repo diff sections ============ */
@@ -2460,12 +2588,55 @@ body.pane-resizing {
   --md-editor-background-color: var(--bg);
   --md-editor-box-shadow-color: var(--border);
 }
+.md-editor-tabs {
+  display: flex;
+  gap: 4px;
+}
+.md-editor-tabs button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+.md-editor-tabs button:hover,
+.md-editor-tabs button[aria-selected="true"] {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.md-editor-tabs button[aria-selected="true"] {
+  font-weight: 650;
+}
+.md-editor-tabs button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 .md-editor .w-md-editor {
   color: var(--text);
   background: var(--bg);
   border-radius: var(--radius-md);
   box-shadow: 0 0 0 1px var(--border);
   font-family: inherit;
+}
+.md-editor.is-dragging .w-md-editor {
+  position: relative;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.md-editor.is-dragging .w-md-editor::after {
+  content: "Drop to attach";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  pointer-events: none;
 }
 .md-editor .w-md-editor-toolbar {
   padding: 2px 4px;

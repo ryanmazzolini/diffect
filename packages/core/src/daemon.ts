@@ -11,12 +11,13 @@ import {
   type DeleteThreadRequest,
   type OpenRequest,
   type OpenUrlRequest,
+  type PrDraftUpdateRequest,
   type ResolveThreadRequest,
   type WorkspaceEntry,
   type WorkspaceMutationRequest,
 } from "@diffect/shared";
 import { readTargetFileContent } from "./git/content.js";
-import { resolveWorkBase } from "./git/diff.js";
+import { resolveCurrentBranch, resolveWorkBase } from "./git/diff.js";
 import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, readSideLines } from "./reviews/anchors.js";
@@ -72,6 +73,7 @@ import {
   isValidAttachmentId,
   storeAttachment,
 } from "./store/attachments.js";
+import { readPrDraft, updatePrDraft, type PrDraftScope } from "./store/pr-draft.js";
 import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
 
 export interface DaemonOptions {
@@ -194,6 +196,7 @@ async function handle(
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
   if (await sessionRoutes(ctx, req, res, method, path)) return;
+  if (await prDraftRoutes(ctx, req, res, url, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
   if (await fileContentRoute(ctx, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
@@ -484,6 +487,47 @@ async function sessionRoutes(
       throw err;
     }
   }
+  return true;
+}
+
+/** `GET/PUT /pr-draft` — repo-scoped local PR draft packet. */
+async function prDraftRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (path !== "/pr-draft" || (method !== "GET" && method !== "PUT")) return false;
+  const workspacePath = resolveSpacePath(ctx, res, url.searchParams.get("workspace") ?? ctx.ws.root);
+  if (!workspacePath) return true;
+
+  const target = await resolvePrDraftTarget(
+    ctx,
+    res,
+    workspacePath,
+    url.searchParams.get("repo") ?? undefined,
+    url.searchParams.get("worktree"),
+  );
+  if (!target) return true;
+
+  if (method === "GET") {
+    sendJson(res, 200, await readPrDraft(target));
+    return true;
+  }
+  const body = (await readJsonBody<PrDraftUpdateRequest>(req)) ?? {};
+  if (body.title !== undefined && typeof body.title !== "string") {
+    sendJson(res, 400, { error: "title must be a string" });
+    return true;
+  }
+  if (body.body !== undefined && typeof body.body !== "string") {
+    sendJson(res, 400, { error: "body must be a string" });
+    return true;
+  }
+  const next = await updatePrDraft(target, body, ctx.now());
+  ctx.events.notify(DAEMON_EVENTS.threadChanged);
+  sendJson(res, 200, next);
   return true;
 }
 
@@ -895,6 +939,40 @@ function resolveSpacePath(
     return null;
   }
   return abs;
+}
+
+async function resolvePrDraftTarget(
+  ctx: RouteContext,
+  res: ServerResponse,
+  workspacePath: string,
+  repoName: string | undefined,
+  worktree: string | null,
+): Promise<PrDraftScope | null> {
+  const repos = ctx.ws.repos.filter((candidate) => (candidate.workspacePath ?? ctx.ws.root) === workspacePath);
+  const repo = repoName
+    ? repos.find((candidate) => candidate.name === repoName)
+    : repos.length === 1
+      ? repos[0]
+      : undefined;
+  if (!repo) {
+    sendJson(res, 400, {
+      error: repoName ? `unknown repo: ${repoName}` : "repo is required for multi-repo workspaces",
+    });
+    return null;
+  }
+  const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
+  const repoRoot = resolveRepoRoot(ctx.ws, repo.name, null);
+  if (!treeRoot || !repoRoot) {
+    sendJson(res, 400, { error: `unknown worktree: ${worktree}` });
+    return null;
+  }
+  return {
+    workspacePath,
+    repo: repo.name,
+    repoRoot,
+    worktree,
+    branch: await resolveCurrentBranch(treeRoot),
+  };
 }
 
 /**

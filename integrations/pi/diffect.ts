@@ -169,6 +169,43 @@ export default function diffectExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "diffect_pr",
+    label: "Diffect PR",
+    description: "Get or update the local PR Draft packet for a Diffect repo.",
+    promptSnippet: "Get or update Diffect's local PR Draft title/body",
+    parameters: Type.Object({
+      action: Type.Optional(Type.String({ description: "get, update, or copy_body; default get" })),
+      title: Type.Optional(Type.String()),
+      body: Type.Optional(Type.String()),
+      repo: Type.Optional(Type.String({ description: "Repo name; required when the workspace has multiple repos" })),
+      worktree: Type.Optional(Type.String({ description: "Worktree name" })),
+      workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
+    }),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      const action = params.action || "get";
+      const scopeArgs: string[] = [];
+      if (params.repo) scopeArgs.push("--repo", params.repo);
+      if (params.worktree) scopeArgs.push("--worktree", params.worktree);
+      if (action === "get" || action === "copy_body") {
+        const result = await runDiffectTool(pi, ctx, ["pr", "get", ...scopeArgs], signal, params.workspace);
+        if (action === "copy_body") {
+          const parsed = JSON.parse((result.details as { stdout: string }).stdout) as { body?: unknown };
+          return textResult(typeof parsed.body === "string" ? parsed.body : "", result.details);
+        }
+        return result;
+      }
+      if (action === "update") {
+        const args = ["pr", "update", ...scopeArgs];
+        if (params.title !== undefined) args.push("--title", params.title);
+        if (params.body !== undefined) args.push("--body", params.body);
+        if (params.title === undefined && params.body === undefined) throw new Error("title or body is required for update");
+        return runDiffectTool(pi, ctx, args, signal, params.workspace);
+      }
+      throw new Error(`unknown diffect_pr action: ${action}`);
+    },
+  });
+
+  pi.registerTool({
     name: "diffect_comment",
     label: "Diffect Comment",
     description: "Create a Diffect review comment on a file line/range as an agent.",

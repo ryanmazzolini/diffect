@@ -357,6 +357,22 @@ export interface OpenUrlRequest {
   url: string;
 }
 
+/** Local, reviewable PR draft packet. This is not a GitHub draft PR object. */
+export interface PrDraft {
+  workspacePath: string;
+  repo: string;
+  worktree: string | null;
+  branch: string | null;
+  title: string;
+  body: string;
+  updatedAt: string | null;
+}
+
+export interface PrDraftUpdateRequest {
+  title?: string;
+  body?: string;
+}
+
 export type Severity = "must-fix" | "suggestion" | "nit" | "question";
 // A thread is open or closed. The store records *events* (thread.resolved,
 // and legacy thread.dismissed) — status is computed on replay, both folding to

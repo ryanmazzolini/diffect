@@ -11,6 +11,8 @@ import type {
   FsListing,
   OpenRequest,
   OpenUrlRequest,
+  PrDraft,
+  PrDraftUpdateRequest,
   RecommendedWorkspace,
   RefList,
   RefSearchResults,
@@ -33,6 +35,13 @@ async function json<T>(res: Response): Promise<T> {
     throw new Error(`${res.status} ${res.statusText}${detail ? `: ${detail}` : ""}`);
   }
   return res.json() as Promise<T>;
+}
+
+function prDraftQuery(workspacePath: string, repo?: string, worktree?: string | null): URLSearchParams {
+  const q = new URLSearchParams({ workspace: workspacePath });
+  if (repo) q.set("repo", repo);
+  if (worktree) q.set("worktree", worktree);
+  return q;
 }
 
 export const api = {
@@ -180,6 +189,25 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(req),
     }).then((r) => json<{ ok: boolean }>(r)),
+
+  prDraft: (workspacePath: string, repo?: string, worktree?: string | null) => {
+    const q = prDraftQuery(workspacePath, repo, worktree);
+    return fetch(`/pr-draft?${q}`).then((r) => json<PrDraft>(r));
+  },
+
+  updatePrDraft: (
+    workspacePath: string,
+    repo: string | undefined,
+    worktree: string | null | undefined,
+    req: PrDraftUpdateRequest,
+  ) => {
+    const q = prDraftQuery(workspacePath, repo, worktree);
+    return fetch(`/pr-draft?${q}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => json<PrDraft>(r));
+  },
 
   /**
    * Archive (`archived: true`) or revive (`archived: false`) a review session.

@@ -35,8 +35,10 @@ import { Topbar, WorkspaceRail } from "./components/Topbar.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 import { GeneralCommentForm } from "./components/GeneralCommentForm.js";
+import { PrDraftPanel } from "./components/PrDraftPanel.js";
 
 type StatusFilter = ThreadStatus | "all";
+type MainPaneTab = "diff" | "pr-draft";
 type GeneralCommentTarget = {
   targetLevel: "space" | "repo";
   repo: string | null;
@@ -255,6 +257,8 @@ export function App() {
   );
   const [addOpen, setAddOpen] = useState(false);
   const [generalComment, setGeneralComment] = useState<GeneralCommentTarget | null>(null);
+  const [mainTab, setMainTab] = useState<MainPaneTab>("diff");
+  const [prDraftReloadKey, setPrDraftReloadKey] = useState(0);
   // Per-repo per-file "viewed" sets, projected to `viewed` for the active repo.
   const [viewedByRepo, setViewedByRepo] = useState<Map<string, Set<string>>>(
     () => new Map(),
@@ -330,6 +334,10 @@ export function App() {
     [activeEntry?.path, visibleRepos, workspace],
   );
   const activeSpacePath = visibleWorkspace?.root ?? null;
+  const prDraftTargets = useMemo(
+    () => visibleRepos.map((r) => ({ repo: r.name, worktree: selections.get(r.name)?.worktree ?? null })),
+    [selections, visibleRepos],
+  );
   // N≥2 ⇒ the stacked "modules view" (one diff list per repo, sharing a scroll
   // container); N≤1 ⇒ the literal single pane. A presentational switch only: every
   // selector/effect below still treats the single repo as the N=1 case.
@@ -981,6 +989,7 @@ export function App() {
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable))
         return;
       if (document.querySelector(".modal-backdrop")) return;
+      if (mainTab !== "diff") return;
       const paths = orderedFiles.map((f) => f.path);
       if (paths.length === 0) return;
       e.preventDefault();
@@ -994,7 +1003,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [orderedFiles, activeFile, selectFile]);
+  }, [orderedFiles, activeFile, mainTab, selectFile]);
 
   // Live updates: subscribe to the daemon's SSE stream exactly once and route
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
@@ -1025,6 +1034,7 @@ export function App() {
       const r = refreshers.current;
       if (type === DAEMON_EVENTS.threadChanged) {
         r.refreshThreads();
+        setPrDraftReloadKey((key) => key + 1);
         setLive("Review threads updated");
       } else if (type === DAEMON_EVENTS.diffChanged) {
         r.refreshAllDiffs();
@@ -1582,105 +1592,138 @@ export function App() {
           </>
         )}
         <main className="layout" style={{ gridTemplateColumns: paneColumns }}>
-        {/* N≥2: one module per repo, stacked inside a shared scroll container that
-            owns the scroll-spy ref. N=1: the literal single diff pane, with the
-            pane ref handed straight to it. Each ModuleSection provides its own
-            snapshot context, so the diff side always sees its own repo's snapshot. */}
-        {stacked ? (
-          <section className="modmain" ref={diffPaneRef}>
-            {visibleRepos.map((r, i) => {
-              const moduleWorktree = selections.get(r.name)?.worktree ?? null;
-              const worktreeSummary = selectedWorktreeSummary(r, moduleWorktree);
-              return (
-                <ModuleSection
-                  key={r.name}
-                  stacked
-                  band={i % 2 === 0 ? 1 : 2}
-                  focused={r.name === repo}
-                  repo={r.name}
-                  worktree={moduleWorktree}
-                  branch={worktreeSummary?.branch ?? null}
-                  pullRequest={worktreeSummary?.pullRequest ?? null}
-                  diff={diffs.get(r.name) ?? null}
-                  threads={scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS}
-                  viewed={(viewedByRepo.get(r.name) ?? EMPTY_VIEWED) as Set<string>}
-                  split={splitView}
-                  wrap={wrapLines}
-                  theme={theme}
-                  target={selections.get(r.name)?.target ?? DEFAULT_TARGET}
-                  refs={refsByRepo.get(r.name) ?? null}
-                  defaultBranch={r.defaultBranch}
-                  onTarget={changeTargetFor}
-                  lifecycle={lifecycleByRepo.get(r.name)?.state ?? "idle"}
-                  lifecycleSession={lifecycleByRepo.get(r.name)?.session ?? null}
-                  onArchive={setArchivedFor}
-                  collapsed={collapsedRepos.has(r.name)}
-                  onToggleCollapse={toggleCollapseFor}
-                  onToggleViewed={toggleViewedFor}
-                  previewFile={r.name === repo ? previewFile : null}
-                  onBackToDiff={backToDiff}
-                  onChanged={refreshThreads}
-                  editors={editors}
-                  editor={activeEditor}
-                  onEditor={setPreferredEditor}
-                  onOpenFile={openFileInEditor}
-                />
-              );
-            })}
+          <section className="review-main-shell">
+            <div className="pane-tabs main-pane-tabs" role="tablist" aria-label="Review view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mainTab === "diff"}
+                className={`pane-tab${mainTab === "diff" ? " active" : ""}`}
+                onClick={() => setMainTab("diff")}
+              >
+                Diff
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mainTab === "pr-draft"}
+                className={`pane-tab${mainTab === "pr-draft" ? " active" : ""}`}
+                onClick={() => setMainTab("pr-draft")}
+              >
+                PR Draft
+              </button>
+            </div>
+            <div className="review-main-panel" role="tabpanel" hidden={mainTab !== "pr-draft"}>
+              <PrDraftPanel
+                workspacePath={activeEntry?.path ?? visibleWorkspace.root}
+                targets={prDraftTargets}
+                reloadKey={prDraftReloadKey}
+              />
+            </div>
+            {mainTab === "diff" && (
+              <div className="review-main-content" role="tabpanel">
+                {/* N≥2: one module per repo, stacked inside a shared scroll container that
+                    owns the scroll-spy ref. N=1: the literal single diff pane, with the
+                    pane ref handed straight to it. Each ModuleSection provides its own
+                    snapshot context, so the diff side always sees its own repo's snapshot. */}
+                {stacked ? (
+                  <section className="modmain" ref={diffPaneRef}>
+                    {visibleRepos.map((r, i) => {
+                      const moduleWorktree = selections.get(r.name)?.worktree ?? null;
+                      const worktreeSummary = selectedWorktreeSummary(r, moduleWorktree);
+                      return (
+                        <ModuleSection
+                          key={r.name}
+                          stacked
+                          band={i % 2 === 0 ? 1 : 2}
+                          focused={r.name === repo}
+                          repo={r.name}
+                          worktree={moduleWorktree}
+                          branch={worktreeSummary?.branch ?? null}
+                          pullRequest={worktreeSummary?.pullRequest ?? null}
+                          diff={diffs.get(r.name) ?? null}
+                          threads={scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS}
+                          viewed={(viewedByRepo.get(r.name) ?? EMPTY_VIEWED) as Set<string>}
+                          split={splitView}
+                          wrap={wrapLines}
+                          theme={theme}
+                          target={selections.get(r.name)?.target ?? DEFAULT_TARGET}
+                          refs={refsByRepo.get(r.name) ?? null}
+                          defaultBranch={r.defaultBranch}
+                          onTarget={changeTargetFor}
+                          lifecycle={lifecycleByRepo.get(r.name)?.state ?? "idle"}
+                          lifecycleSession={lifecycleByRepo.get(r.name)?.session ?? null}
+                          onArchive={setArchivedFor}
+                          collapsed={collapsedRepos.has(r.name)}
+                          onToggleCollapse={toggleCollapseFor}
+                          onToggleViewed={toggleViewedFor}
+                          previewFile={r.name === repo ? previewFile : null}
+                          onBackToDiff={backToDiff}
+                          onChanged={refreshThreads}
+                          editors={editors}
+                          editor={activeEditor}
+                          onEditor={setPreferredEditor}
+                          onOpenFile={openFileInEditor}
+                        />
+                      );
+                    })}
+                  </section>
+                ) : (
+                  <ModuleSection
+                    paneRef={diffPaneRef}
+                    repo={repo}
+                    worktree={worktree}
+                    branch={activeWorktree?.branch ?? null}
+                    pullRequest={activeWorktree?.pullRequest ?? null}
+                    diff={diff}
+                    threads={scopedThreads}
+                    viewed={viewed}
+                    split={splitView}
+                    wrap={wrapLines}
+                    theme={theme}
+                    target={target}
+                    refs={refs}
+                    defaultBranch={activeRepo?.defaultBranch ?? null}
+                    onTarget={changeTargetFor}
+                    lifecycle={lifecycleByRepo.get(repo)?.state ?? "idle"}
+                    lifecycleSession={lifecycleByRepo.get(repo)?.session ?? null}
+                    onArchive={setArchivedFor}
+                    onToggleViewed={toggleViewedFor}
+                    previewFile={previewFile}
+                    onBackToDiff={backToDiff}
+                    onChanged={refreshThreads}
+                    editors={editors}
+                    editor={activeEditor}
+                    onEditor={setPreferredEditor}
+                    onOpenFile={openFileInEditor}
+                  />
+                )}
+              </div>
+            )}
           </section>
-        ) : (
-          <ModuleSection
-            paneRef={diffPaneRef}
-            repo={repo}
-            worktree={worktree}
-            branch={activeWorktree?.branch ?? null}
-            pullRequest={activeWorktree?.pullRequest ?? null}
-            diff={diff}
-            threads={scopedThreads}
-            viewed={viewed}
-            split={splitView}
-            wrap={wrapLines}
-            theme={theme}
-            target={target}
-            refs={refs}
-            defaultBranch={activeRepo?.defaultBranch ?? null}
-            onTarget={changeTargetFor}
-            lifecycle={lifecycleByRepo.get(repo)?.state ?? "idle"}
-            lifecycleSession={lifecycleByRepo.get(repo)?.session ?? null}
-            onArchive={setArchivedFor}
-            onToggleViewed={toggleViewedFor}
-            previewFile={previewFile}
-            onBackToDiff={backToDiff}
-            onChanged={refreshThreads}
-            editors={editors}
-            editor={activeEditor}
-            onEditor={setPreferredEditor}
-            onOpenFile={openFileInEditor}
-          />
-        )}
-        {paneCollapsed ? (
-          <button
-            type="button"
-            className="thread-reopen"
-            onClick={toggleCollapsed}
-            title="Show threads sidebar"
-            aria-label="Show threads sidebar"
-          >
-            <Icon name="sidebar-collapse" size={15} />
-          </button>
-        ) : (
-          <>
-            <div
-              className="pane-resizer"
-              onMouseDown={startResize}
-              title="Drag to resize"
-            />
-            {/* The thread pane carries its own snapshot context: the active diff's at
-                N=1 (byte-identical to before), null at N≥2 — the aggregated inbox spans
-                repos, so there's no single snapshot to mark "earlier iteration" against. */}
-            <CurrentSnapshotContext.Provider
-              value={stacked ? null : (diff?.currentSnapshotId ?? null)}
+          {paneCollapsed ? (
+            <button
+              type="button"
+              className="thread-reopen"
+              onClick={toggleCollapsed}
+              title="Show threads sidebar"
+              aria-label="Show threads sidebar"
             >
+              <Icon name="sidebar-collapse" size={15} />
+            </button>
+          ) : (
+            <>
+              <div
+                className="pane-resizer"
+                onMouseDown={startResize}
+                title="Drag to resize"
+              />
+              {/* The thread pane carries its own snapshot context: the active diff's at
+                  N=1 (byte-identical to before), null at N≥2 — the aggregated inbox spans
+                  repos, so there's no single snapshot to mark "earlier iteration" against. */}
+              <CurrentSnapshotContext.Provider
+                value={stacked ? null : (diff?.currentSnapshotId ?? null)}
+              >
               <aside className="thread-pane">
                 <div className="thread-pane-head">
                   <span className="thread-pane-title">Threads</span>
@@ -1780,9 +1823,9 @@ export function App() {
                   />
                 </div>
               </aside>
-            </CurrentSnapshotContext.Provider>
-          </>
-        )}
+              </CurrentSnapshotContext.Provider>
+            </>
+          )}
         </main>
       </div>
     </div>

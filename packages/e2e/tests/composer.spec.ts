@@ -12,7 +12,7 @@ test("Preview mode renders the markdown", async ({ page }) => {
   const form = await openCommentForm(page);
 
   await form.locator("textarea").fill("**bold** and `code`");
-  await form.getByRole("button", { name: /Preview code/ }).click();
+  await form.getByRole("tab", { name: "Preview" }).click();
 
   await expect(form.locator(".w-md-editor-preview strong", { hasText: "bold" })).toBeVisible();
   await expect(form.locator(".w-md-editor-preview code", { hasText: "code" })).toBeVisible();
@@ -65,7 +65,7 @@ test("preview strips unsafe markdown output", async ({ page }) => {
   await form.locator("textarea").fill(
     '[x](javascript:alert(1))\n\n<img src=x onerror="alert(2)">\n\n<iframe src="javascript:alert(3)"></iframe>',
   );
-  await form.getByRole("button", { name: /Preview code/ }).click();
+  await form.getByRole("tab", { name: "Preview" }).click();
 
   const html = await form.locator(".w-md-editor-preview").innerHTML();
   expect(html).not.toMatch(/javascript:|onerror|<iframe|<img/i);
@@ -83,6 +83,27 @@ test("attaching a file inserts a markdown image link", async ({ page }) => {
 
   await expect(form.locator("textarea")).toHaveValue(
     /!\[pic\.png\]\(\/attachments\/[a-f0-9]{64}\.png\)/,
+  );
+});
+
+test("dropping an image inserts a markdown image link", async ({ page }) => {
+  await page.goto("/");
+  const form = await openCommentForm(page);
+
+  await form.locator("textarea").evaluate((textarea) => {
+    const data = new DataTransfer();
+    data.items.add(
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4, 5, 6])], "drop.png", {
+        type: "image/png",
+      }),
+    );
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      textarea.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: data }));
+    }
+  });
+
+  await expect(form.locator("textarea")).toHaveValue(
+    /!\[drop\.png\]\(\/attachments\/[a-f0-9]{64}\.png\)/,
   );
 });
 
