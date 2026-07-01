@@ -1488,7 +1488,21 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   margin-top: 2px;
   padding-left: 0;
 }
+.tree-actions {
+  display: flex;
+  gap: 6px;
+  margin: 0 4px 6px;
+}
+.tree-actions .mini {
+  flex: 1;
+}
+.space-repo-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
 /* Changed/all-file tree — IDE-style nesting with hairline indent guides. */
+.tree-repo,
 .tree-dir,
 .tree-file {
   display: flex;
@@ -1517,10 +1531,46 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   background-repeat: no-repeat;
   transition: background-color var(--motion);
 }
+.tree-repo {
+  align-items: flex-start;
+  min-height: 38px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.tree-repo.active {
+  background-color: var(--active);
+  color: var(--text);
+}
+.tree-repo-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.tree-repo-name,
+.tree-repo-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-repo-name {
+  color: var(--text);
+  font-weight: 650;
+}
+.tree-repo-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
 .tree-dir {
   color: var(--muted);
   font-weight: 500;
 }
+.tree-repo:hover,
 .tree-dir:hover,
 .tree-file:hover {
   background-color: var(--panel-2);
@@ -1662,6 +1712,17 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   background: var(--panel);
   border-color: var(--border);
   font-weight: 650;
+}
+.pane-tab-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 7px;
+}
+.ghost.mini {
+  padding: 2px 7px;
+  font-size: 11px;
 }
 .review-main-content {
   flex: 1;

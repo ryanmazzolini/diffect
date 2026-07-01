@@ -23,7 +23,7 @@ test("renders the workspace identity and one module per repo", async ({ page }) 
   await expect(page.locator('.module[data-repo="beta"] .mod-name')).toHaveText("beta");
 
   // The sidebar lists both repos.
-  await expect(page.locator(".repo-item")).toHaveCount(2);
+  await expect(page.locator(".tree-repo")).toHaveCount(2);
 });
 
 test("each module shows only its own repo's diff", async ({ page }) => {
@@ -87,11 +87,11 @@ test("selecting a repo in the sidebar focuses its module", async ({ page }) => {
   // so don't assume — just drive focus explicitly and assert it follows.
   await expect(page.locator(".module.focused")).toHaveCount(1);
 
-  await page.locator(".repo-item", { hasText: "beta" }).click();
+  await page.locator(".tree-repo", { hasText: "beta" }).click();
   await expect(page.locator('.module[data-repo="beta"]')).toHaveClass(/focused/);
   await expect(page.locator(".module.focused")).toHaveCount(1);
 
-  await page.locator(".repo-item", { hasText: "alpha" }).click();
+  await page.locator(".tree-repo", { hasText: "alpha" }).click();
   await expect(page.locator('.module[data-repo="alpha"]')).toHaveClass(/focused/);
   await expect(page.locator(".module.focused")).toHaveCount(1);
 });

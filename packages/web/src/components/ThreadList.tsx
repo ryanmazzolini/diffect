@@ -30,6 +30,7 @@ export const ThreadList = memo(function ThreadList({
       {threads.map((t) => (
         <div className={`thread-card status-${t.status}`} key={t.id}>
           <div className="thread-card-head">
+            {t.repo === null && t.spacePath && <span className="repo-chip">space</span>}
             {showRepo && t.targetLevel !== "space" && t.repo && (
               <span className="repo-chip">
                 {t.repo}

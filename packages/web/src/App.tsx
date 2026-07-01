@@ -33,6 +33,7 @@ import { ModuleSection } from "./components/ModuleSection.js";
 import { ThreadList } from "./components/ThreadList.js";
 import { Topbar, WorkspaceRail } from "./components/Topbar.js";
 import { Sidebar } from "./components/Sidebar.js";
+import { SpaceFilePreview } from "./components/SpaceFilePreview.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 import { GeneralCommentForm } from "./components/GeneralCommentForm.js";
 import { PrDraftPanel } from "./components/PrDraftPanel.js";
@@ -217,7 +218,10 @@ export function App() {
   const [refsByRepo, setRefsByRepo] = useState<Map<string, RefList>>(
     () => new Map(),
   );
-  const [allFiles, setAllFiles] = useState<string[]>([]);
+  const [allFilesByRepo, setAllFilesByRepo] = useState<Map<string, string[]>>(
+    () => new Map(),
+  );
+  const [spaceFiles, setSpaceFiles] = useState<string[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
@@ -226,6 +230,7 @@ export function App() {
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(initialPlace.file);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const [spacePreviewFile, setSpacePreviewFile] = useState<string | null>(null);
   const [workspaceRailOpen, setWorkspaceRailOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => getStored("diffect-sidebar-collapsed") === "1",
@@ -347,17 +352,32 @@ export function App() {
   const repoNamesKey = JSON.stringify(visibleRepos.map((r) => r.name));
 
   const persistPlace = useCallback(
-    (file: string | null) => {
+    (
+      file: string | null,
+      placeRepo = repo,
+      placeWorktree = worktree,
+      placeTarget = target,
+    ) => {
       const workspacePath = activeEntry?.path ?? activeWorkspacePath ?? workspace?.root ?? null;
-      if (!workspacePath && !repo && !file) return;
-      setStored(PLACE_KEY, JSON.stringify({ workspacePath, repo, worktree, target, file }));
+      if (!workspacePath && !placeRepo && !file) return;
+      setStored(
+        PLACE_KEY,
+        JSON.stringify({
+          workspacePath,
+          repo: placeRepo,
+          worktree: placeWorktree,
+          target: placeTarget,
+          file,
+        }),
+      );
     },
     [activeEntry?.path, activeWorkspacePath, repo, target, worktree, workspace?.root],
   );
 
   useEffect(() => {
-    persistPlace(activeFile);
-  }, [activeFile, persistPlace]);
+    if (spacePreviewFile) persistPlace(activeFile, null, null, DEFAULT_TARGET);
+    else persistPlace(activeFile);
+  }, [activeFile, persistPlace, spacePreviewFile]);
 
   // Write the unscoped/pending session UI for a given repo; both no-op when the
   // value is unchanged so a redundant settle (e.g. clearing an already-clear pending
@@ -423,15 +443,52 @@ export function App() {
       persistPlace(scrollPath);
       if (match && repo) {
         setPreviewFile(null);
+        setSpacePreviewFile(null);
         document
           .getElementById(fileElementId(repo, scrollPath))
           ?.scrollIntoView({ block: "start" });
       } else {
+        setSpacePreviewFile(null);
         setPreviewFile(path);
         diffPaneRef.current?.scrollTo({ top: 0 });
       }
     },
     [diff, lockProgrammaticFile, persistPlace, repo],
+  );
+
+  const selectTreeFile = useCallback(
+    (fileRepo: string | null, path: string) => {
+      if (fileRepo === null) {
+        setSpacePreviewFile(path);
+        setPreviewFile(null);
+        setActiveFile(path);
+        persistPlace(path, null, null, DEFAULT_TARGET);
+        diffPaneRef.current?.scrollTo({ top: 0 });
+        return;
+      }
+
+      const fileDiff = diffs.get(fileRepo) ?? (fileRepo === repo ? diff : null);
+      const match = fileDiff?.files.find((f) => f.path === path || f.oldPath === path);
+      const scrollPath = match?.path ?? path;
+      const sel = selectionsRef.current.get(fileRepo) ?? { worktree: null, target: DEFAULT_TARGET };
+      setRepo(fileRepo);
+      lockProgrammaticFile(scrollPath);
+      setActiveFile(scrollPath);
+      persistPlace(scrollPath, fileRepo, sel.worktree, sel.target);
+      setSpacePreviewFile(null);
+      if (match) {
+        setPreviewFile(null);
+        requestAnimationFrame(() => {
+          document
+            .getElementById(fileElementId(fileRepo, scrollPath))
+            ?.scrollIntoView({ block: "start" });
+        });
+      } else {
+        setPreviewFile(path);
+        diffPaneRef.current?.scrollTo({ top: 0 });
+      }
+    },
+    [diff, diffs, lockProgrammaticFile, persistPlace, repo],
   );
 
   const scrollThreadIntoView = useCallback((threadId: string) => {
@@ -453,6 +510,10 @@ export function App() {
   const navigateToThread = useCallback(
     (thread: Thread) => {
       if (!thread.file) return;
+      if (thread.repo === null) {
+        selectTreeFile(null, thread.file);
+        return;
+      }
       const threadRepo = thread.repo ?? repo;
       if (!threadRepo) return;
       const threadDiff = diffs.get(threadRepo) ?? (threadRepo === repo ? diff : null);
@@ -461,10 +522,12 @@ export function App() {
       );
       const scrollPath = match?.path ?? thread.file;
 
+      const sel = selectionsRef.current.get(threadRepo) ?? { worktree: null, target: DEFAULT_TARGET };
       setRepo(threadRepo);
       lockProgrammaticFile(scrollPath);
       setActiveFile(scrollPath);
-      persistPlace(scrollPath);
+      persistPlace(scrollPath, threadRepo, sel.worktree, sel.target);
+      setSpacePreviewFile(null);
       if (match) {
         setPreviewFile(null);
         document
@@ -476,7 +539,7 @@ export function App() {
       }
       scrollThreadIntoView(thread.id);
     },
-    [diff, diffs, lockProgrammaticFile, persistPlace, repo, scrollThreadIntoView],
+    [diff, diffs, lockProgrammaticFile, persistPlace, repo, scrollThreadIntoView, selectTreeFile],
   );
 
   // Selecting a repo (sidebar click) promotes it to active and, in the stacked
@@ -489,6 +552,7 @@ export function App() {
       window.clearTimeout(programmaticRepoTimerRef.current);
     }
     setRepo(name);
+    setSpacePreviewFile(null);
     setReselectTick((n) => n + 1);
     diffPaneRef.current
       ?.querySelector(`.module[data-repo="${cssEscape(name)}"]`)
@@ -534,6 +598,10 @@ export function App() {
       return next;
     });
   }, []);
+  const collapseAllModules = useCallback(() => {
+    setCollapsedRepos(new Set(visibleRepos.map((r) => r.name)));
+  }, [visibleRepos]);
+  const expandAllModules = useCallback(() => setCollapsedRepos(new Set()), []);
 
   // Per-file "viewed" state, scoped per repo to that repo's (worktree, target) —
   // the diff's identity — and persisted under one key each. The key is computed
@@ -819,6 +887,7 @@ export function App() {
 
   useEffect(() => {
     setPreviewFile(null);
+    setSpacePreviewFile(null);
   }, [repo, worktree, target]);
 
   // Refresh ONE repo's refs (branches/tags/commits/remotes) for its compare
@@ -859,18 +928,36 @@ export function App() {
     }
   }, [workspace, visibleRepos, selections, refreshRefsFor]);
 
-  // Load every tracked file for the sidebar's All files mode.
+  // Load every tracked repo file plus non-repo space files for the sidebar's All files mode.
   useEffect(() => {
-    if (!repo) return;
+    if (!workspace) return;
     let live = true;
-    api
-      .repoFiles(repo, worktree)
-      .then((r) => live && setAllFiles(r.files))
-      .catch(() => live && setAllFiles([]));
+    Promise.all(
+      visibleRepos.map(async (r) => {
+        const wt = selections.get(r.name)?.worktree ?? null;
+        try {
+          return [r.name, (await api.repoFiles(r.name, wt)).files] as const;
+        } catch {
+          return [r.name, [] as string[]] as const;
+        }
+      }),
+    ).then((rows) => live && setAllFilesByRepo(new Map(rows)));
     return () => {
       live = false;
     };
-  }, [repo, worktree]);
+  }, [workspace, visibleRepos, selections]);
+
+  useEffect(() => {
+    if (!activeSpacePath) return;
+    let live = true;
+    api
+      .spaceFiles(activeSpacePath)
+      .then((r) => live && setSpaceFiles(r.files))
+      .catch(() => live && setSpaceFiles([]));
+    return () => {
+      live = false;
+    };
+  }, [activeSpacePath]);
 
   // Fan-out diff fetch: each repo loads its own selection, in parallel and cached
   // independently. A module is skipped when its (worktree, target) is already
@@ -1341,9 +1428,7 @@ export function App() {
   const spaceThreads = useMemo(
     () =>
       activeSpacePath
-        ? threads.filter(
-            (t) => t.targetLevel === "space" && t.spacePath === activeSpacePath,
-          )
+        ? threads.filter((t) => t.repo === null && t.spacePath === activeSpacePath)
         : EMPTY_THREADS,
     [threads, activeSpacePath],
   );
@@ -1408,7 +1493,10 @@ export function App() {
   // One stable closure for "back to diff" so it doesn't defeat memo() on the
   // heavy DiffView/Sidebar panels — a fresh arrow each render made them
   // re-run on every scroll-spy active-file tick, resize commit, and filter click.
-  const backToDiff = useCallback(() => setPreviewFile(null), []);
+  const backToDiff = useCallback(() => {
+    setPreviewFile(null);
+    setSpacePreviewFile(null);
+  }, []);
 
   // Header/sidebar derived counts — total diffstat and the per-file open-thread
   // counts the sidebar tree badges read.
@@ -1420,20 +1508,37 @@ export function App() {
     () => headerFiles.reduce((n, f) => n + f.deletions, 0),
     [headerFiles],
   );
-  const threadCounts = useMemo(() => {
+  const threadCountsByRepo = useMemo(() => {
+    const byRepo = new Map<string, Map<string, number>>();
+    for (const r of visibleRepos) {
+      const counts = new Map<string, number>();
+      for (const t of scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS) {
+        if (t.file === null) continue;
+        counts.set(t.file, (counts.get(t.file) ?? 0) + 1);
+      }
+      byRepo.set(r.name, counts);
+    }
+    return byRepo;
+  }, [visibleRepos, scopedThreadsByRepo]);
+  const spaceFileThreadCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const t of scopedThreads) {
-      if (t.file === null) continue;
+    for (const t of spaceThreads) {
+      if (t.targetLevel !== "file" || t.file === null) continue;
       counts.set(t.file, (counts.get(t.file) ?? 0) + 1);
     }
     return counts;
-  }, [scopedThreads]);
+  }, [spaceThreads]);
 
   const changedFilesByRepo = useMemo(() => {
     const map = new Map<string, number>();
     for (const [name, d] of diffs) map.set(name, d.files.length);
     return map;
   }, [diffs]);
+  const diffFilesByRepo = useMemo(() => {
+    const map = new Map<string, DiffFile[]>();
+    for (const r of visibleRepos) map.set(r.name, diffs.get(r.name)?.files ?? EMPTY_FILES);
+    return map;
+  }, [visibleRepos, diffs]);
 
   const editors = visibleWorkspace?.editors ?? workspace?.editors ?? [];
   const activeEditor = pickEditor(editors, preferredEditor);
@@ -1466,10 +1571,32 @@ export function App() {
     },
     [activeEditor, showOpenError],
   );
+  const openSpaceFileInEditor = useCallback(
+    (path: string, line = 1) => {
+      if (!activeEditor || !visibleWorkspace) {
+        setError("No supported editor found");
+        return;
+      }
+      void api
+        .open({
+          editor: activeEditor,
+          workspacePath: activeEntry?.path ?? visibleWorkspace.root,
+          file: path,
+          line,
+        })
+        .catch(showOpenError);
+    },
+    [activeEditor, activeEntry?.path, showOpenError, visibleWorkspace],
+  );
   const openCurrentFileInEditor = useCallback(() => {
-    if (!repo || !activeFile) return;
+    if (!activeFile) return;
+    if (spacePreviewFile) {
+      openSpaceFileInEditor(spacePreviewFile);
+      return;
+    }
+    if (!repo) return;
     openFileInEditor(repo, worktree, activeFile);
-  }, [activeFile, openFileInEditor, repo, worktree]);
+  }, [activeFile, openFileInEditor, openSpaceFileInEditor, repo, spacePreviewFile, worktree]);
 
   // A failed fetch no longer replaces the whole app; it shows a dismissible
   // banner so the current view stays usable and recoverable.
@@ -1573,16 +1700,24 @@ export function App() {
               onSelectRepo={selectRepo}
               onSelectSession={selectReviewSession}
               onSelectLegacy={selectLegacy}
-              files={sidebarFiles}
-              allFiles={allFiles}
-              viewed={viewed}
-              threadCounts={threadCounts}
+              spacePath={activeEntry?.path ?? visibleWorkspace.root}
+              spaceFiles={spaceFiles}
+              filesByRepo={diffFilesByRepo}
+              allFilesByRepo={allFilesByRepo}
+              viewedByRepo={viewedByRepo}
+              threadCountsByRepo={threadCountsByRepo}
+              spaceThreadCounts={spaceFileThreadCounts}
               activeFile={activeFile}
-              onSelectFile={selectFile}
+              activeSpaceFile={spacePreviewFile}
+              onSelectFile={selectTreeFile}
               onShowDiff={backToDiff}
               onCollapse={toggleSidebar}
               editorLabel={activeEditorLabel}
-              onOpenFile={(path) => openFileInEditor(repo, worktree, path)}
+              onOpenRepoFile={(repoName, path) => {
+                const sel = selections.get(repoName) ?? { worktree: null, target: DEFAULT_TARGET };
+                openFileInEditor(repoName, sel.worktree, path);
+              }}
+              onOpenSpaceFile={openSpaceFileInEditor}
             />
             <div
               className="sidebar-resizer"
@@ -1612,6 +1747,16 @@ export function App() {
               >
                 PR Draft
               </button>
+              {stacked && mainTab === "diff" && (
+                <span className="pane-tab-actions">
+                  <button type="button" className="ghost mini" onClick={collapseAllModules}>
+                    Collapse all
+                  </button>
+                  <button type="button" className="ghost mini" onClick={expandAllModules}>
+                    Expand all
+                  </button>
+                </span>
+              )}
             </div>
             <div className="review-main-panel" role="tabpanel" hidden={mainTab !== "pr-draft"}>
               <PrDraftPanel
@@ -1626,7 +1771,19 @@ export function App() {
                     owns the scroll-spy ref. N=1: the literal single diff pane, with the
                     pane ref handed straight to it. Each ModuleSection provides its own
                     snapshot context, so the diff side always sees its own repo's snapshot. */}
-                {stacked ? (
+                {spacePreviewFile ? (
+                  <SpaceFilePreview
+                    workspacePath={activeEntry?.path ?? visibleWorkspace.root}
+                    file={spacePreviewFile}
+                    threads={spaceThreads.filter((t) => t.file === spacePreviewFile)}
+                    onBackToDiff={backToDiff}
+                    onChanged={refreshThreads}
+                    editors={editors}
+                    editor={activeEditor}
+                    onEditor={setPreferredEditor}
+                    onOpenFile={openSpaceFileInEditor}
+                  />
+                ) : stacked ? (
                   <section className="modmain" ref={diffPaneRef}>
                     {visibleRepos.map((r, i) => {
                       const moduleWorktree = selections.get(r.name)?.worktree ?? null;

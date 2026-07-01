@@ -23,7 +23,8 @@ import {
 } from "../fileTree.js";
 
 interface Props {
-  repo: string;
+  repo: string | null;
+  spacePath: string;
   /** Id of the session the active diff resolved to — remounts the file tree on review switch. */
   currentSession: string | null;
   /** The unscoped/legacy bucket is open; no session entry is highlighted. */
@@ -39,19 +40,26 @@ interface Props {
   onSelectRepo: (repo: string) => void;
   onSelectSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
-  files: DiffFile[];
-  allFiles: string[];
-  viewed: Set<string>;
-  /** Open-thread count per file path, for the tree/list badges. */
-  threadCounts: Map<string, number>;
+  spaceFiles: string[];
+  filesByRepo: Map<string, DiffFile[]>;
+  allFilesByRepo: Map<string, string[]>;
+  viewedByRepo: Map<string, Set<string>>;
+  /** Open-thread count per repo/file path, plus space files. */
+  threadCountsByRepo: Map<string, Map<string, number>>;
+  spaceThreadCounts: Map<string, number>;
   activeFile: string | null;
-  onSelectFile: (path: string) => void;
+  activeSpaceFile: string | null;
+  onSelectFile: (repo: string | null, path: string) => void;
   onShowDiff: () => void;
   onCollapse: () => void;
   editorLabel: string | null;
-  onOpenFile: (path: string) => void;
+  onOpenRepoFile: (repo: string, path: string) => void;
+  onOpenSpaceFile: (path: string) => void;
 }
 
+type TreeAction = { id: number; action: "expand" | "collapse" };
+
+type ProgressFile = { repo: string; path: string };
 
 /**
  * Human label for a review session, derived from its scope so the client never
@@ -99,10 +107,21 @@ function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-/** Left navigation: workspace → repos (when needed) → files. Memoized so a
- * diff/thread change doesn't re-render the whole nav. */
+const collapsedReposKey = (spacePath: string) => `diffect-space-tree-repos:${spacePath}`;
+
+function loadCollapsedRepos(spacePath: string): Set<string> {
+  try {
+    const raw = getStored(collapsedReposKey(spacePath));
+    return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Left navigation: one space-level tree: space files plus repo folders. */
 export const Sidebar = memo(function Sidebar({
   repo,
+  spacePath,
   repos,
   currentSession,
   showUnscoped,
@@ -112,26 +131,59 @@ export const Sidebar = memo(function Sidebar({
   onSelectRepo,
   onSelectSession,
   onSelectLegacy,
-  files,
-  allFiles,
-  viewed,
-  threadCounts,
+  spaceFiles,
+  filesByRepo,
+  allFilesByRepo,
+  viewedByRepo,
+  threadCountsByRepo,
+  spaceThreadCounts,
   activeFile,
+  activeSpaceFile,
   onSelectFile,
   onShowDiff,
   onCollapse,
   editorLabel,
-  onOpenFile,
+  onOpenRepoFile,
+  onOpenSpaceFile,
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
-  const treeEntries = useMemo(
-    () => (fileMode === "all" ? allFileEntries(allFiles, files) : diffFileEntries(files)),
-    [allFiles, fileMode, files],
+  const [treeAction, setTreeAction] = useState<TreeAction | null>(null);
+  const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() => loadCollapsedRepos(spacePath));
+  const [menu, setMenu] = useState<{ repo: string | null; path: string; x: number; y: number } | null>(null);
+
+  useEffect(() => setCollapsedRepos(loadCollapsedRepos(spacePath)), [spacePath]);
+
+  const repoEntries = useMemo(
+    () =>
+      repos.map((r) => {
+        const changed = filesByRepo.get(r.name) ?? [];
+        return {
+          repo: r,
+          entries:
+            fileMode === "all"
+              ? allFileEntries(allFilesByRepo.get(r.name) ?? [], changed)
+              : diffFileEntries(changed),
+        };
+      }),
+    [allFilesByRepo, fileMode, filesByRepo, repos],
   );
-  const showFiles = files.length > 0 || allFiles.length > 0;
-  const showRepoList = repos.length > 1;
+  const spaceEntries = useMemo<FileTreeEntry[]>(
+    () =>
+      fileMode === "all"
+        ? spaceFiles.map((path) => ({ path, status: "unchanged" }))
+        : [],
+    [fileMode, spaceFiles],
+  );
+  const changedProgress = useMemo<ProgressFile[]>(
+    () =>
+      repos.flatMap((r) =>
+        (filesByRepo.get(r.name) ?? []).map((file) => ({ repo: r.name, path: file.path })),
+      ),
+    [filesByRepo, repos],
+  );
+  const showFiles =
+    spaceEntries.length > 0 || repoEntries.some((entry) => entry.entries.length > 0) || repos.length > 0;
   const showRecovery = legacyCount > 0 || archivedSessions.length > 0;
-  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!menu) return;
@@ -149,10 +201,30 @@ export const Sidebar = memo(function Sidebar({
     };
   }, [menu]);
 
-  const openContextMenu = (path: string, event: MouseEvent) => {
+  const openContextMenu = (fileRepo: string | null, path: string, event: MouseEvent) => {
     if (!editorLabel) return;
     event.preventDefault();
-    setMenu({ path, x: event.clientX, y: event.clientY });
+    setMenu({ repo: fileRepo, path, x: event.clientX, y: event.clientY });
+  };
+
+  const storeCollapsedRepos = (next: Set<string>) => {
+    setStored(collapsedReposKey(spacePath), JSON.stringify([...next]));
+    return next;
+  };
+  const toggleRepo = (name: string) => {
+    setCollapsedRepos((prev) => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return storeCollapsedRepos(next);
+    });
+  };
+  const collapseAll = () => {
+    setCollapsedRepos(storeCollapsedRepos(new Set(repos.map((r) => r.name))));
+    setTreeAction({ id: Date.now(), action: "collapse" });
+  };
+  const expandAll = () => {
+    setCollapsedRepos(storeCollapsedRepos(new Set()));
+    setTreeAction({ id: Date.now(), action: "expand" });
   };
 
   return (
@@ -169,33 +241,17 @@ export const Sidebar = memo(function Sidebar({
           <Icon name="sidebar-collapse" size={14} />
         </button>
       </div>
-      {showRepoList && (
-        <>
-          <div className="sidebar-head sidebar-top-head">
-            <span>Repos</span>
-          </div>
-          <div className="ws-group">
-            {repos.map((r) => (
-              <RepoItem
-                key={r.name}
-                repo={r}
-                active={r.name === repo}
-                onSelectRepo={onSelectRepo}
-              />
-            ))}
-          </div>
-        </>
-      )}
 
       {showFiles && (
         <>
           <div className="sidebar-head files-head">
-            <span>{fileMode === "all" ? "All files" : "Changed"}</span>
+            <span>{fileMode === "all" ? "Space tree" : "Diff tree"}</span>
             <span className="files-head-actions">
               {fileMode === "diff" && (
                 <ReviewProgress
-                  files={files}
-                  viewed={viewed}
+                  files={changedProgress}
+                  viewedByRepo={viewedByRepo}
+                  activeRepo={repo}
                   activeFile={activeFile}
                   onSelectFile={onSelectFile}
                 />
@@ -216,18 +272,79 @@ export const Sidebar = memo(function Sidebar({
               </button>
             </span>
           </div>
-          {/* key remounts the tree on repo/mode switch so collapse state and
-              the memoized tree re-initialize for the right file set. */}
-          <FileTree
-            key={`${repo}:${fileMode}:${currentSession ?? ""}`}
-            repo={repo}
-            entries={treeEntries}
-            viewed={viewed}
-            threadCounts={threadCounts}
-            activeFile={activeFile}
-            onSelectFile={onSelectFile}
-            onContextMenu={openContextMenu}
-          />
+          <div className="tree-actions" aria-label="Tree actions">
+            <button type="button" className="ghost mini" onClick={collapseAll}>Collapse all</button>
+            <button type="button" className="ghost mini" onClick={expandAll}>Expand all</button>
+          </div>
+
+          {spaceEntries.length > 0 && (
+            <FileTree
+              key={`space:${spacePath}:${fileMode}`}
+              storageKey={`space:${spacePath}:${fileMode}`}
+              entries={spaceEntries}
+              viewed={new Set()}
+              threadCounts={spaceThreadCounts}
+              activeFile={activeSpaceFile}
+              onSelectFile={(path) => onSelectFile(null, path)}
+              onContextMenu={(path, event) => openContextMenu(null, path, event)}
+              action={treeAction}
+            />
+          )}
+
+          <div className="space-repo-tree">
+            {repoEntries.map(({ repo: r, entries }) => {
+              const collapsed = collapsedRepos.has(r.name);
+              const primaryBranch =
+                r.worktrees.find((w) => w.root === r.root)?.branch ??
+                r.worktrees[0]?.branch ??
+                null;
+              const label = basename(r.root);
+              return (
+                <div className="space-repo-node" key={r.name}>
+                  <button
+                    type="button"
+                    aria-expanded={!collapsed}
+                    className={`tree-repo${r.name === repo ? " active" : ""}`}
+                    title={`${label}${label === r.name ? "" : ` (${r.name})`}\n${r.root}`}
+                    onClick={() => {
+                      onSelectRepo(r.name);
+                      toggleRepo(r.name);
+                    }}
+                  >
+                    <Icon
+                      name={collapsed ? "chevron-right" : "chevron-down"}
+                      size={12}
+                      className="tree-chevron"
+                    />
+                    <Icon name="file-directory-fill" size={13} className="tree-icon" />
+                    <span className="tree-repo-copy">
+                      <span className="tree-repo-name">{label}</span>
+                      {primaryBranch && (
+                        <span className="tree-repo-branch" title={`On branch ${primaryBranch}`}>
+                          <Icon name="git-branch" size={11} className="repo-branch-icon" />
+                          {primaryBranch}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                  {!collapsed && entries.length > 0 && (
+                    <FileTree
+                      key={`${r.name}:${fileMode}:${currentSession ?? ""}`}
+                      storageKey={`${spacePath}:${r.name}:${fileMode}`}
+                      entries={entries}
+                      viewed={viewedByRepo.get(r.name) ?? new Set()}
+                      threadCounts={threadCountsByRepo.get(r.name) ?? new Map()}
+                      activeFile={r.name === repo ? activeFile : null}
+                      onSelectFile={(path) => onSelectFile(r.name, path)}
+                      onContextMenu={(path, event) => openContextMenu(r.name, path, event)}
+                      action={treeAction}
+                      baseDepth={1}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </>
       )}
 
@@ -242,7 +359,8 @@ export const Sidebar = memo(function Sidebar({
             type="button"
             role="menuitem"
             onClick={() => {
-              onOpenFile(menu.path);
+              if (menu.repo) onOpenRepoFile(menu.repo, menu.path);
+              else onOpenSpaceFile(menu.path);
               setMenu(null);
             }}
           >
@@ -272,25 +390,30 @@ export const Sidebar = memo(function Sidebar({
  */
 function ReviewProgress({
   files,
-  viewed,
+  viewedByRepo,
+  activeRepo,
   activeFile,
   onSelectFile,
 }: {
-  files: DiffFile[];
-  viewed: Set<string>;
+  files: ProgressFile[];
+  viewedByRepo: Map<string, Set<string>>;
+  activeRepo: string | null;
   activeFile: string | null;
-  onSelectFile: (path: string) => void;
+  onSelectFile: (repo: string | null, path: string) => void;
 }) {
   const total = files.length;
-  const done = files.reduce((n, f) => (viewed.has(f.path) ? n + 1 : n), 0);
+  const isViewed = (f: ProgressFile) => viewedByRepo.get(f.repo)?.has(f.path) ?? false;
+  const done = files.reduce((n, f) => (isViewed(f) ? n + 1 : n), 0);
   const pct = total ? Math.round((done / total) * 100) : 0;
   const allViewed = done >= total;
 
   const jumpNextUnviewed = () => {
-    const start = activeFile ? files.findIndex((f) => f.path === activeFile) : -1;
+    const start = activeFile
+      ? files.findIndex((f) => f.repo === activeRepo && f.path === activeFile)
+      : -1;
     for (let i = 1; i <= total; i++) {
       const f = files[(start + i + total) % total]!;
-      if (!viewed.has(f.path)) return onSelectFile(f.path);
+      if (!isViewed(f)) return onSelectFile(f.repo, f.path);
     }
   };
 
@@ -313,40 +436,77 @@ function ReviewProgress({
   );
 }
 
-const collapsedKey = (repo: string) => `diffect-tree-collapsed:${repo}`;
+const collapsedKey = (storageKey: string) => `diffect-tree-collapsed:${storageKey}`;
 
-function loadCollapsed(repo: string): Set<string> {
+function loadCollapsed(storageKey: string): Set<string> {
   try {
-    const raw = getStored(collapsedKey(repo));
+    const raw = getStored(collapsedKey(storageKey));
     return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
     return new Set();
   }
 }
 
-/** Collapsible changed-file tree, expansion state persisted per repo. */
+function dirPaths(nodes: TreeNode[]): string[] {
+  const paths: string[] = [];
+  const walk = (node: TreeNode) => {
+    if (node.type !== "dir") return;
+    paths.push(node.path);
+    node.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return paths;
+}
+
+function findDir(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.type !== "dir") continue;
+    if (node.path === path) return node;
+    const found = findDir(node.children, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Collapsible file tree, expansion state persisted per logical tree. */
 function FileTree({
-  repo,
+  storageKey,
   entries,
   viewed,
   threadCounts,
   activeFile,
   onSelectFile,
   onContextMenu,
+  action,
+  baseDepth = 0,
 }: {
-  repo: string;
+  storageKey: string;
   entries: FileTreeEntry[];
   viewed: Set<string>;
   threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onContextMenu: (path: string, event: MouseEvent) => void;
+  action: TreeAction | null;
+  baseDepth?: number;
 }) {
   const tree = useMemo(() => buildPathTree(entries), [entries]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(repo));
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(storageKey));
+  const treeRef = useRef<HTMLDivElement>(null);
+
+  const storeCollapsed = (next: Set<string>) => {
+    setStored(collapsedKey(storageKey), JSON.stringify([...next]));
+    return next;
+  };
+
+  useEffect(() => setCollapsed(loadCollapsed(storageKey)), [storageKey]);
+  useEffect(() => {
+    if (!action) return;
+    setCollapsed(storeCollapsed(action.action === "collapse" ? new Set(dirPaths(tree)) : new Set()));
+  }, [action, tree]);
+
   // Keep the scroll-spy-highlighted file visible without yanking the whole list:
   // `nearest` only scrolls the sidebar the minimum needed.
-  const treeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!activeFile) return;
     treeRef.current
@@ -354,21 +514,23 @@ function FileTree({
       ?.scrollIntoView({ block: "nearest" });
   }, [activeFile]);
 
-  const toggleDir = (path: string) =>
+  const toggleDir = (path: string, recursive: boolean) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
-      next.has(path) ? next.delete(path) : next.add(path);
-      setStored(collapsedKey(repo), JSON.stringify([...next]));
-      return next;
+      const closing = !next.has(path);
+      const dir = recursive ? findDir(tree, path) : null;
+      const paths = recursive && dir?.type === "dir" ? dirPaths([dir]) : [path];
+      for (const p of paths) closing ? next.add(p) : next.delete(p);
+      return storeCollapsed(next);
     });
 
   return (
-    <div className="file-tree" role="tree" ref={treeRef}>
+    <div className="file-tree" ref={treeRef}>
       {tree.map((node) => (
         <TreeRow
           key={node.path}
           node={node}
-          depth={0}
+          depth={baseDepth}
           collapsed={collapsed}
           onToggleDir={toggleDir}
           viewed={viewed}
@@ -396,7 +558,7 @@ function TreeRow({
   node: TreeNode;
   depth: number;
   collapsed: Set<string>;
-  onToggleDir: (path: string) => void;
+  onToggleDir: (path: string, recursive: boolean) => void;
   viewed: Set<string>;
   threadCounts: Map<string, number>;
   activeFile: string | null;
@@ -416,8 +578,6 @@ function TreeRow({
     return (
       <button
         type="button"
-        role="treeitem"
-        aria-level={depth + 1}
         className={`tree-file${node.path === activeFile ? " active" : ""}${
           unchanged ? " unchanged" : ""
         }${ignored ? " ignored" : ""}`}
@@ -447,18 +607,18 @@ function TreeRow({
     <>
       <button
         type="button"
-        role="treeitem"
-        aria-level={depth + 1}
         aria-expanded={!isCollapsed}
         className="tree-dir"
         style={depthVar}
-        onClick={() => onToggleDir(node.path)}
+        title="Option-click to collapse or expand descendants"
+        onClick={(event) => onToggleDir(node.path, event.altKey)}
       >
         <Icon
           name={isCollapsed ? "chevron-right" : "chevron-down"}
           size={12}
           className="tree-chevron"
         />
+        <Icon name="file-directory-fill" size={12} className="tree-icon" />
         <span className="tree-name">{node.name}</span>
       </button>
       {!isCollapsed &&

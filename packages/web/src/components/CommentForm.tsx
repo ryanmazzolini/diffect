@@ -7,7 +7,8 @@ import { MarkdownEditor } from "./MarkdownEditor.js";
 const SEVERITIES: Severity[] = ["must-fix", "suggestion", "nit", "question"];
 
 interface Props {
-  repo: string;
+  repo: string | null;
+  spacePath?: string | null;
   worktree: string | null;
   /** The review target spec the comment is filed under (e.g. "work",
    * "main..feat"); the daemon resolves it to the durable scope/session. */
@@ -23,6 +24,7 @@ interface Props {
 
 export function CommentForm({
   repo,
+  spacePath = null,
   worktree,
   target,
   file,
@@ -34,7 +36,7 @@ export function CommentForm({
 }: Props) {
   // Persist the in-progress comment per location so it survives a re-render or
   // an SSE-driven diff reload and an accidental cancel.
-  const draftKey = `draft:${repo}:${worktree ?? ""}:${side}:${file}:${line}:${
+  const draftKey = `draft:${repo ?? spacePath ?? "space"}:${worktree ?? ""}:${side}:${file}:${line}:${
     endLine ?? line
   }`;
   const [body, setBody, clearDraft] = useDraft(draftKey);
@@ -52,6 +54,7 @@ export function CommentForm({
     try {
       await api.createThread({
         repo,
+        spacePath,
         worktree,
         target,
         targetLevel: "file",

@@ -20,7 +20,7 @@ import { readTargetFileContent } from "./git/content.js";
 import { resolveCurrentBranch, resolveWorkBase } from "./git/diff.js";
 import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
-import { buildAnchor, readSideLines } from "./reviews/anchors.js";
+import { buildAnchor, computeAnchor, readSideLines } from "./reviews/anchors.js";
 import {
   resolveScope,
   sessionIdForScope,
@@ -75,6 +75,7 @@ import {
 } from "./store/attachments.js";
 import { readPrDraft, updatePrDraft, type PrDraftScope } from "./store/pr-draft.js";
 import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
+import { listSpaceFiles, readSpaceFileLines } from "./space-files.js";
 
 export interface DaemonOptions {
   /** Workspace to serve at boot, always included even if not yet registered. */
@@ -197,6 +198,7 @@ async function handle(
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
   if (await sessionRoutes(ctx, req, res, method, path)) return;
   if (await prDraftRoutes(ctx, req, res, url, method, path)) return;
+  if (await spaceFileRoutes(ctx, res, url, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
   if (await fileContentRoute(ctx, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
@@ -344,6 +346,35 @@ async function createThreadRoute(
         line: null,
         endLine: null,
         anchor: null,
+        scope: null,
+        sessionId: null,
+        snapshotId: null,
+      },
+      ctx.now(),
+    );
+    thread.spacePath = spacePath;
+    ctx.events.notify(DAEMON_EVENTS.threadChanged);
+    sendJson(res, 201, thread);
+    return true;
+  }
+
+  if (targetLevel === "file" && !body.repo && spacePath && body.file) {
+    const lines = await readSpaceFileLines(spacePath, body.file);
+    if (!lines) {
+      sendJson(res, 404, { error: "file not found or binary" });
+      return true;
+    }
+    const anchor = body.line
+      ? computeAnchor(lines, body.line, body.endLine ?? null, null)
+      : null;
+    const thread = await createThread(
+      spaceThreadStore(spacePath),
+      {
+        ...body,
+        repo: null,
+        worktree: null,
+        targetLevel,
+        anchor,
         scope: null,
         sessionId: null,
         snapshotId: null,
@@ -528,6 +559,46 @@ async function prDraftRoutes(
   const next = await updatePrDraft(target, body, ctx.now());
   ctx.events.notify(DAEMON_EVENTS.threadChanged);
   sendJson(res, 200, next);
+  return true;
+}
+
+/** `GET /space/files` and `GET /space/file` — non-repo files under a review space. */
+async function spaceFileRoutes(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (method !== "GET" || (path !== "/space/files" && path !== "/space/file")) {
+    return false;
+  }
+  const workspacePath = resolveSpacePath(ctx, res, url.searchParams.get("workspace") ?? ctx.ws.root);
+  if (!workspacePath) return true;
+
+  if (path === "/space/files") {
+    const repos = ctx.ws.repos.filter((r) => (r.workspacePath ?? ctx.ws.root) === workspacePath);
+    sendJson(
+      res,
+      200,
+      await listSpaceFiles(workspacePath, repos.flatMap((r) => r.worktrees.map((w) => w.root))),
+    );
+    return true;
+  }
+
+  const file = url.searchParams.get("path");
+  const from = Number(url.searchParams.get("from"));
+  const to = Number(url.searchParams.get("to"));
+  if (!file || !Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
+    sendJson(res, 400, { error: "path, from, and to (from<=to, from>=1) required" });
+    return true;
+  }
+  const all = await readSpaceFileLines(workspacePath, file);
+  if (!all) {
+    sendJson(res, 404, { error: "file not found or binary" });
+    return true;
+  }
+  sendJson(res, 200, { from, lines: all.slice(from - 1, Math.min(to, from - 1 + 2000)) });
   return true;
 }
 
@@ -727,7 +798,11 @@ async function editorRoute(
         sendJson(res, 404, { error: `unknown workspace: ${body.workspacePath}` });
         return true;
       }
-      await openWorkspaceInEditor(workspace.root, body.editor);
+      if (body.file) {
+        await openInEditor(workspace.root, body.file, body.line ?? 1, body.editor);
+      } else {
+        await openWorkspaceInEditor(workspace.root, body.editor);
+      }
     } else {
       if (!body.repo) {
         sendJson(res, 400, { error: "repo or workspacePath is required" });

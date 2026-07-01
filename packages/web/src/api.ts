@@ -71,6 +71,21 @@ export const api = {
     );
   },
 
+  spaceFiles: (workspacePath: string) => {
+    const q = new URLSearchParams({ workspace: workspacePath });
+    return fetch(`/space/files?${q}`).then((r) => json<RepoFileList>(r));
+  },
+
+  spaceFile: (workspacePath: string, opts: { path: string; from: number; to: number }) => {
+    const q = new URLSearchParams({
+      workspace: workspacePath,
+      path: opts.path,
+      from: String(opts.from),
+      to: String(opts.to),
+    });
+    return fetch(`/space/file?${q}`).then((r) => json<FileRange>(r));
+  },
+
   uploadAttachment: (file: File) =>
     fetch("/attachments", {
       method: "POST",
