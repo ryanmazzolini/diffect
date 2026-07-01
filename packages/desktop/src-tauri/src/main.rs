@@ -172,7 +172,8 @@ fn watch_daemon(handle: AppHandle, launch: DaemonLaunch, daemon: Arc<Mutex<Optio
                 Ok((child, url)) => {
                     *daemon.lock().unwrap() = Some(child);
                     if let Some(w) = handle.get_webview_window("main") {
-                        let _ = w.navigate(url.parse().expect("ready line carries a valid URL"));
+                        let url = url.parse().expect("ready line carries a valid URL");
+                        let _ = w.navigate(desktop_url(url));
                     }
                 }
                 Err(e) => {
@@ -200,10 +201,17 @@ fn requested_loopback_url(args: &[String]) -> Option<Url> {
         .find(is_loopback)
 }
 
+fn desktop_url(mut url: Url) -> Url {
+    url.query_pairs_mut()
+        .append_pair("shell", "desktop")
+        .append_pair("platform", std::env::consts::OS);
+    url
+}
+
 fn focus_window(handle: &AppHandle, requested: Option<Url>) {
     if let Some(w) = handle.get_webview_window("main") {
         if let Some(url) = requested {
-            let _ = w.navigate(url);
+            let _ = w.navigate(desktop_url(url));
         }
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -238,8 +246,7 @@ fn main() {
                     }
                 },
             };
-            let mut url: Url = url.parse()?;
-            url.query_pairs_mut().append_pair("shell", "desktop");
+            let url: Url = desktop_url(url.parse()?);
             // The app's own origins stay in the webview: any loopback port
             // (respawns get new ones) plus whatever origin the window was
             // started on. Everything else — links in comments, markdown —

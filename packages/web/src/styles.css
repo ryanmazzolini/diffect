@@ -436,7 +436,7 @@ body.modal-open {
 .rh-identity {
   height: 44px;
 }
-html[data-shell="desktop"] .rh-identity {
+html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   padding-left: 78px;
 }
 .rh-grow {
@@ -476,7 +476,7 @@ html[data-shell="desktop"] .rh-identity {
   .rh-row {
     padding: 0 8px;
   }
-  html[data-shell="desktop"] .rh-identity {
+  html[data-shell="desktop"][data-platform="macos"] .rh-identity {
     padding-left: 72px;
   }
   .brand,
