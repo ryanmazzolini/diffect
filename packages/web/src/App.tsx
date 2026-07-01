@@ -1638,6 +1638,7 @@ export function App() {
                           band={i % 2 === 0 ? 1 : 2}
                           focused={r.name === repo}
                           repo={r.name}
+                          repoLabel={basename(r.root)}
                           worktree={moduleWorktree}
                           branch={worktreeSummary?.branch ?? null}
                           pullRequest={worktreeSummary?.pullRequest ?? null}
@@ -1672,6 +1673,7 @@ export function App() {
                   <ModuleSection
                     paneRef={diffPaneRef}
                     repo={repo}
+                    repoLabel={activeRepo ? basename(activeRepo.root) : repo}
                     worktree={worktree}
                     branch={activeWorktree?.branch ?? null}
                     pullRequest={activeWorktree?.pullRequest ?? null}

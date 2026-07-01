@@ -48,6 +48,7 @@ interface Props {
    * the stack so two adjacent modules read as distinct. Stacked layout only. */
   band?: 1 | 2;
   repo: string;
+  repoLabel?: string;
   worktree: string | null;
   branch?: string | null;
   pullRequest?: PullRequestLink | null;
@@ -104,6 +105,7 @@ export const ModuleSection = memo(function ModuleSection({
   focused = false,
   band = 1,
   repo,
+  repoLabel = repo,
   worktree,
   branch = null,
   pullRequest = null,
@@ -190,6 +192,7 @@ export const ModuleSection = memo(function ModuleSection({
       <section className="diff-pane" ref={paneRef}>
         <StackedModule
           repo={repo}
+          repoLabel={repoLabel}
           band={band}
           focused={false}
           collapsible={false}
@@ -217,6 +220,7 @@ export const ModuleSection = memo(function ModuleSection({
   return (
     <StackedModule
       repo={repo}
+      repoLabel={repoLabel}
       band={band}
       focused={focused}
       collapsible
@@ -244,6 +248,7 @@ export const ModuleSection = memo(function ModuleSection({
  *  the base…compare picker. Multi-repo adds the band + collapse caret. */
 function StackedModule({
   repo,
+  repoLabel,
   band,
   focused,
   collapsible,
@@ -264,6 +269,7 @@ function StackedModule({
   children,
 }: {
   repo: string;
+  repoLabel: string;
   band: 1 | 2;
   focused: boolean;
   collapsible: boolean;
@@ -304,7 +310,7 @@ function StackedModule({
               type="button"
               className="mh-caret"
               aria-expanded={!collapsed}
-              aria-label={collapsed ? `Expand ${repo}` : `Collapse ${repo}`}
+              aria-label={collapsed ? `Expand ${repoLabel}` : `Collapse ${repoLabel}`}
               title={collapsed ? "Expand this module" : "Collapse this module"}
               onClick={onToggleCollapse}
             >
@@ -312,11 +318,13 @@ function StackedModule({
             </button>
           )}
           <span className="mh-repo">
-            <Icon name="git-branch" size={12} className="fork" />
-            <span className="mod-name">{repo}</span>
-          </span>
-          <span className="mh-branch" title={branch ? `Branch ${branch}` : "Detached HEAD"}>
-            {branch ?? "detached"}
+            <span className="mh-repo-main">
+              <span className="mod-name" title={repoLabel === repo ? undefined : repo}>{repoLabel}</span>
+            </span>
+            <span className="mh-branch" title={branch ? `Branch ${branch}` : "Detached HEAD"}>
+              <Icon name="git-branch" size={12} className="fork" />
+              {branch ?? "detached"}
+            </span>
           </span>
           <PullRequestBadge pullRequest={pullRequest} />
           <span className="mh-state-wrap">

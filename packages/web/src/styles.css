@@ -1315,17 +1315,26 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   flex: 0 1 auto;
   min-width: 0;
 }
-/* The branch label rides on the right, muted, and yields its space to the name
- * before truncating itself. */
+.repo-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding-block: 5px;
+  white-space: normal;
+}
+.repo-name {
+  max-width: 100%;
+  white-space: nowrap;
+}
 .repo-branch {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  flex: 0 1 auto;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 400;
   color: var(--muted);
@@ -1862,8 +1871,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   display: flex;
   align-items: center;
   gap: 9px;
-  height: 38px;
-  padding: 0 14px 0 0;
+  min-height: 48px;
+  padding: 6px 14px 6px 0;
 }
 .module.single .mh-line1 {
   padding-left: 14px;
@@ -1908,18 +1917,28 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .mh-repo {
   display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mh-repo-main {
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  flex: none;
+  max-width: 100%;
+  min-width: 0;
 }
 .mh-repo .fork {
   color: var(--faint);
   flex: none;
 }
 .mh-branch {
-  max-width: 180px;
+  max-width: 100%;
   flex: 0 1 auto;
   color: var(--faint);
+  line-height: 1.2;
 }
 .mod-name {
   font-weight: 700;
@@ -2035,7 +2054,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
  * visible while scrolling. */
 .modmain .file-header,
 .diff-pane .module .file-header {
-  top: 78px;
+  top: 88px;
 }
 /* When a module is collapsed its line 2 is hidden, so the body (and its file
  * headers) are gone too — no offset adjustment needed. */

@@ -95,6 +95,10 @@ function allFileEntries(paths: string[], changed: DiffFile[]): FileTreeEntry[] {
   return [...byPath.values()];
 }
 
+function basename(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
 /** Left navigation: workspace → repos (when needed) → files. Memoized so a
  * diff/thread change doesn't re-render the whole nav. */
 export const Sidebar = memo(function Sidebar({
@@ -554,14 +558,16 @@ function RepoItem({
     repo.worktrees.find((w) => w.root === repo.root)?.branch ??
     repo.worktrees[0]?.branch ??
     null;
+  const repoLabel = basename(repo.root);
 
   return (
     <button
       type="button"
       className={`repo-item ${active ? "active" : ""}`}
       onClick={() => onSelectRepo(repo.name)}
+      title={`${repoLabel}${repoLabel === repo.name ? "" : ` (${repo.name})`}\n${repo.root}`}
     >
-      <span className="repo-name">{repo.name}</span>
+      <span className="repo-name">{repoLabel}</span>
       {primaryBranch && (
         <span className="repo-branch" title={`On branch ${primaryBranch}`}>
           <Icon name="git-branch" size={11} className="repo-branch-icon" />
