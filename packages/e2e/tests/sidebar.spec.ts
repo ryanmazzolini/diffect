@@ -9,17 +9,17 @@ test("sidebar shows the file tree, toggles and persists", async ({ page }) => {
   await expect(page.locator(".tree-file", { hasText: "calc.js" })).toBeVisible();
   await expect(page.locator(".tree-dir", { hasText: "src/util" })).toBeVisible();
 
-  // Changed files keep their status markers; modified is highlighted separately.
-  await expect(page.locator('.tree-file:has-text("calc.js") .status-modified')).toBeVisible();
+  // Changed files keep a compact status dot; modified is highlighted separately.
+  await expect(page.locator('.tree-file:has-text("calc.js") .ft-dot.s-modified')).toBeVisible();
 
   // Clicking a file marks it active (and scrolls to it).
   await page.locator(".tree-file", { hasText: "calc.js" }).click();
   await expect(page.locator(".tree-file.active")).toHaveCount(1);
 
-  // All files mode includes unchanged tracked files with a neutral icon.
+  // All files mode includes unchanged tracked files with the same quiet file glyphs.
   await page.getByRole("button", { name: "All files" }).click();
   await expect(page.locator(".tree-file", { hasText: "README.md" })).toBeVisible();
-  await expect(page.locator('.tree-file:has-text("README.md") .status-unchanged')).toBeVisible();
+  await expect(page.locator('.tree-file:has-text("README.md") .ft-glyph')).toBeVisible();
 
   // Hamburger opens the hidden workspace rail, not the file sidebar.
   await page.getByRole("button", { name: "Toggle workspaces" }).click();

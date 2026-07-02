@@ -13,7 +13,7 @@ import type {
   ReviewScope,
   ReviewSession,
 } from "@diffect/shared";
-import { Icon, type IconName } from "../icons.js";
+import { Icon } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
 import {
   buildPathTree,
@@ -56,8 +56,6 @@ interface Props {
   onOpenRepoFile: (repo: string, path: string) => void;
   onOpenSpaceFile: (path: string) => void;
 }
-
-type TreeAction = { id: number; action: "expand" | "collapse" };
 
 type ProgressFile = { repo: string; path: string };
 
@@ -147,7 +145,6 @@ export const Sidebar = memo(function Sidebar({
   onOpenSpaceFile,
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
-  const [treeAction, setTreeAction] = useState<TreeAction | null>(null);
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() => loadCollapsedRepos(spacePath));
   const [menu, setMenu] = useState<{ repo: string | null; path: string; x: number; y: number } | null>(null);
 
@@ -218,15 +215,6 @@ export const Sidebar = memo(function Sidebar({
       return storeCollapsedRepos(next);
     });
   };
-  const collapseAll = () => {
-    setCollapsedRepos(storeCollapsedRepos(new Set(repos.map((r) => r.name))));
-    setTreeAction({ id: Date.now(), action: "collapse" });
-  };
-  const expandAll = () => {
-    setCollapsedRepos(storeCollapsedRepos(new Set()));
-    setTreeAction({ id: Date.now(), action: "expand" });
-  };
-
   return (
     <nav className="sidebar">
       <div className="sidebar-panel-head">
@@ -272,11 +260,6 @@ export const Sidebar = memo(function Sidebar({
               </button>
             </span>
           </div>
-          <div className="tree-actions" aria-label="Tree actions">
-            <button type="button" className="ghost mini" onClick={collapseAll}>Collapse all</button>
-            <button type="button" className="ghost mini" onClick={expandAll}>Expand all</button>
-          </div>
-
           {spaceEntries.length > 0 && (
             <FileTree
               key={`space:${spacePath}:${fileMode}`}
@@ -287,7 +270,6 @@ export const Sidebar = memo(function Sidebar({
               activeFile={activeSpaceFile}
               onSelectFile={(path) => onSelectFile(null, path)}
               onContextMenu={(path, event) => openContextMenu(null, path, event)}
-              action={treeAction}
             />
           )}
 
@@ -337,7 +319,6 @@ export const Sidebar = memo(function Sidebar({
                       activeFile={r.name === repo ? activeFile : null}
                       onSelectFile={(path) => onSelectFile(r.name, path)}
                       onContextMenu={(path, event) => openContextMenu(r.name, path, event)}
-                      action={treeAction}
                       baseDepth={1}
                     />
                   )}
@@ -477,7 +458,6 @@ function FileTree({
   activeFile,
   onSelectFile,
   onContextMenu,
-  action,
   baseDepth = 0,
 }: {
   storageKey: string;
@@ -487,7 +467,6 @@ function FileTree({
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onContextMenu: (path: string, event: MouseEvent) => void;
-  action: TreeAction | null;
   baseDepth?: number;
 }) {
   const tree = useMemo(() => buildPathTree(entries), [entries]);
@@ -500,10 +479,6 @@ function FileTree({
   };
 
   useEffect(() => setCollapsed(loadCollapsed(storageKey)), [storageKey]);
-  useEffect(() => {
-    if (!action) return;
-    setCollapsed(storeCollapsed(action.action === "collapse" ? new Set(dirPaths(tree)) : new Set()));
-  }, [action, tree]);
 
   // Keep the scroll-spy-highlighted file visible without yanking the whole list:
   // `nearest` only scrolls the sidebar the minimum needed.
@@ -572,30 +547,34 @@ function TreeRow({
   if (node.type === "file") {
     const unchanged = node.status === "unchanged";
     const ignored = node.file?.ignored ?? false;
+    const isViewed = !unchanged && viewed.has(node.path);
+    const glyph = fileGlyph(node.name);
     let title = node.path;
     if (ignored) title = `${node.path} — ignored by git`;
     else if (unchanged) title = `${node.path} — unchanged, open to comment`;
+    else if (isViewed) title = `${node.path} — viewed`;
     return (
       <button
         type="button"
         className={`tree-file${node.path === activeFile ? " active" : ""}${
           unchanged ? " unchanged" : ""
-        }${ignored ? " ignored" : ""}`}
+        }${ignored ? " ignored" : ""}${isViewed ? " viewed" : ""}`}
         style={depthVar}
         title={title}
         onClick={() => onSelectFile(node.path)}
         onContextMenu={(event) => onContextMenu(node.path, event)}
       >
-        <Icon
-          name={statusIcon(node.status)}
-          size={12}
-          className={`tree-icon status-${node.status}${ignored ? " ignored" : ""}`}
-        />
+        {glyph ? (
+          <span className="ft-glyph" style={{ color: glyph.color }} aria-hidden="true">
+            {glyph.glyph}
+          </span>
+        ) : (
+          <Icon name="file" size={12} className={`tree-icon${ignored ? " ignored" : ""}`} />
+        )}
         <span className="tree-name">{node.name}</span>
         <FileBadges
           status={node.status}
           file={node.file}
-          viewed={viewed.has(node.path)}
           threads={threadCounts.get(node.path) ?? 0}
         />
       </button>
@@ -640,22 +619,19 @@ function TreeRow({
   );
 }
 
-/** Right-aligned per-file badges: open-thread count, viewed mark, diffstat. */
+/** Right-aligned per-file badges: open-thread count, then a change-status dot. */
 function FileBadges({
   status,
   file,
-  viewed,
   threads,
 }: {
   status: TreeFileStatus;
   file?: DiffFile;
-  viewed: boolean;
   threads: number;
 }) {
   const unchanged = status === "unchanged";
   const ignored = file?.ignored ?? false;
-  const hasStat = file && (file.additions > 0 || file.deletions > 0);
-  if (!threads && unchanged && !hasStat && !ignored) return null;
+  if (!threads && unchanged && !ignored) return null;
   return (
     <span className="ft-badges">
       {threads > 0 && (
@@ -668,41 +644,43 @@ function FileBadges({
           ignored
         </span>
       )}
-      {!unchanged &&
-        (viewed ? (
-          <span className="ft-viewed" title="Viewed" aria-hidden="true">
-            ✓
-          </span>
-        ) : (
-          <span className="ft-unviewed" title="Not viewed" aria-hidden="true" />
-        ))}
-      {hasStat && (
-        <span className="ft-stat">
-          {file!.additions > 0 && <span className="a">+{file!.additions}</span>}
-          {file!.additions > 0 && file!.deletions > 0 ? " " : ""}
-          {file!.deletions > 0 && <span className="d">&minus;{file!.deletions}</span>}
-        </span>
-      )}
+      {!unchanged && <span className={`ft-dot s-${status}`} title={status} aria-hidden="true" />}
     </span>
   );
 }
 
-function statusIcon(status: TreeFileStatus): IconName {
-  switch (status) {
-    case "added":
-    case "untracked":
-      return "diff-added" as const;
-    case "deleted":
-      return "diff-removed" as const;
-    case "renamed":
-      return "diff-renamed" as const;
-    case "modified":
-      return "diff-modified";
-    case "unchanged":
-      return "file";
-    default:
-      return "diff-modified";
-  }
+// ponytail: tiny ext→glyph map instead of a filetype icon set; extend per demand.
+const FILE_GLYPHS: Record<string, { glyph: string; color: string }> = {
+  ts: { glyph: "TS", color: "#4d9fd6" },
+  tsx: { glyph: "TS", color: "#4d9fd6" },
+  js: { glyph: "JS", color: "#cdb54a" },
+  jsx: { glyph: "JS", color: "#cdb54a" },
+  mjs: { glyph: "JS", color: "#cdb54a" },
+  cjs: { glyph: "JS", color: "#cdb54a" },
+  json: { glyph: "{}", color: "#8f939c" },
+  avsc: { glyph: "{}", color: "#8f939c" },
+  yml: { glyph: "Y", color: "#b48cd9" },
+  yaml: { glyph: "Y", color: "#b48cd9" },
+  md: { glyph: "M", color: "#7d93d9" },
+  rb: { glyph: "◆", color: "#e0716c" },
+  py: { glyph: "Py", color: "#6cb2e0" },
+  go: { glyph: "Go", color: "#4dc0d1" },
+  rs: { glyph: "Rs", color: "#db9a6a" },
+  hs: { glyph: "λ", color: "#a78bfa" },
+  graphql: { glyph: "◇", color: "#e07ab0" },
+  gql: { glyph: "◇", color: "#e07ab0" },
+  css: { glyph: "#", color: "#6cb2e0" },
+  scss: { glyph: "#", color: "#e07ab0" },
+  html: { glyph: "<>", color: "#db9a6a" },
+  sh: { glyph: "$", color: "#7fbf7f" },
+  bash: { glyph: "$", color: "#7fbf7f" },
+  zsh: { glyph: "$", color: "#7fbf7f" },
+};
+
+function fileGlyph(name: string): { glyph: string; color: string } | null {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return null;
+  return FILE_GLYPHS[name.slice(dot + 1).toLowerCase()] ?? null;
 }
 
 function RepoItem({

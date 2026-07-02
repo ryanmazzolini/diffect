@@ -43,6 +43,7 @@ import { SpaceFilePreview } from "./components/SpaceFilePreview.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
 import { GeneralCommentForm } from "./components/GeneralCommentForm.js";
 import { PrDraftPanel } from "./components/PrDraftPanel.js";
+import { StatusBar } from "./components/StatusBar.js";
 
 type StatusFilter = ThreadStatus | "all";
 type MainPaneTab = "diff" | "pr-draft";
@@ -2270,6 +2271,11 @@ export function App() {
           )}
         </main>
       </div>
+      <StatusBar
+        repoLabel={spacePreviewFile ? null : activeRepo ? basename(activeRepo.root) : repo}
+        filePath={spacePreviewFile ?? activeFile}
+        mode={spacePreviewFile ? "space" : "diff"}
+      />
     </div>
   );
 }

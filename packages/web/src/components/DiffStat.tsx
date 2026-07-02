@@ -3,46 +3,16 @@ interface Props {
   deletions: number;
 }
 
-/**
- * GitHub-style diffstat: "+N −N" plus a five-square block whose green/red fill is
- * proportional to the add/del ratio. Purely presentational.
- */
+/** Quiet diffstat: "+N −N", no block squares. */
 export function DiffStat({ additions, deletions }: Props) {
-  const blocks = diffBlocks(additions, deletions);
   return (
-    <span className="diffstat">
+    <span
+      className="diffstat"
+      role="img"
+      aria-label={`${additions} additions, ${deletions} deletions`}
+    >
       <span className="diffstat-add">+{additions}</span>
       <span className="diffstat-del">&minus;{deletions}</span>
-      <span
-        className="diffstat-blocks"
-        role="img"
-        aria-label={`${additions} additions, ${deletions} deletions`}
-      >
-        {blocks.map((kind, i) => (
-          <span key={i} className={`diffstat-block diffstat-block-${kind}`} />
-        ))}
-      </span>
     </span>
   );
-}
-
-type Block = "add" | "del" | "neutral";
-
-/** Distribute five squares across add/del proportionally, neutral for the rest. */
-function diffBlocks(additions: number, deletions: number): Block[] {
-  const total = additions + deletions;
-  let greens = total ? Math.round((additions / total) * 5) : 0;
-  let reds = total ? Math.round((deletions / total) * 5) : 0;
-  // Never round a real change down to zero squares.
-  if (additions > 0 && greens === 0) greens = 1;
-  if (deletions > 0 && reds === 0) reds = 1;
-  // Rounding can overshoot five; trim the larger share back, biasing ties toward
-  // green (additions) the way GitHub's block does.
-  while (greens + reds > 5) reds >= greens ? reds-- : greens--;
-  const neutral = 5 - greens - reds;
-  return [
-    ...Array<Block>(greens).fill("add"),
-    ...Array<Block>(reds).fill("del"),
-    ...Array<Block>(neutral).fill("neutral"),
-  ];
 }

@@ -1249,6 +1249,80 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   display: flex;
   min-height: 0;
 }
+.statusbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  color: var(--muted);
+  background: var(--chrome);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.statusbar-left,
+.statusbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.statusbar-left {
+  flex: 1;
+}
+.statusbar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.statusbar-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.statusbar-sep,
+.statusbar-path {
+  color: var(--faint);
+}
+.statusbar-file {
+  color: var(--text);
+  font-weight: 600;
+}
+.statusbar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+}
+.statusbar-pill:disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+.statusbar-pill.muted {
+  color: var(--faint);
+}
+.statusbar-switch {
+  width: 18px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--shadow) 12%, transparent);
+}
 .layout {
   flex: 1;
   display: grid;
@@ -1523,14 +1597,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   margin-top: 2px;
   padding-left: 0;
 }
-.tree-actions {
-  display: flex;
-  gap: 6px;
-  margin: 0 4px 6px;
-}
-.tree-actions .mini {
-  flex: 1;
-}
 .space-repo-tree {
   display: flex;
   flex-direction: column;
@@ -1623,8 +1689,22 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   flex: 1;
   min-width: 0;
 }
-.tree-icon {
+.tree-icon,
+.ft-glyph {
   flex-shrink: 0;
+}
+.ft-glyph {
+  width: 17px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  opacity: 0.95;
+}
+.tree-file.viewed .tree-name,
+.tree-file.viewed .ft-glyph {
+  opacity: 0.55;
 }
 .tree-chevron {
   flex: none;
@@ -1680,27 +1760,23 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   padding: 1px 5px;
   text-transform: uppercase;
 }
-.ft-viewed {
-  color: var(--success);
-  font-size: 11px;
-  line-height: 1;
+.ft-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
 }
-.ft-unviewed {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--border-strong);
+.ft-dot.s-added,
+.ft-dot.s-untracked {
+  background: var(--add-ink);
 }
-.ft-stat {
-  font-size: 10.5px;
-  font-family: var(--mono);
-  white-space: nowrap;
+.ft-dot.s-deleted {
+  background: var(--del-ink);
 }
-.ft-stat .a {
-  color: var(--add-ink);
-}
-.ft-stat .d {
-  color: var(--del-ink);
+.ft-dot.s-modified,
+.ft-dot.s-renamed {
+  background: #d6a85c;
 }
 
 .diff-pane {
@@ -2182,22 +2258,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .diffstat-del {
   color: var(--diffstat-del);
   font-weight: 600;
-}
-.diffstat-blocks {
-  display: inline-flex;
-  gap: 1px;
-}
-.diffstat-block {
-  width: 8px;
-  height: 8px;
-  border-radius: 1px;
-  background: var(--diffstat-neutral);
-}
-.diffstat-block-add {
-  background: var(--diffstat-add);
-}
-.diffstat-block-del {
-  background: var(--diffstat-del);
 }
 
 /* Flat file blocks — no card border/shadow; a hairline separates them. */
