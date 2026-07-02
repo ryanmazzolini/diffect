@@ -704,7 +704,7 @@ const FileDiff = memo(function FileDiff({
           >
             {canUseCodeMirror ? (
               <Suspense fallback={<div className="cm-diff-unavailable">Loading CodeMirror renderer…</div>}>
-                <CodeMirrorDiffBody content={content} wrap={wrap} theme={theme} />
+                <CodeMirrorDiffBody path={file.path} content={content} wrap={wrap} theme={theme} />
               </Suspense>
             ) : (
               <DiffViewWithMultiSelect<LineWidgetData>
