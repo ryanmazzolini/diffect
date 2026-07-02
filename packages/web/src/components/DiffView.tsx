@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   memo,
   useCallback,
   useEffect,
@@ -38,6 +40,21 @@ const EMPTY_THREADS: Thread[] = [];
 // offscreen files render a height-preserving placeholder instead.
 const MOUNT_MARGIN_PX = 1200;
 const EST_ROW_PX = 20; // rough diff-row height, for placeholder/intrinsic sizing
+const CodeMirrorDiffBody = lazy(() =>
+  import("./CodeMirrorDiffBody.js").then((m) => ({ default: m.CodeMirrorDiffBody })),
+);
+const DIFF_RENDERER_KEY = "diffect-diff-renderer";
+type DiffRenderer = "git" | "cm6";
+
+function initialDiffRenderer(): DiffRenderer {
+  if (typeof window === "undefined") return "git";
+  const requested = new URLSearchParams(window.location.search).get("renderer");
+  if (requested === "cm6" || requested === "git") {
+    window.localStorage.setItem(DIFF_RENDERER_KEY, requested);
+    return requested;
+  }
+  return window.localStorage.getItem(DIFF_RENDERER_KEY) === "cm6" ? "cm6" : "git";
+}
 
 interface Props {
   repo: string;
@@ -84,6 +101,7 @@ export const DiffView = memo(function DiffView({
   onEditor,
   onOpenFile,
 }: Props) {
+  const [renderer] = useState<DiffRenderer>(initialDiffRenderer);
   // One pass to bucket threads by file, kept stable across renders so each file
   // gets a referentially-stable array (memo can then skip unchanged files).
   const threadsByFile = useMemo(() => groupThreadsByFile(threads), [threads]);
@@ -141,6 +159,7 @@ export const DiffView = memo(function DiffView({
             threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
             viewed={viewed.has(file.path)}
             mode={mode}
+            renderer={renderer}
             wrap={wrap}
             theme={theme}
             onToggleViewed={onToggleViewed}
@@ -212,6 +231,10 @@ interface LineWidgetData {
 
 function emptyLineWidgetData(): LineWidgetData {
   return { threads: [], selection: null };
+}
+
+function readableFileContent(content: FileContent | "error" | null): content is { old: string; new: string } {
+  return content !== null && content !== "error" && content.old !== null && content.new !== null;
 }
 
 /** Thread/form bucket keyed by line number, split by side — git-diff-view's extendData shape. */
@@ -322,6 +345,7 @@ const FileDiff = memo(function FileDiff({
   threads,
   viewed,
   mode,
+  renderer,
   wrap,
   theme,
   onToggleViewed,
@@ -338,6 +362,7 @@ const FileDiff = memo(function FileDiff({
   threads: Thread[];
   viewed: boolean;
   mode: DiffModeEnum;
+  renderer: DiffRenderer;
   wrap: boolean;
   theme: Theme;
   onToggleViewed: (path: string) => void;
@@ -355,12 +380,12 @@ const FileDiff = memo(function FileDiff({
   // diff-only as a fallback.
   const [content, setContent] = useState<FileContent | "error" | null>(null);
 
-  // Build + initialize the lib's DiffFile instance. git-diff-view parses a full
-  // unified-diff string (with `diff --git`/`---`/`+++` headers) — we re-serialize
-  // our parsed hunks back into that form — plus the full content of each side so
-  // it can expand context and validate against the real file.
+  const canUseCodeMirror = renderer === "cm6" && readableFileContent(content);
+
+  // Build + initialize the legacy lib's DiffFile only when CM6 cannot handle this
+  // file yet. git-diff-view remains the default renderer and the fallback path.
   const diffFile = useMemo(() => {
-    if (content === null) return null; // wait for content before first render
+    if (content === null || canUseCodeMirror) return null; // wait for content before first render
     const c = content === "error" ? null : content;
     const f = LibDiffFile.createInstance({
       oldFile: {
@@ -379,7 +404,7 @@ const FileDiff = memo(function FileDiff({
     f.buildSplitDiffLines();
     f.buildUnifiedDiffLines();
     return f;
-  }, [file, content]);
+  }, [file, content, canUseCodeMirror]);
   const multiSelectRef = useRef<DiffViewWithMultiSelectRef>(null);
   const [selectionComment, setSelectionComment] = useState<SelectionComment | null>(null);
   const extendData = useMemo(
@@ -449,8 +474,8 @@ const FileDiff = memo(function FileDiff({
     };
   }, [near, content, repo, worktree, target, file.path, file.oldPath]);
 
-  // The body only renders once content has arrived and the lib instance is built.
-  const showBody = mounted && diffFile !== null;
+  // The body only renders once content has arrived and the selected renderer is ready.
+  const showBody = mounted && content !== null && (canUseCodeMirror || diffFile !== null);
   // Remember the real rendered height so the placeholder reserves the same space
   // when the body unmounts (keeps the scrollbar stable). ResizeObserver also
   // catches height changes from a wrap/mode toggle while mounted.
@@ -674,25 +699,31 @@ const FileDiff = memo(function FileDiff({
         (showBody ? (
           <div
             ref={bodyRef}
-            className="file-body"
+            className={`file-body${canUseCodeMirror ? " cm6-file-body" : ""}`}
             onMouseDownCapture={onAddWidgetMouseDownCapture}
           >
-            <DiffViewWithMultiSelect<LineWidgetData>
-              ref={multiSelectRef}
-              diffFile={diffFile!}
-              extendData={extendData}
-              diffViewMode={mode}
-              diffViewWrap={wrap}
-              diffViewTheme={theme}
-              diffViewHighlight
-              diffViewAddWidget
-              enableMultiSelect
-              onMultiSelectChange={onMultiSelectChange}
-              onMultiSelectComplete={onMultiSelectComplete}
-              onAddWidgetClick={() => setSelectionComment(null)}
-              renderExtendLine={renderExtendLine}
-              renderWidgetLine={renderWidgetLine}
-            />
+            {canUseCodeMirror ? (
+              <Suspense fallback={<div className="cm-diff-unavailable">Loading CodeMirror renderer…</div>}>
+                <CodeMirrorDiffBody content={content} wrap={wrap} theme={theme} />
+              </Suspense>
+            ) : (
+              <DiffViewWithMultiSelect<LineWidgetData>
+                ref={multiSelectRef}
+                diffFile={diffFile!}
+                extendData={extendData}
+                diffViewMode={mode}
+                diffViewWrap={wrap}
+                diffViewTheme={theme}
+                diffViewHighlight
+                diffViewAddWidget
+                enableMultiSelect
+                onMultiSelectChange={onMultiSelectChange}
+                onMultiSelectComplete={onMultiSelectComplete}
+                onAddWidgetClick={() => setSelectionComment(null)}
+                renderExtendLine={renderExtendLine}
+                renderWidgetLine={renderWidgetLine}
+              />
+            )}
           </div>
         ) : (
           <div

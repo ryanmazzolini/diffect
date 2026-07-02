@@ -2259,6 +2259,31 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--diffstat-del);
   font-weight: 600;
 }
+.cm6-file-body {
+  background: var(--panel);
+}
+.cm-diff-host {
+  width: 100%;
+  overflow: auto;
+}
+.cm-diff-host .cm-editor {
+  outline: none;
+}
+.cm-diff-host .cm-scroller {
+  min-height: 120px;
+}
+.cm-diff-host .cm-content {
+  padding: 0;
+}
+.cm-diff-host .cm-lineNumbers .cm-gutterElement {
+  min-width: 42px;
+  padding: 0 8px 0 10px;
+}
+.cm-diff-unavailable {
+  padding: var(--space-4);
+  color: var(--muted);
+  background: var(--panel);
+}
 
 /* Flat file blocks — no card border/shadow; a hairline separates them. */
 .file {
