@@ -13,6 +13,7 @@ import {
   type OpenUrlRequest,
   type PrDraftUpdateRequest,
   type ResolveThreadRequest,
+  type UiStateUpdate,
   type WorkspaceEntry,
   type WorkspaceMutationRequest,
 } from "@diffect/shared";
@@ -74,6 +75,7 @@ import {
   storeAttachment,
 } from "./store/attachments.js";
 import { readPrDraft, updatePrDraft, type PrDraftScope } from "./store/pr-draft.js";
+import { readUiState, updateUiState } from "./store/ui-state.js";
 import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
 import { listSpaceFiles, readSpaceFileLines } from "./space-files.js";
 
@@ -193,6 +195,7 @@ async function handle(
   }
 
   // Delegate to route groups; each returns true once it has sent a response.
+  if (await uiStateRoutes(req, res, method, path)) return;
   if (await workspaceRoutes(ctx, req, res, method, path)) return;
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
@@ -213,6 +216,25 @@ async function handle(
   }
 
   sendJson(res, 404, { error: "not found" });
+}
+
+/** Host-local UI state that survives desktop daemon port changes. */
+async function uiStateRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (method === "GET" && path === "/ui-state") {
+    sendJson(res, 200, await readUiState());
+    return true;
+  }
+  if (method === "POST" && path === "/ui-state") {
+    const body = (await readJsonBody<UiStateUpdate>(req)) ?? {};
+    sendJson(res, 200, await updateUiState(body));
+    return true;
+  }
+  return false;
 }
 
 /** `/workspace` summary + `/workspaces` list/add/remove. */

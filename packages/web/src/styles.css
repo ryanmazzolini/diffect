@@ -689,7 +689,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   position: absolute;
   left: 0;
   top: calc(100% + 8px);
-  width: min(360px, calc(100vw - 24px));
+  width: min(520px, calc(100vw - 24px));
   z-index: 90;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -724,16 +724,16 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .workspace-option {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
-  gap: 2px 8px;
+  gap: 5px;
   border: 0;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   text-align: left;
   border-radius: var(--r);
-  padding: 7px 8px;
+  padding: 8px 10px;
 }
 .workspace-option:hover,
 .workspace-option.active {
@@ -741,18 +741,32 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .workspace-option-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-weight: 650;
+  line-height: 1.25;
 }
 .workspace-option-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
   color: var(--muted);
   font-size: 11px;
-  white-space: nowrap;
+}
+.workspace-meta-separator {
+  color: var(--faint);
+}
+.workspace-delta {
+  font-family: var(--mono);
+}
+.workspace-delta .plus {
+  color: var(--add-ink);
+}
+.workspace-delta .minus {
+  color: var(--del-ink);
 }
 .workspace-option-path {
-  grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1112,6 +1126,19 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.ref-thread-count {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.ref-thread-count.open {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent), transparent 55%);
 }
 .ref-check {
   color: var(--success);

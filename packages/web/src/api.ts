@@ -20,6 +20,8 @@ import type {
   RepoFileList,
   ResolveThreadRequest,
   Thread,
+  UiState,
+  UiStateUpdate,
   WorkspaceEntry,
   WorkspaceInfo,
 } from "@diffect/shared";
@@ -46,6 +48,15 @@ function prDraftQuery(workspacePath: string, repo?: string, worktree?: string | 
 
 export const api = {
   workspace: () => fetch("/workspace").then((r) => json<WorkspaceInfo>(r)),
+
+  uiState: () => fetch("/ui-state").then((r) => json<UiState>(r)),
+
+  updateUiState: (req: UiStateUpdate) =>
+    fetch("/ui-state", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => json<UiState>(r)),
 
   workspaces: () => fetch("/workspaces").then((r) => json<WorkspaceEntry[]>(r)),
 

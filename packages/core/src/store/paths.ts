@@ -51,3 +51,8 @@ export function spaceThreadsLogPath(spaceRoot: string): string {
 export function workspacesRegistryPath(): string {
   return join(configDir(), "workspaces.json");
 }
+
+/** Host-local UI preferences shared across desktop daemon ports. */
+export function uiStatePath(): string {
+  return join(configDir(), "ui-state.json");
+}

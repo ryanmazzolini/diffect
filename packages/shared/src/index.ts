@@ -339,6 +339,23 @@ export interface WorkspaceEntry {
   repos: RepoSummary[];
 }
 
+export interface UiReviewSelection {
+  worktree: string | null;
+  target: string;
+  openedAt: number;
+}
+
+export interface UiState {
+  workspaceRecency: Record<string, number>;
+  /** Last explicitly opened review per workspace path, then repo name. */
+  reviewRecency: Record<string, Record<string, UiReviewSelection>>;
+}
+
+export interface UiStateUpdate {
+  workspaceRecency?: Record<string, number>;
+  reviewRecency?: Record<string, Record<string, UiReviewSelection>>;
+}
+
 /** Body for POST/DELETE /workspaces. */
 export interface WorkspaceMutationRequest {
   path: string;

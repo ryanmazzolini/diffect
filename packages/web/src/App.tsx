@@ -9,6 +9,7 @@ import type {
   ReviewSession,
   Thread,
   ThreadStatus,
+  UiReviewSelection,
   WorkspaceEntry,
   WorkspaceInfo,
   WorktreeSummary,
@@ -23,7 +24,7 @@ import {
   pickEditor,
   savePreferredEditor,
 } from "./editorPreference.js";
-import { getStored, removeStored, setStored } from "./storage.js";
+import { getSessionStored, getStored, removeStored, setSessionStored, setStored } from "./storage.js";
 import { deriveLifecycle, type Lifecycle } from "./lifecycle.js";
 import { fileElementId, orderedDiffFiles } from "./fileTree.js";
 import { CurrentSnapshotContext } from "./currentSnapshot.js";
@@ -31,7 +32,12 @@ import { usePaneLayout } from "./usePaneLayout.js";
 import { useResizable } from "./useResizable.js";
 import { ModuleSection } from "./components/ModuleSection.js";
 import { ThreadList } from "./components/ThreadList.js";
-import { Topbar, WorkspaceRail } from "./components/Topbar.js";
+import {
+  loadWorkspaceRecency,
+  Topbar,
+  WORKSPACE_RECENCY_KEY,
+  WorkspaceRail,
+} from "./components/Topbar.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { SpaceFilePreview } from "./components/SpaceFilePreview.js";
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog.js";
@@ -58,17 +64,19 @@ const EMPTY_ARCHIVED: ArchivedSession[] = [];
 const EMPTY_VIEWED: ReadonlySet<string> = new Set();
 // A repo's default review selection on first visit: its primary checkout, work target.
 const DEFAULT_TARGET = "work";
-interface DeepLinkSelection {
-  repo: string | null;
+interface StoredSelection {
   worktree: string | null;
   target: string;
 }
-interface StoredPlace {
+interface DeepLinkSelection extends StoredSelection {
   workspacePath: string | null;
   repo: string | null;
-  worktree: string | null;
-  target: string;
+}
+interface StoredPlace extends StoredSelection {
+  workspacePath: string | null;
+  repo: string | null;
   file: string | null;
+  selections: Record<string, StoredSelection>;
 }
 function cleanQueryValue(value: string | null): string | null {
   const trimmed = value?.trim();
@@ -76,31 +84,120 @@ function cleanQueryValue(value: string | null): string | null {
 }
 function readInitialDeepLink(): DeepLinkSelection {
   if (typeof window === "undefined") {
-    return { repo: null, worktree: null, target: DEFAULT_TARGET };
+    return { workspacePath: null, repo: null, worktree: null, target: DEFAULT_TARGET };
   }
   const q = new URLSearchParams(window.location.search);
   return {
+    workspacePath: cleanQueryValue(q.get("workspace")),
     repo: cleanQueryValue(q.get("repo")),
     worktree: cleanQueryValue(q.get("worktree")),
     target: cleanQueryValue(q.get("target")) ?? DEFAULT_TARGET,
   };
 }
 const PLACE_KEY = "diffect-place-v1";
+const WORKSPACE_PLACES_KEY = "diffect-workspace-places-v1";
+const EMPTY_PLACE: StoredPlace = {
+  workspacePath: null,
+  repo: null,
+  worktree: null,
+  target: DEFAULT_TARGET,
+  file: null,
+  selections: {},
+};
+function parseSelection(value: unknown): StoredSelection | null {
+  if (!value || typeof value !== "object") return null;
+  const sel = value as Partial<Record<keyof StoredSelection, unknown>>;
+  return {
+    worktree: typeof sel.worktree === "string" ? sel.worktree : null,
+    target: typeof sel.target === "string" ? sel.target : DEFAULT_TARGET,
+  };
+}
+function parseStoredPlace(value: unknown): StoredPlace {
+  if (!value || typeof value !== "object") return EMPTY_PLACE;
+  const place = value as Partial<Record<keyof StoredPlace, unknown>>;
+  const selections: Record<string, StoredSelection> = {};
+  if (place.selections && typeof place.selections === "object") {
+    for (const [name, sel] of Object.entries(place.selections)) {
+      const parsed = parseSelection(sel);
+      if (parsed) selections[name] = parsed;
+    }
+  }
+  return {
+    workspacePath: typeof place.workspacePath === "string" ? place.workspacePath : null,
+    repo: typeof place.repo === "string" ? place.repo : null,
+    worktree: typeof place.worktree === "string" ? place.worktree : null,
+    target: typeof place.target === "string" ? place.target : DEFAULT_TARGET,
+    file: typeof place.file === "string" ? place.file : null,
+    selections,
+  };
+}
 function readStoredPlace(): StoredPlace {
   try {
-    const parsed = JSON.parse(getStored(PLACE_KEY) ?? "{}");
-    if (!parsed || typeof parsed !== "object") throw new Error("bad place");
-    const place = parsed as Partial<Record<keyof StoredPlace, unknown>>;
-    return {
-      workspacePath: typeof place.workspacePath === "string" ? place.workspacePath : null,
-      repo: typeof place.repo === "string" ? place.repo : null,
-      worktree: typeof place.worktree === "string" ? place.worktree : null,
-      target: typeof place.target === "string" ? place.target : DEFAULT_TARGET,
-      file: typeof place.file === "string" ? place.file : null,
-    };
+    return parseStoredPlace(JSON.parse(getSessionStored(PLACE_KEY) ?? "{}"));
   } catch {
-    return { workspacePath: null, repo: null, worktree: null, target: DEFAULT_TARGET, file: null };
+    return EMPTY_PLACE;
   }
+}
+function readWorkspacePlaces(): Record<string, StoredPlace> {
+  try {
+    const parsed = JSON.parse(getSessionStored(WORKSPACE_PLACES_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, StoredPlace> = {};
+    for (const [path, value] of Object.entries(parsed)) out[path] = parseStoredPlace(value);
+    return out;
+  } catch {
+    return {};
+  }
+}
+function readWorkspacePlace(path: string): StoredPlace | null {
+  return readWorkspacePlaces()[path] ?? null;
+}
+function mostRecentStoredWorkspacePath(
+  recency = loadWorkspaceRecency(),
+  paths?: Set<string>,
+): string | null {
+  let best: string | null = null;
+  let bestTs = 0;
+  for (const [path, ts] of Object.entries(recency)) {
+    if (paths && !paths.has(path)) continue;
+    if (ts > bestTs) {
+      best = path;
+      bestTs = ts;
+    }
+  }
+  return best;
+}
+function mostRecentWorkspacePath(
+  entries: WorkspaceEntry[],
+  recency: Record<string, number>,
+): string | null {
+  return mostRecentStoredWorkspacePath(recency, new Set(entries.map((entry) => entry.path)));
+}
+function latestReviewRepo(
+  entry: WorkspaceEntry,
+  reviewRecency: Record<string, Record<string, UiReviewSelection>>,
+): string | null {
+  const allowed = new Set(entry.repos.map((r) => r.name));
+  let best: string | null = null;
+  let bestTs = -1;
+  for (const [repo, review] of Object.entries(reviewRecency[entry.path] ?? {})) {
+    if (allowed.has(repo) && review.openedAt > bestTs) {
+      best = repo;
+      bestTs = review.openedAt;
+    }
+  }
+  return best;
+}
+function recentSelectionsFor(
+  entry: WorkspaceEntry,
+  reviewRecency: Record<string, Record<string, UiReviewSelection>>,
+): Record<string, StoredSelection> {
+  const allowed = new Set(entry.repos.map((r) => r.name));
+  const out: Record<string, StoredSelection> = {};
+  for (const [repo, review] of Object.entries(reviewRecency[entry.path] ?? {})) {
+    if (allowed.has(repo)) out[repo] = { worktree: review.worktree, target: review.target };
+  }
+  return out;
 }
 // Per-session dismissal of the "looks complete" suggestion. This is a UI
 // preference (correctly browser-local), unlike the archive *fact* itself, which
@@ -156,15 +253,19 @@ function selectedWorktreeSummary(
 // Stable empty thread array so a repo with no scoped threads projects a constant
 // reference (the memoized module / inbox don't re-render on the empty path).
 const EMPTY_THREADS: Thread[] = [];
+type RefThreadCount = { open: number; total: number };
+const EMPTY_REF_THREAD_COUNTS: ReadonlyMap<string, RefThreadCount> = new Map();
 
 export function App() {
   const [initialDeepLink] = useState(readInitialDeepLink);
   const [initialPlace] = useState(readStoredPlace);
   const initialRepo = initialDeepLink.repo ?? initialPlace.repo;
+  const initialWorkspacePath =
+    initialDeepLink.workspacePath ?? mostRecentStoredWorkspacePath() ?? initialPlace.workspacePath;
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [repo, setRepo] = useState<string | null>(initialRepo);
   const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(
-    initialDeepLink.repo ? null : initialPlace.workspacePath,
+    initialWorkspacePath,
   );
   // Per-repo review selection (checkout + target), so each stacked module keeps
   // its own base..compare independently. The active repo's entry is projected to
@@ -175,6 +276,7 @@ export function App() {
     Map<string, { worktree: string | null; target: string }>
   >(() => {
     const m = new Map<string, { worktree: string | null; target: string }>();
+    for (const [name, sel] of Object.entries(initialPlace.selections)) m.set(name, sel);
     if (initialRepo) {
       m.set(initialRepo, {
         worktree: initialDeepLink.repo ? initialDeepLink.worktree : initialPlace.worktree,
@@ -228,6 +330,12 @@ export function App() {
   const [density, setDensityState] = useState<Density>(getStoredDensity);
   const [preferredEditor, setPreferredEditorState] = useState(loadPreferredEditor);
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
+  const [workspaceRecency, setWorkspaceRecency] = useState(loadWorkspaceRecency);
+  const [reviewRecency, setReviewRecency] = useState<
+    Record<string, Record<string, UiReviewSelection>>
+  >({});
+  const [workspacePlaces, setWorkspacePlaces] = useState(readWorkspacePlaces);
+  const [uiStateLoaded, setUiStateLoaded] = useState(false);
   const [activeFile, setActiveFile] = useState<string | null>(initialPlace.file);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const [spacePreviewFile, setSpacePreviewFile] = useState<string | null>(null);
@@ -326,17 +434,17 @@ export function App() {
       null,
     [activeWorkspacePath, entries, repo],
   );
-  const visibleRepos = activeEntry?.repos ?? workspace?.repos ?? [];
+  const visibleRepos = activeEntry?.repos ?? (activeWorkspacePath ? [] : workspace?.repos ?? []);
   const visibleWorkspace = useMemo<WorkspaceInfo | null>(
     () =>
       workspace
         ? {
             ...workspace,
-            root: activeEntry?.path ?? workspace.root,
+            root: activeEntry?.path ?? activeWorkspacePath ?? workspace.root,
             repos: visibleRepos,
           }
         : null,
-    [activeEntry?.path, visibleRepos, workspace],
+    [activeEntry?.path, activeWorkspacePath, visibleRepos, workspace],
   );
   const activeSpacePath = visibleWorkspace?.root ?? null;
   const prDraftTargets = useMemo(
@@ -358,20 +466,41 @@ export function App() {
       placeWorktree = worktree,
       placeTarget = target,
     ) => {
-      const workspacePath = activeEntry?.path ?? activeWorkspacePath ?? workspace?.root ?? null;
+      if (!activeWorkspacePath || !activeEntry || activeEntry.path !== activeWorkspacePath) return;
+      const workspacePath = activeEntry.path;
       if (!workspacePath && !placeRepo && !file) return;
-      setStored(
-        PLACE_KEY,
-        JSON.stringify({
-          workspacePath,
-          repo: placeRepo,
-          worktree: placeWorktree,
-          target: placeTarget,
-          file,
+      const storedSelections = Object.fromEntries(
+        visibleRepos.map((r) => {
+          const sel = selections.get(r.name) ?? { worktree: null, target: DEFAULT_TARGET };
+          return [r.name, sel];
         }),
       );
+      const place: StoredPlace = {
+        workspacePath,
+        repo: placeRepo,
+        worktree: placeWorktree,
+        target: placeTarget,
+        file,
+        selections: storedSelections,
+      };
+      setSessionStored(PLACE_KEY, JSON.stringify(place));
+      if (workspacePath) {
+        setWorkspacePlaces((prev) => {
+          const next = { ...prev, [workspacePath]: place };
+          setSessionStored(WORKSPACE_PLACES_KEY, JSON.stringify(next));
+          return next;
+        });
+      }
     },
-    [activeEntry?.path, activeWorkspacePath, repo, target, worktree, workspace?.root],
+    [
+      activeEntry,
+      activeWorkspacePath,
+      repo,
+      selections,
+      target,
+      visibleRepos,
+      worktree,
+    ],
   );
 
   useEffect(() => {
@@ -418,10 +547,40 @@ export function App() {
     });
   const toggleWorkspaceRail = () => setWorkspaceRailOpen((open) => !open);
   const closeWorkspaceRail = useCallback(() => setWorkspaceRailOpen(false), []);
+  const markWorkspaceOpened = useCallback((path: string) => {
+    const ts = Date.now();
+    setWorkspaceRecency((prev) => {
+      const next = { ...prev, [path]: ts };
+      setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
+      return next;
+    });
+    void api.updateUiState({ workspaceRecency: { [path]: ts } }).catch(() => {});
+  }, []);
+  const markReviewOpened = useCallback(
+    (forRepo: string, sel: StoredSelection) => {
+      if (!activeEntry || activeEntry.path !== activeWorkspacePath) return;
+      const opened: UiReviewSelection = { ...sel, openedAt: Date.now() };
+      const workspacePath = activeEntry.path;
+      setReviewRecency((prev) => ({
+        ...prev,
+        [workspacePath]: { ...(prev[workspacePath] ?? {}), [forRepo]: opened },
+      }));
+      void api
+        .updateUiState({ reviewRecency: { [workspacePath]: { [forRepo]: opened } } })
+        .catch(() => {});
+    },
+    [activeEntry, activeWorkspacePath],
+  );
 
   const loadWorkspaces = useCallback(() => {
     api.workspaces().then(setEntries).catch(() => setEntries([]));
   }, []);
+
+  useEffect(() => {
+    if (uiStateLoaded && activeEntry?.path && activeEntry.path === activeWorkspacePath) {
+      markWorkspaceOpened(activeEntry.path);
+    }
+  }, [activeEntry?.path, activeWorkspacePath, markWorkspaceOpened, uiStateLoaded]);
 
   const lockProgrammaticFile = useCallback((path: string) => {
     programmaticFileRef.current = path;
@@ -564,18 +723,106 @@ export function App() {
   }, []);
   const selectWorkspace = useCallback(
     (path: string) => {
+      const entry = entries.find((ws) => ws.path === path);
+      const allowed = new Set(entry?.repos.map((r) => r.name) ?? []);
+      const place = workspacePlaces[path] ?? readWorkspacePlace(path);
+      const recentSelections = entry ? recentSelectionsFor(entry, reviewRecency) : {};
       setActiveWorkspacePath(path);
-      const firstRepo = entries.find((ws) => ws.path === path)?.repos[0]?.name;
-      if (firstRepo) selectRepo(firstRepo);
+      const selectionsToRestore = place?.selections ?? recentSelections;
+      if (selectionsToRestore) {
+        setSelections((prev) => {
+          const next = new Map(prev);
+          for (const [name, sel] of Object.entries(selectionsToRestore)) {
+            if (allowed.has(name)) next.set(name, sel);
+          }
+          return next;
+        });
+      }
+      const storedRepo = place?.repo && allowed.has(place.repo) ? place.repo : null;
+      const recentRepo = entry ? latestReviewRepo(entry, reviewRecency) : null;
+      const nextRepo = storedRepo ?? recentRepo ?? entry?.repos[0]?.name ?? null;
+      if (nextRepo) selectRepo(nextRepo);
+      else setRepo(null);
+      setActiveFile(place?.file ?? null);
+      setSpacePreviewFile(place?.repo === null ? (place.file ?? null) : null);
+      setPreviewFile(null);
     },
-    [entries, selectRepo],
+    [entries, reviewRecency, selectRepo, workspacePlaces],
   );
 
+  const autoWorkspacePicked = useRef(false);
   useEffect(() => {
-    if (!activeEntry || (repo && activeEntry.repos.some((r) => r.name === repo))) return;
-    const firstRepo = activeEntry.repos[0]?.name;
+    if (
+      autoWorkspacePicked.current ||
+      !uiStateLoaded ||
+      initialDeepLink.repo ||
+      initialDeepLink.workspacePath ||
+      entries.length === 0
+    ) {
+      return;
+    }
+    const recent = mostRecentWorkspacePath(entries, workspaceRecency);
+    if (recent && recent !== activeWorkspacePath) {
+      autoWorkspacePicked.current = true;
+      selectWorkspace(recent);
+    } else if (activeWorkspacePath && !entries.some((entry) => entry.path === activeWorkspacePath)) {
+      autoWorkspacePicked.current = true;
+      const fallback = entries[0]?.path ?? null;
+      if (fallback) selectWorkspace(fallback);
+      else setActiveWorkspacePath(null);
+    }
+  }, [activeWorkspacePath, entries, initialDeepLink.repo, initialDeepLink.workspacePath, selectWorkspace, uiStateLoaded, workspaceRecency]);
+
+  const restoredWorkspacePlaces = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (
+      !uiStateLoaded ||
+      !activeEntry ||
+      activeEntry.path !== activeWorkspacePath ||
+      restoredWorkspacePlaces.current.has(activeEntry.path)
+    ) {
+      return;
+    }
+    const place = workspacePlaces[activeEntry.path] ?? readWorkspacePlace(activeEntry.path);
+    const selectionsToRestore = place?.selections ?? recentSelectionsFor(activeEntry, reviewRecency);
+    restoredWorkspacePlaces.current.add(activeEntry.path);
+    const allowed = new Set(activeEntry.repos.map((r) => r.name));
+    setSelections((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const [name, sel] of Object.entries(selectionsToRestore)) {
+        if (!allowed.has(name)) continue;
+        const cur = next.get(name);
+        if (cur?.worktree === sel.worktree && cur.target === sel.target) continue;
+        next.set(name, sel);
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    const nextRepo =
+      place?.repo && allowed.has(place.repo) ? place.repo : latestReviewRepo(activeEntry, reviewRecency);
+    if (!initialDeepLink.repo && nextRepo) setRepo(nextRepo);
+    if (place?.repo === null && place.file) {
+      setActiveFile(place.file);
+      setSpacePreviewFile(place.file);
+      setPreviewFile(null);
+    }
+  }, [activeEntry, activeWorkspacePath, initialDeepLink.repo, reviewRecency, uiStateLoaded, workspacePlaces]);
+
+  useEffect(() => {
+    if (
+      !activeEntry ||
+      activeEntry.path !== activeWorkspacePath ||
+      (repo && activeEntry.repos.some((r) => r.name === repo))
+    ) {
+      return;
+    }
+    const place = workspacePlaces[activeEntry.path] ?? readWorkspacePlace(activeEntry.path);
+    const storedRepo = place?.repo && activeEntry.repos.some((r) => r.name === place.repo) ? place.repo : null;
+    const recentRepo = latestReviewRepo(activeEntry, reviewRecency);
+    const firstRepo = storedRepo ?? recentRepo ?? activeEntry.repos[0]?.name;
     if (firstRepo) setRepo(firstRepo);
-  }, [activeEntry, repo]);
+  }, [activeEntry, activeWorkspacePath, repo, reviewRecency, workspacePlaces]);
   const initialDeepLinkScrolled = useRef(false);
   useEffect(() => {
     const name = initialDeepLink.repo;
@@ -787,6 +1034,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    api
+      .uiState()
+      .then((state) => {
+        setWorkspaceRecency(state.workspaceRecency);
+        setReviewRecency(state.reviewRecency);
+        setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(state.workspaceRecency));
+      })
+      .catch(() => {})
+      .finally(() => setUiStateLoaded(true));
+  }, []);
+
+  useEffect(() => {
     refreshWorkspace();
     loadWorkspaces();
     refreshThreads();
@@ -808,14 +1067,11 @@ export function App() {
       setUnscopedFor(forRepo, false);
       setPendingFor(forRepo, null);
       setThreadSessionFor(forRepo, null);
-      setSelections((prev) =>
-        new Map(prev).set(forRepo, {
-          worktree: prev.get(forRepo)?.worktree ?? null,
-          target: next,
-        }),
-      );
+      const sel = { worktree: selectionsRef.current.get(forRepo)?.worktree ?? null, target: next };
+      setSelections((prev) => new Map(prev).set(forRepo, sel));
+      markReviewOpened(forRepo, sel);
     },
-    [setUnscopedFor, setPendingFor, setThreadSessionFor],
+    [markReviewOpened, setUnscopedFor, setPendingFor, setThreadSessionFor],
   );
   const selectLegacy = useCallback(() => {
     if (!repo) return;
@@ -830,10 +1086,13 @@ export function App() {
       setUnscopedFor(repo, false);
       setPendingFor(repo, null);
       setThreadSessionFor(repo, session.id);
+      const sel = { worktree: session.worktree, target: session.scope.target };
+      setSelections((prev) => new Map(prev).set(repo, sel));
+      markReviewOpened(repo, sel);
       setFilter("all");
       if (paneCollapsed) toggleCollapsed();
     },
-    [paneCollapsed, repo, setPendingFor, setThreadSessionFor, setUnscopedFor, toggleCollapsed],
+    [markReviewOpened, paneCollapsed, repo, setPendingFor, setThreadSessionFor, setUnscopedFor, toggleCollapsed],
   );
 
   // Archive (`archived: true`) or revive (`archived: false`) a session. Optimistic:
@@ -1282,6 +1541,21 @@ export function App() {
     return counts;
   }, [threads, repo, activeSpacePath]);
 
+  const refThreadCountsByRepo = useMemo(() => {
+    const map = new Map<string, Map<string, RefThreadCount>>();
+    for (const t of threads) {
+      if (t.spacePath && t.spacePath !== activeSpacePath) continue;
+      if (!t.repo || !t.scope) continue;
+      const byRef = map.get(t.repo) ?? new Map<string, RefThreadCount>();
+      const count = byRef.get(t.scope.headRef) ?? { open: 0, total: 0 };
+      count.total += 1;
+      if (t.status === "open") count.open += 1;
+      byRef.set(t.scope.headRef, count);
+      map.set(t.repo, byRef);
+    }
+    return map;
+  }, [threads, activeSpacePath]);
+
   // The settled session the user is looking at — the one "Mark complete" would
   // archive. Only the diff's own settled session qualifies: not mid-selection (the
   // threads on screen still belong to the previous session) and not the unscoped
@@ -1529,9 +1803,14 @@ export function App() {
     return counts;
   }, [spaceThreads]);
 
-  const changedFilesByRepo = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const [name, d] of diffs) map.set(name, d.files.length);
+  const diffStatsByRepo = useMemo(() => {
+    const map = new Map<string, { additions: number; deletions: number }>();
+    for (const [name, d] of diffs) {
+      map.set(name, {
+        additions: d.files.reduce((n, f) => n + f.additions, 0),
+        deletions: d.files.reduce((n, f) => n + f.deletions, 0),
+      });
+    }
     return map;
   }, [diffs]);
   const diffFilesByRepo = useMemo(() => {
@@ -1642,7 +1921,8 @@ export function App() {
         workspace={visibleWorkspace}
         entries={entries}
         activeWorkspacePath={activeEntry?.path ?? visibleWorkspace.root}
-        changedFilesByRepo={changedFilesByRepo}
+        diffStatsByRepo={diffStatsByRepo}
+        workspaceRecency={workspaceRecency}
         onSelectWorkspace={selectWorkspace}
         onAddWorkspace={openAdd}
         theme={theme}
@@ -1671,7 +1951,8 @@ export function App() {
             workspace={visibleWorkspace}
             entries={entries}
             activeWorkspacePath={activeEntry?.path ?? visibleWorkspace.root}
-            changedFilesByRepo={changedFilesByRepo}
+            diffStatsByRepo={diffStatsByRepo}
+            workspaceRecency={workspaceRecency}
             onSelectWorkspace={selectWorkspace}
             onAddWorkspace={openAdd}
             onClose={closeWorkspaceRail}
@@ -1807,6 +2088,7 @@ export function App() {
                           theme={theme}
                           target={selections.get(r.name)?.target ?? DEFAULT_TARGET}
                           refs={refsByRepo.get(r.name) ?? null}
+                          refThreadCounts={refThreadCountsByRepo.get(r.name) ?? EMPTY_REF_THREAD_COUNTS}
                           defaultBranch={r.defaultBranch}
                           onTarget={changeTargetFor}
                           lifecycle={lifecycleByRepo.get(r.name)?.state ?? "idle"}
@@ -1842,6 +2124,7 @@ export function App() {
                     theme={theme}
                     target={target}
                     refs={refs}
+                    refThreadCounts={refThreadCountsByRepo.get(repo) ?? EMPTY_REF_THREAD_COUNTS}
                     defaultBranch={activeRepo?.defaultBranch ?? null}
                     onTarget={changeTargetFor}
                     lifecycle={lifecycleByRepo.get(repo)?.state ?? "idle"}

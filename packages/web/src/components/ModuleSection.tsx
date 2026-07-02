@@ -24,7 +24,7 @@ import { CurrentSnapshotContext } from "../currentSnapshot.js";
 import { Icon } from "../icons.js";
 import { DiffView } from "./DiffView.js";
 import { DiffStat } from "./DiffStat.js";
-import { TargetPicker } from "./TargetPicker.js";
+import { TargetPicker, type RefThreadCount } from "./TargetPicker.js";
 import { PullRequestBadge } from "./Topbar.js";
 
 // Stable empty reference so the memoized file derivation doesn't churn on the
@@ -64,6 +64,7 @@ interface Props {
    * only itself. */
   target?: string;
   refs?: RefList | null;
+  refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch?: string | null;
   onTarget?: (repo: string, target: string) => void;
   /** This module's durable review state (the status crumb) plus the session its
@@ -117,6 +118,7 @@ export const ModuleSection = memo(function ModuleSection({
   theme,
   target = "work",
   refs = null,
+  refThreadCounts,
   defaultBranch = null,
   onTarget,
   lifecycle = "idle",
@@ -203,6 +205,7 @@ export const ModuleSection = memo(function ModuleSection({
           pullRequest={pullRequest}
           target={target}
           refs={refs}
+          refThreadCounts={refThreadCounts}
           defaultBranch={defaultBranch}
           onTarget={handleTarget}
           lifecycle={lifecycle}
@@ -231,6 +234,7 @@ export const ModuleSection = memo(function ModuleSection({
       pullRequest={pullRequest}
       target={target}
       refs={refs}
+      refThreadCounts={refThreadCounts}
       defaultBranch={defaultBranch}
       onTarget={handleTarget}
       lifecycle={lifecycle}
@@ -259,6 +263,7 @@ function StackedModule({
   pullRequest,
   target,
   refs,
+  refThreadCounts,
   defaultBranch,
   onTarget,
   lifecycle,
@@ -280,6 +285,7 @@ function StackedModule({
   pullRequest: PullRequestLink | null;
   target: string;
   refs: RefList | null;
+  refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch: string | null;
   onTarget: (target: string) => void;
   lifecycle: Lifecycle;
@@ -381,6 +387,7 @@ function StackedModule({
             target={target}
             onTarget={onTarget}
             refs={refs}
+            refThreadCounts={refThreadCounts}
             // Repo headers live inside scroll panes, which clip inline popovers.
             portalPopover
           />

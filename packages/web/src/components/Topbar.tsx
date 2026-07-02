@@ -9,11 +9,11 @@ import type { Density } from "../density.js";
 import { Icon } from "../icons.js";
 import diffectIconUrl from "../../../desktop/src-tauri/icons/icon.png";
 import { api } from "../api.js";
-import { getStored, setStored } from "../storage.js";
+import { getStored } from "../storage.js";
 import { DiffStat } from "./DiffStat.js";
 import { OpenInMenu } from "./OpenInMenu.js";
 
-const WORKSPACE_RECENCY_KEY = "diffect-workspace-recency";
+export const WORKSPACE_RECENCY_KEY = "diffect-workspace-recency";
 
 /** Trailing path segment of a workspace root. */
 function basename(p: string): string {
@@ -21,7 +21,7 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
-function loadWorkspaceRecency(): Record<string, number> {
+export function loadWorkspaceRecency(): Record<string, number> {
   const raw = getStored(WORKSPACE_RECENCY_KEY);
   if (!raw) return {};
   try {
@@ -37,25 +37,79 @@ function loadWorkspaceRecency(): Record<string, number> {
   }
 }
 
-function workspaceMeta(
-  workspace: WorkspaceEntry,
-  changedFilesByRepo: Map<string, number>,
-): string {
-  const loaded = workspace.repos.some((r) => changedFilesByRepo.has(r.name));
-  const changed = workspace.repos.reduce(
-    (n, r) => n + (changedFilesByRepo.get(r.name) ?? 0),
-    0,
+type WorkspaceDiffStats = { additions: number; deletions: number };
+
+function WorkspaceOptionMeta({
+  workspace,
+  diffStatsByRepo,
+  lastOpenedAt,
+}: {
+  workspace: WorkspaceEntry;
+  diffStatsByRepo: Map<string, WorkspaceDiffStats>;
+  lastOpenedAt?: number;
+}) {
+  const loaded = workspace.repos.some((r) => diffStatsByRepo.has(r.name));
+  const stats = workspace.repos.reduce(
+    (total, r) => {
+      const stats = diffStatsByRepo.get(r.name);
+      if (!stats) return total;
+      return {
+        additions: total.additions + stats.additions,
+        deletions: total.deletions + stats.deletions,
+      };
+    },
+    { additions: 0, deletions: 0 },
   );
   const repoCount = `${workspace.repos.length} repo${workspace.repos.length === 1 ? "" : "s"}`;
-  if (!loaded) return repoCount;
-  return `${repoCount} · ${changed} changed file${changed === 1 ? "" : "s"}`;
+  const last = formatLastOpened(lastOpenedAt);
+  return (
+    <span className="workspace-option-meta">
+      <span>{repoCount}</span>
+      {loaded && (
+        <>
+          <span className="workspace-meta-separator">·</span>
+          <span className="workspace-delta">
+            <span className="plus">+{stats.additions}</span>{" "}
+            <span className="minus">-{stats.deletions}</span>
+          </span>
+        </>
+      )}
+      {last && (
+        <>
+          <span className="workspace-meta-separator">·</span>
+          <span>{last}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function formatLastOpened(ts?: number): string | null {
+  if (!ts) return null;
+  const diff = Date.now() - ts;
+  if (!Number.isFinite(diff) || diff < 0) return "just now";
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < minute) return "just now";
+  if (diff < hour) {
+    const n = Math.floor(diff / minute);
+    return `${n} minute${n === 1 ? "" : "s"} ago`;
+  }
+  if (diff < day) {
+    const n = Math.floor(diff / hour);
+    return `${n} hour${n === 1 ? "" : "s"} ago`;
+  }
+  const n = Math.floor(diff / day);
+  return `${n} day${n === 1 ? "" : "s"} ago`;
 }
 
 interface WorkspaceNavProps {
   workspace: WorkspaceInfo;
   entries: WorkspaceEntry[];
   activeWorkspacePath: string;
-  changedFilesByRepo: Map<string, number>;
+  diffStatsByRepo: Map<string, WorkspaceDiffStats>;
+  workspaceRecency: Record<string, number>;
   onSelectWorkspace: (path: string) => void;
   onAddWorkspace: () => void;
 }
@@ -64,7 +118,8 @@ interface Props {
   workspace: WorkspaceInfo;
   entries: WorkspaceEntry[];
   activeWorkspacePath: string;
-  changedFilesByRepo: Map<string, number>;
+  diffStatsByRepo: Map<string, WorkspaceDiffStats>;
+  workspaceRecency: Record<string, number>;
   onSelectWorkspace: (path: string) => void;
   onAddWorkspace: () => void;
   theme: Theme;
@@ -98,7 +153,8 @@ export function Topbar({
   workspace,
   entries,
   activeWorkspacePath,
-  changedFilesByRepo,
+  diffStatsByRepo,
+  workspaceRecency,
   onSelectWorkspace,
   onAddWorkspace,
   theme,
@@ -143,7 +199,8 @@ export function Topbar({
           workspace={workspace}
           entries={entries}
           activeWorkspacePath={activeWorkspacePath}
-          changedFilesByRepo={changedFilesByRepo}
+          diffStatsByRepo={diffStatsByRepo}
+          workspaceRecency={workspaceRecency}
           onSelectWorkspace={onSelectWorkspace}
           onAddWorkspace={onAddWorkspace}
         />
@@ -346,14 +403,15 @@ function WorkspacePicker({
   workspace,
   entries,
   activeWorkspacePath,
-  changedFilesByRepo,
+  diffStatsByRepo,
+  workspaceRecency,
   onSelectWorkspace,
   onAddWorkspace,
 }: WorkspaceNavProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
-  const [recency, setRecency] = useState(loadWorkspaceRecency);
+  const recency = workspaceRecency;
   const fallbackEntry = useMemo<WorkspaceEntry>(
     () => ({ path: workspace.root, repos: workspace.repos }),
     [workspace.repos, workspace.root],
@@ -361,14 +419,6 @@ function WorkspacePicker({
   const allEntries = entries.length > 0 ? entries : [fallbackEntry];
   const active =
     allEntries.find((entry) => entry.path === activeWorkspacePath) ?? fallbackEntry;
-
-  useEffect(() => {
-    setRecency((prev) => {
-      const next = { ...prev, [activeWorkspacePath]: Date.now() };
-      setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, [activeWorkspacePath]);
 
   const sorted = useMemo(() => {
     const originalOrder = new Map(allEntries.map((entry, index) => [entry.path, index]));
@@ -400,9 +450,6 @@ function WorkspacePicker({
   }, []);
 
   const select = (path: string) => {
-    const next = { ...recency, [path]: Date.now() };
-    setRecency(next);
-    setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
     onSelectWorkspace(path);
     setQuery("");
     close();
@@ -446,9 +493,11 @@ function WorkspacePicker({
                 onClick={() => select(entry.path)}
               >
                 <span className="workspace-option-name">{basename(entry.path)}</span>
-                <span className="workspace-option-meta">
-                  {workspaceMeta(entry, changedFilesByRepo)}
-                </span>
+                <WorkspaceOptionMeta
+                  workspace={entry}
+                  diffStatsByRepo={diffStatsByRepo}
+                  lastOpenedAt={recency[entry.path]}
+                />
                 <span className="workspace-option-path">{entry.path}</span>
               </button>
             ))
@@ -474,14 +523,15 @@ export function WorkspaceRail({
   workspace,
   entries,
   activeWorkspacePath,
-  changedFilesByRepo,
+  diffStatsByRepo,
+  workspaceRecency,
   onSelectWorkspace,
   onAddWorkspace,
   onClose,
 }: WorkspaceNavProps & { onClose: () => void }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
-  const [recency, setRecency] = useState(loadWorkspaceRecency);
+  const recency = workspaceRecency;
   const fallbackEntry = useMemo<WorkspaceEntry>(
     () => ({ path: workspace.root, repos: workspace.repos }),
     [workspace.repos, workspace.root],
@@ -493,14 +543,6 @@ export function WorkspaceRail({
   useEffect(() => {
     searchRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    setRecency((prev) => {
-      const next = { ...prev, [activeWorkspacePath]: Date.now() };
-      setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, [activeWorkspacePath]);
 
   const sorted = useMemo(() => {
     const originalOrder = new Map(allEntries.map((entry, index) => [entry.path, index]));
@@ -518,9 +560,6 @@ export function WorkspaceRail({
     : sorted;
 
   const select = (path: string) => {
-    const next = { ...recency, [path]: Date.now() };
-    setRecency(next);
-    setStored(WORKSPACE_RECENCY_KEY, JSON.stringify(next));
     onSelectWorkspace(path);
     onClose();
   };
@@ -561,9 +600,11 @@ export function WorkspaceRail({
               onClick={() => select(entry.path)}
             >
               <span className="workspace-option-name">{basename(entry.path)}</span>
-              <span className="workspace-option-meta">
-                {workspaceMeta(entry, changedFilesByRepo)}
-              </span>
+              <WorkspaceOptionMeta
+                workspace={entry}
+                diffStatsByRepo={diffStatsByRepo}
+                lastOpenedAt={recency[entry.path]}
+              />
               <span className="workspace-option-path">{entry.path}</span>
             </button>
           ))

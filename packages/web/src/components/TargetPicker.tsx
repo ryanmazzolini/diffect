@@ -9,6 +9,11 @@ const LOCAL_TARGETS = [
   { target: "unstaged", label: "Unstaged changes", short: "Unstaged" },
 ];
 
+export interface RefThreadCount {
+  open: number;
+  total: number;
+}
+
 interface Props {
   repo: string;
   worktree: string | null;
@@ -16,6 +21,7 @@ interface Props {
   target: string;
   onTarget: (target: string) => void;
   refs: RefList | null;
+  refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   /**
    * Render each ref popover in a document.body portal, fixed-positioned from its
    * trigger. Needed in the stacked (N≥2) module header, whose `.modmain` scroll
@@ -37,6 +43,7 @@ export function TargetPicker({
   target,
   onTarget,
   refs,
+  refThreadCounts,
   portalPopover = false,
 }: Props) {
   const fallbackBase = useMemo(
@@ -90,6 +97,7 @@ export function TargetPicker({
           worktree={worktree}
           selectedValue={compare}
           fallbackResults={fallbackResults}
+          refThreadCounts={refThreadCounts}
           portalPopover={portalPopover}
           onSelect={(option) => applyCompare(base || fallbackBase, option.value)}
         />
@@ -121,6 +129,7 @@ interface RefSearchPickerProps {
   worktree: string | null;
   selectedValue: string;
   fallbackResults: RefSearchResults;
+  refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   /** See TargetPicker.Props.portalPopover. */
   portalPopover: boolean;
   onSelect: (option: RefSearchOption) => void;
@@ -132,6 +141,7 @@ function RefSearchPicker({
   worktree,
   selectedValue,
   fallbackResults,
+  refThreadCounts,
   portalPopover,
   onSelect,
 }: RefSearchPickerProps) {
@@ -320,6 +330,8 @@ function RefSearchPicker({
             <ul>
               {group.options.map((option) => {
                 const idx = flat.indexOf(option);
+                const threadCount = refThreadCounts?.get(option.value);
+                const countLabel = refThreadCountLabel(threadCount);
                 return (
                   <li key={`${option.kind}-${option.value}`}>
                     <button
@@ -337,6 +349,14 @@ function RefSearchPicker({
                         </span>
                         {option.kind === "commit" && option.subject && (
                           <span className="ref-subject">{option.subject}</span>
+                        )}
+                        {countLabel && (
+                          <span
+                            className={`ref-thread-count ${threadCount?.open ? "open" : "closed"}`}
+                            title={refThreadCountTitle(threadCount!)}
+                          >
+                            {countLabel}
+                          </span>
                         )}
                       </span>
                       {selectedValue === option.value && <span className="ref-check">✓</span>}
@@ -432,6 +452,17 @@ function parseCompareTarget(target: string): { base: string; compare: string } |
 
 function isLocalTarget(target: string): boolean {
   return LOCAL_TARGETS.some((mode) => mode.target === target);
+}
+
+function refThreadCountLabel(count?: RefThreadCount): string | null {
+  if (!count || count.total === 0) return null;
+  if (count.open > 0) return `${count.open} open`;
+  return `${count.total} closed`;
+}
+
+function refThreadCountTitle(count: RefThreadCount): string {
+  const closed = count.total - count.open;
+  return `${count.open} open, ${closed} closed review thread${count.total === 1 ? "" : "s"}`;
 }
 
 function displayRefValue(value: string): string {

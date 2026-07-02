@@ -23,3 +23,19 @@ export function removeStored(key: string): void {
     /* persistence is best-effort */
   }
 }
+
+export function getSessionStored(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function setSessionStored(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* persistence is best-effort */
+  }
+}
