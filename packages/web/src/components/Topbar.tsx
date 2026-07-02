@@ -63,24 +63,21 @@ function WorkspaceOptionMeta({
   const repoCount = `${workspace.repos.length} repo${workspace.repos.length === 1 ? "" : "s"}`;
   const last = formatLastOpened(lastOpenedAt);
   return (
-    <span className="workspace-option-meta">
-      <span>{repoCount}</span>
-      {loaded && (
-        <>
-          <span className="workspace-meta-separator">·</span>
-          <span className="workspace-delta">
-            <span className="plus">+{stats.additions}</span>{" "}
-            <span className="minus">-{stats.deletions}</span>
-          </span>
-        </>
-      )}
-      {last && (
-        <>
-          <span className="workspace-meta-separator">·</span>
-          <span>{last}</span>
-        </>
-      )}
-    </span>
+    <>
+      <span className="workspace-option-meta">
+        <span>{repoCount}</span>
+        {loaded && (
+          <>
+            <span className="workspace-meta-separator">·</span>
+            <span className="workspace-delta">
+              <span className="plus">+{stats.additions}</span>{" "}
+              <span className="minus">-{stats.deletions}</span>
+            </span>
+          </>
+        )}
+      </span>
+      {last && <span className="workspace-last-opened">{last}</span>}
+    </>
   );
 }
 
