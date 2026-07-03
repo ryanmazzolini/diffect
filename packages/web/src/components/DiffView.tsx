@@ -66,6 +66,11 @@ function initialDeletedSyntaxHighlightMaxLength(): number {
   return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_DELETED_SYNTAX_HIGHLIGHT_MAX_LENGTH;
 }
 
+function isLocalOrigin(): boolean {
+  if (typeof window === "undefined") return false;
+  return ["127.0.0.1", "::1", "localhost"].includes(window.location.hostname);
+}
+
 interface Props {
   repo: string;
   worktree: string | null;
@@ -113,6 +118,7 @@ export const DiffView = memo(function DiffView({
 }: Props) {
   const [renderer] = useState<DiffRenderer>(initialDiffRenderer);
   const [deletedSyntaxHighlightMaxLength] = useState(initialDeletedSyntaxHighlightMaxLength);
+  const [localDaemon] = useState(isLocalOrigin);
   // One pass to bucket threads by file, kept stable across renders so each file
   // gets a referentially-stable array (memo can then skip unchanged files).
   const threadsByFile = useMemo(() => groupThreadsByFile(threads), [threads]);
@@ -174,6 +180,7 @@ export const DiffView = memo(function DiffView({
             wrap={wrap}
             theme={theme}
             deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
+            localDaemon={localDaemon}
             onToggleViewed={onToggleViewed}
             onChanged={onChanged}
             editors={editors}
@@ -377,6 +384,7 @@ const FileDiff = memo(function FileDiff({
   wrap,
   theme,
   deletedSyntaxHighlightMaxLength,
+  localDaemon,
   onToggleViewed,
   onChanged,
   editors,
@@ -395,6 +403,7 @@ const FileDiff = memo(function FileDiff({
   wrap: boolean;
   theme: Theme;
   deletedSyntaxHighlightMaxLength: number;
+  localDaemon: boolean;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
   editors: string[];
@@ -411,8 +420,31 @@ const FileDiff = memo(function FileDiff({
   const [content, setContent] = useState<FileContent | "error" | null>(null);
 
   const canUseCodeMirror = renderer === "cm6" && readableFileContent(content);
+  const editableTarget = localDaemon && (target === "work" || target === "unstaged");
+  const canEditCodeMirror = canUseCodeMirror && editableTarget;
+  const editModeTitle = canEditCodeMirror
+    ? "Editable: saves write to the working tree"
+    : editableTarget
+      ? "Read-only until CodeMirror can load this file"
+      : "Read-only for this review target";
   const skipsDeletedSyntaxHighlight =
     canUseCodeMirror && hasDeletedBlockOver(file, deletedSyntaxHighlightMaxLength);
+
+  const saveCodeMirrorContent = useCallback(
+    async (nextContent: string) => {
+      await api.writeFileContent(repo, {
+        path: file.path,
+        target,
+        worktree,
+        content: nextContent,
+      });
+      setContent((current) =>
+        current && current !== "error" ? { ...current, new: nextContent } : current,
+      );
+      onChanged();
+    },
+    [file.path, onChanged, repo, target, worktree],
+  );
 
   // Build + initialize the legacy lib's DiffFile only when CM6 cannot handle this
   // file yet. git-diff-view remains the default renderer and the fallback path.
@@ -701,6 +733,12 @@ const FileDiff = memo(function FileDiff({
             {dir && <span className="fp-dir">{dir}</span>}
             {base}
           </span>
+          <span
+            className={`edit-mode-badge ${canEditCodeMirror ? "editable" : "readonly"}`}
+            title={editModeTitle}
+          >
+            {canEditCodeMirror ? "Editable" : "Read-only"}
+          </span>
           <DiffStat additions={file.additions} deletions={file.deletions} />
           {threadCount > 0 && (
             <span className="fh-threads">
@@ -743,6 +781,8 @@ const FileDiff = memo(function FileDiff({
                   theme={theme}
                   deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
                   skipsDeletedSyntaxHighlight={skipsDeletedSyntaxHighlight}
+                  editable={canEditCodeMirror}
+                  onSave={saveCodeMirrorContent}
                 />
               </Suspense>
             ) : (

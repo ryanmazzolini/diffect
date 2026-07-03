@@ -16,8 +16,9 @@ import {
   type UiStateUpdate,
   type WorkspaceEntry,
   type WorkspaceMutationRequest,
+  type WriteFileContentRequest,
 } from "@diffect/shared";
-import { readTargetFileContent } from "./git/content.js";
+import { readTargetFileContent, writeWorktreeFileContent } from "./git/content.js";
 import { resolveCurrentBranch, resolveWorkBase } from "./git/diff.js";
 import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
@@ -203,7 +204,7 @@ async function handle(
   if (await prDraftRoutes(ctx, req, res, url, method, path)) return;
   if (await spaceFileRoutes(ctx, res, url, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
-  if (await fileContentRoute(ctx, res, url, method, path)) return;
+  if (await fileContentRoute(ctx, req, res, url, method, path)) return;
   if (await fileRoute(ctx, res, url, method, path)) return;
   if (await editorRoute(ctx, req, res, method, path)) return;
   if (await externalUrlRoute(ctx, req, res, method, path)) return;
@@ -714,13 +715,14 @@ async function repoRoutes(
  */
 async function fileContentRoute(
   ctx: RouteContext,
+  req: IncomingMessage,
   res: ServerResponse,
   url: URL,
   method: string,
   path: string,
 ): Promise<boolean> {
   const m = /^\/repos\/(.+)\/file\/content$/.exec(path);
-  if (!(method === "GET" && m)) return false;
+  if (!m || (method !== "GET" && method !== "PUT")) return false;
   const q = url.searchParams;
   const treeRoot = resolveRepoTreeOr404(
     ctx,
@@ -735,8 +737,31 @@ async function fileContentRoute(
     return true;
   }
   const target = normalizeTarget(q.get("target"));
-  const content = await readTargetFileContent(treeRoot, target, file, q.get("oldPath") || file);
-  sendJson(res, 200, content);
+
+  if (method === "GET") {
+    const content = await readTargetFileContent(treeRoot, target, file, q.get("oldPath") || file);
+    sendJson(res, 200, content);
+    return true;
+  }
+
+  if (!isLoopback(ctx.host)) {
+    sendJson(res, 403, { error: "editing files is only allowed on a loopback-bound daemon" });
+    return true;
+  }
+  if (target.kind !== "work" && target.kind !== "unstaged") {
+    sendJson(res, 400, { error: "only work and unstaged targets are editable" });
+    return true;
+  }
+  const body = await readJsonBody<WriteFileContentRequest>(req);
+  if (!body || typeof body.content !== "string") {
+    sendJson(res, 400, { error: "content is required" });
+    return true;
+  }
+  if (!(await writeWorktreeFileContent(treeRoot, file, body.content))) {
+    sendJson(res, 404, { error: "file not found or not editable" });
+    return true;
+  }
+  sendJson(res, 200, { ok: true });
   return true;
 }
 

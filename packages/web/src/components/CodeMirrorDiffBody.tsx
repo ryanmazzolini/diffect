@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { FileContent } from "@diffect/shared";
 import type { Theme } from "../theme.js";
@@ -14,6 +14,8 @@ interface Props {
   theme: Theme;
   deletedSyntaxHighlightMaxLength: number;
   skipsDeletedSyntaxHighlight: boolean;
+  editable: boolean;
+  onSave: (content: string) => Promise<void>;
 }
 
 export function CodeMirrorDiffBody({
@@ -23,8 +25,33 @@ export function CodeMirrorDiffBody({
   theme,
   deletedSyntaxHighlightMaxLength,
   skipsDeletedSyntaxHighlight,
+  editable,
+  onSave,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const savingRef = useRef(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const saveCurrent = useCallback(async () => {
+    const view = viewRef.current;
+    if (!view || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      await onSave(view.state.doc.toString());
+      setDirty(false);
+      setSaveMessage("Saved");
+    } catch (e) {
+      setSaveMessage(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [onSave]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -32,18 +59,19 @@ export function CodeMirrorDiffBody({
     const newText = content.new;
     if (!host || oldText === null || newText === null) return;
 
+    setDirty(false);
+    setSaveMessage("");
     let cancelled = false;
-    let view: EditorView | null = null;
 
     void codeMirrorLanguage(path).catch(() => []).then((language) => {
       if (cancelled) return;
-      view = new EditorView({
+      const view = new EditorView({
         parent: host,
         state: EditorState.create({
           doc: newText,
           extensions: [
-            EditorState.readOnly.of(true),
-            EditorView.editable.of(false),
+            EditorState.readOnly.of(!editable),
+            EditorView.editable.of(editable),
             EditorView.contentAttributes.of({
               spellcheck: "false",
               autocorrect: "off",
@@ -51,6 +79,20 @@ export function CodeMirrorDiffBody({
             }),
             lineNumbers(),
             language,
+            EditorView.updateListener.of((update) => {
+              if (update.docChanged) setDirty(update.state.doc.toString() !== newText);
+            }),
+            editable
+              ? keymap.of([
+                  {
+                    key: "Mod-s",
+                    run: () => {
+                      void saveCurrent();
+                      return true;
+                    },
+                  },
+                ])
+              : [],
             syntaxHighlighting(diffectHighlightStyle),
             unifiedMergeView({
               original: oldText,
@@ -129,13 +171,15 @@ export function CodeMirrorDiffBody({
           ],
         }),
       });
+      viewRef.current = view;
     });
 
     return () => {
       cancelled = true;
-      view?.destroy();
+      viewRef.current?.destroy();
+      viewRef.current = null;
     };
-  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, path, theme, wrap]);
+  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, editable, path, saveCurrent, theme, wrap]);
 
   if (content.old === null || content.new === null) {
     return <div className="cm-diff-unavailable">CodeMirror preview needs readable old/new file content.</div>;
@@ -145,6 +189,15 @@ export function CodeMirrorDiffBody({
       {skipsDeletedSyntaxHighlight && (
         <div className="cm-diff-notice">
           Some deleted lines are shown as plain text to keep this large diff responsive.
+        </div>
+      )}
+      {editable && (
+        <div className="cm-diff-editbar">
+          <span>Editable working-tree file</span>
+          <button type="button" className="ghost mini" onClick={() => void saveCurrent()} disabled={!dirty || saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+          {saveMessage && <span className="cm-save-status">{saveMessage}</span>}
         </div>
       )}
       <div className="cm-diff-host" ref={hostRef} />

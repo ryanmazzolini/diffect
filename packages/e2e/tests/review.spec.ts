@@ -105,7 +105,9 @@ test("switches review target without errors", async ({ page }) => {
   // The fixture has no staged changes, so Staged shows the empty state.
   await modes.getByRole("button", { name: "Staged changes", exact: true }).click();
   await expect(page.locator(".empty")).toContainText("No changes");
-  // Back to all local changes restores the diff.
-  await modes.getByRole("button", { name: "All local changes", exact: true }).click();
+  // Back to the current branch target restores the diff.
+  await modes
+    .getByRole("button", { name: "Current branch main plus working tree changes", exact: true })
+    .click();
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
 });

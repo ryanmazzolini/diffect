@@ -264,6 +264,14 @@ export interface FileContent {
   new: string | null;
 }
 
+export interface WriteFileContentRequest {
+  content: string;
+}
+
+export interface WriteFileContentResponse {
+  ok: true;
+}
+
 export interface AttachmentResponse {
   /** Daemon-served URL to embed in a comment (e.g. `/attachments/<sha>.png`). */
   url: string;

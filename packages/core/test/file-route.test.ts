@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -57,6 +57,45 @@ describe("GET /repos/:repo/file", () => {
     expect(
       (await fetch(`${base}/repos/${repo}/file?path=f.txt&from=4&to=2`)).status,
     ).toBe(400);
+  });
+});
+
+describe("PUT /repos/:repo/file/content", () => {
+  it("writes work-target content to the working tree", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=f.txt&target=work`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "saved\n" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await readFile(join(dir, "f.txt"), "utf8")).toBe("saved\n");
+  });
+
+  it("rejects non-working-tree targets", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=f.txt&target=staged`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "saved\n" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await readFile(join(dir, "f.txt"), "utf8")).toBe("L1\nL2\nL3\nL4\nL5\n");
+  });
+
+  it("refuses to write outside the repo", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    const res = await fetch(
+      `${base}/repos/${repo}/file/content?path=${encodeURIComponent(
+        "../../../../../../etc/passwd",
+      )}&target=work`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "nope\n" }),
+      },
+    );
+    expect(res.status).toBe(404);
   });
 });
 

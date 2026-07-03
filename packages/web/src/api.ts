@@ -24,6 +24,8 @@ import type {
   UiStateUpdate,
   WorkspaceEntry,
   WorkspaceInfo,
+  WriteFileContentRequest,
+  WriteFileContentResponse,
 } from "@diffect/shared";
 
 async function json<T>(res: Response): Promise<T> {
@@ -147,6 +149,20 @@ export const api = {
     return fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`).then((r) =>
       json<FileContent>(r),
     );
+  },
+
+  writeFileContent: (
+    repo: string,
+    opts: { path: string; target?: string; worktree?: string | null } & WriteFileContentRequest,
+  ) => {
+    const q = new URLSearchParams({ path: opts.path });
+    if (opts.target) q.set("target", opts.target);
+    if (opts.worktree) q.set("worktree", opts.worktree);
+    return fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: opts.content }),
+    }).then((r) => json<WriteFileContentResponse>(r));
   },
 
   refs: (repo: string, worktree?: string | null) => {

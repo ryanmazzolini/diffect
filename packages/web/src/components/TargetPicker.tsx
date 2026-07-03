@@ -3,8 +3,7 @@ import { createPortal } from "react-dom";
 import type { RefList, RefSearchOption, RefSearchResults } from "@diffect/shared";
 import { api } from "../api.js";
 
-const LOCAL_TARGETS = [
-  { target: "work", label: "All local changes", short: "All" },
+const STATIC_LOCAL_TARGETS = [
   { target: "staged", label: "Staged changes", short: "Staged" },
   { target: "unstaged", label: "Unstaged changes", short: "Unstaged" },
 ];
@@ -18,6 +17,7 @@ interface Props {
   repo: string;
   worktree: string | null;
   defaultBranch: string | null;
+  currentBranch?: string | null;
   target: string;
   onTarget: (target: string) => void;
   refs: RefList | null;
@@ -40,6 +40,7 @@ export function TargetPicker({
   repo,
   worktree,
   defaultBranch,
+  currentBranch = null,
   target,
   onTarget,
   refs,
@@ -53,6 +54,19 @@ export function TargetPicker({
   const [base, setBase] = useState(fallbackBase);
   const [compare, setCompare] = useState("HEAD");
   const fallbackResults = useMemo(() => refsToSearchResults(refs), [refs]);
+  const localTargets = useMemo(
+    () => [
+      {
+        target: "work",
+        label: currentBranch
+          ? `Current branch ${currentBranch} plus working tree changes`
+          : "Current checkout plus working tree changes",
+        short: currentBranch ?? "Current",
+      },
+      ...STATIC_LOCAL_TARGETS,
+    ],
+    [currentBranch],
+  );
 
   useEffect(() => {
     const parsed = parseCompareTarget(target);
@@ -104,11 +118,11 @@ export function TargetPicker({
       </span>
 
       <span className="local-targets" aria-label="Local review modes">
-        {LOCAL_TARGETS.map((mode) => (
+        {localTargets.map((mode) => (
           <button
             key={mode.target}
             type="button"
-            className={`target-mode ${target === mode.target ? "active" : ""}`}
+            className={`target-mode ${mode.target === "work" ? "current-branch" : ""} ${target === mode.target ? "active" : ""}`}
             onClick={() => onTarget(mode.target)}
             title={mode.label}
             aria-label={mode.label}
@@ -451,7 +465,7 @@ function parseCompareTarget(target: string): { base: string; compare: string } |
 }
 
 function isLocalTarget(target: string): boolean {
-  return LOCAL_TARGETS.some((mode) => mode.target === target);
+  return target === "work" || STATIC_LOCAL_TARGETS.some((mode) => mode.target === target);
 }
 
 function refThreadCountLabel(count?: RefThreadCount): string | null {

@@ -1,4 +1,4 @@
-import { lstat, readFile, readlink } from "node:fs/promises";
+import { lstat, readFile, readlink, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import type { FileContent, ReviewTarget } from "@diffect/shared";
 import { containedPath } from "../path-safe.js";
@@ -149,4 +149,27 @@ export async function readTargetFileContent(
     readSource(repoRoot, sides.new, path),
   ]);
   return { old: oldContent, new: newContent };
+}
+
+/** Write the editable/new side back to the working tree. */
+export async function writeWorktreeFileContent(
+  repoRoot: string,
+  path: string,
+  content: string,
+): Promise<boolean> {
+  const abs = containedPath(repoRoot, path);
+  if (!abs) return false;
+
+  try {
+    if ((await lstat(resolve(repoRoot, path))).isSymbolicLink()) return false;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") return false;
+  }
+
+  try {
+    await writeFile(abs, content, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
 }

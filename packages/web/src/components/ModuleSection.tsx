@@ -384,6 +384,7 @@ function StackedModule({
             repo={repo}
             worktree={worktree}
             defaultBranch={defaultBranch}
+            currentBranch={branch}
             target={target}
             onTarget={onTarget}
             refs={refs}

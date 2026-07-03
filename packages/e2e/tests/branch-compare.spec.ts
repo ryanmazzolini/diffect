@@ -9,11 +9,15 @@ test("target picker applies local modes, compare refs, and commit search", async
   // (e.g. "Staged changes"), so an unscoped getByRole would be ambiguous once the
   // diff settles. `.local-targets` is the picker group, never the sidebar.
   const modes = page.locator(".local-targets");
-  const all = modes.getByRole("button", { name: "All local changes", exact: true });
+  const current = modes.getByRole("button", {
+    name: "Current branch main plus working tree changes",
+    exact: true,
+  });
   const staged = modes.getByRole("button", { name: "Staged changes", exact: true });
   const unstaged = modes.getByRole("button", { name: "Unstaged changes", exact: true });
 
-  await expect(all).toHaveAttribute("aria-pressed", "true");
+  await expect(current).toHaveText("main");
+  await expect(current).toHaveAttribute("aria-pressed", "true");
 
   await staged.click();
   await expect(staged).toHaveAttribute("aria-pressed", "true");
