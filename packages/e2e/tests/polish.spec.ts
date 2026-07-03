@@ -8,7 +8,7 @@ test("marking a file viewed collapses it and updates the count", async ({ page }
   await calc.getByRole("checkbox", { name: "Viewed" }).check();
   await expect(calc.locator("[data-component='git-diff-view']")).toHaveCount(0); // body collapsed
   // Review progress (now in the sidebar) reflects the newly-viewed file.
-  await expect(page.locator(".review-progress-count")).toHaveText("1/2");
+  await expect(page.locator(".review-progress-count")).toHaveText("1/3");
 });
 
 test("j/k move the active file", async ({ page }) => {

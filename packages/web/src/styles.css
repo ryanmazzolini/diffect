@@ -2284,6 +2284,13 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--muted);
   background: var(--panel);
 }
+.cm-diff-notice {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel-2);
+  font-size: 12px;
+}
 
 /* Flat file blocks — no card border/shadow; a hairline separates them. */
 .file {

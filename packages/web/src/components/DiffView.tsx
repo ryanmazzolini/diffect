@@ -40,6 +40,8 @@ const EMPTY_THREADS: Thread[] = [];
 // offscreen files render a height-preserving placeholder instead.
 const MOUNT_MARGIN_PX = 1200;
 const EST_ROW_PX = 20; // rough diff-row height, for placeholder/intrinsic sizing
+const DEFAULT_DELETED_SYNTAX_HIGHLIGHT_MAX_LENGTH = 12_000;
+const DELETED_SYNTAX_HIGHLIGHT_MAX_QUERY = "cm6DeletedSyntaxHighlightMax";
 const CodeMirrorDiffBody = lazy(() =>
   import("./CodeMirrorDiffBody.js").then((m) => ({ default: m.CodeMirrorDiffBody })),
 );
@@ -54,6 +56,14 @@ function initialDiffRenderer(): DiffRenderer {
     return requested;
   }
   return window.localStorage.getItem(DIFF_RENDERER_KEY) === "cm6" ? "cm6" : "git";
+}
+
+function initialDeletedSyntaxHighlightMaxLength(): number {
+  if (typeof window === "undefined") return DEFAULT_DELETED_SYNTAX_HIGHLIGHT_MAX_LENGTH;
+  const raw = new URLSearchParams(window.location.search).get(DELETED_SYNTAX_HIGHLIGHT_MAX_QUERY);
+  if (raw === null) return DEFAULT_DELETED_SYNTAX_HIGHLIGHT_MAX_LENGTH;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_DELETED_SYNTAX_HIGHLIGHT_MAX_LENGTH;
 }
 
 interface Props {
@@ -102,6 +112,7 @@ export const DiffView = memo(function DiffView({
   onOpenFile,
 }: Props) {
   const [renderer] = useState<DiffRenderer>(initialDiffRenderer);
+  const [deletedSyntaxHighlightMaxLength] = useState(initialDeletedSyntaxHighlightMaxLength);
   // One pass to bucket threads by file, kept stable across renders so each file
   // gets a referentially-stable array (memo can then skip unchanged files).
   const threadsByFile = useMemo(() => groupThreadsByFile(threads), [threads]);
@@ -162,6 +173,7 @@ export const DiffView = memo(function DiffView({
             renderer={renderer}
             wrap={wrap}
             theme={theme}
+            deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
             onToggleViewed={onToggleViewed}
             onChanged={onChanged}
             editors={editors}
@@ -235,6 +247,22 @@ function emptyLineWidgetData(): LineWidgetData {
 
 function readableFileContent(content: FileContent | "error" | null): content is { old: string; new: string } {
   return content !== null && content !== "error" && content.old !== null && content.new !== null;
+}
+
+function hasDeletedBlockOver(file: DiffFile, maxLength: number): boolean {
+  let blockLength = 0;
+  for (const hunk of file.hunks) {
+    blockLength = 0;
+    for (const line of hunk.lines) {
+      if (line.type !== "del") {
+        blockLength = 0;
+        continue;
+      }
+      blockLength += line.text.length + 1;
+      if (blockLength > maxLength) return true;
+    }
+  }
+  return false;
 }
 
 /** Thread/form bucket keyed by line number, split by side — git-diff-view's extendData shape. */
@@ -348,6 +376,7 @@ const FileDiff = memo(function FileDiff({
   renderer,
   wrap,
   theme,
+  deletedSyntaxHighlightMaxLength,
   onToggleViewed,
   onChanged,
   editors,
@@ -365,6 +394,7 @@ const FileDiff = memo(function FileDiff({
   renderer: DiffRenderer;
   wrap: boolean;
   theme: Theme;
+  deletedSyntaxHighlightMaxLength: number;
   onToggleViewed: (path: string) => void;
   onChanged: () => void;
   editors: string[];
@@ -381,6 +411,8 @@ const FileDiff = memo(function FileDiff({
   const [content, setContent] = useState<FileContent | "error" | null>(null);
 
   const canUseCodeMirror = renderer === "cm6" && readableFileContent(content);
+  const skipsDeletedSyntaxHighlight =
+    canUseCodeMirror && hasDeletedBlockOver(file, deletedSyntaxHighlightMaxLength);
 
   // Build + initialize the legacy lib's DiffFile only when CM6 cannot handle this
   // file yet. git-diff-view remains the default renderer and the fallback path.
@@ -704,7 +736,14 @@ const FileDiff = memo(function FileDiff({
           >
             {canUseCodeMirror ? (
               <Suspense fallback={<div className="cm-diff-unavailable">Loading CodeMirror renderer…</div>}>
-                <CodeMirrorDiffBody path={file.path} content={content} wrap={wrap} theme={theme} />
+                <CodeMirrorDiffBody
+                  path={file.path}
+                  content={content}
+                  wrap={wrap}
+                  theme={theme}
+                  deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
+                  skipsDeletedSyntaxHighlight={skipsDeletedSyntaxHighlight}
+                />
               </Suspense>
             ) : (
               <DiffViewWithMultiSelect<LineWidgetData>

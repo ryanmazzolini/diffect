@@ -79,6 +79,13 @@ Line one.
 Line two.
 `,
   );
+  writeFileSync(
+    join(repoDir, "schema.graphql"),
+    `type Query {
+  greeting: String
+}
+`,
+  );
   const tag = (todo) =>
     `export const REPO = ${JSON.stringify(marker)}
 export function id() {
@@ -91,6 +98,18 @@ export function id() {
   // Work changes so the default diff is non-empty.
   writeFileSync(join(repoDir, "calc.js"), calc(" // TODO: overflow?"));
   writeFileSync(join(repoDir, "src", "util", "math.js"), math(" // TODO"));
+  writeFileSync(
+    join(repoDir, "schema.graphql"),
+    `type Query {
+  greeting: String
+  viewer: User
+}
+
+type User {
+  id: ID!
+}
+`,
+  );
   if (marker) writeFileSync(join(repoDir, `${marker}.js`), tag(` // TODO ${marker}`));
 }
 
