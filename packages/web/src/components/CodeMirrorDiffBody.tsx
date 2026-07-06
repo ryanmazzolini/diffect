@@ -14,9 +14,11 @@ import {
   EditorView,
   GutterMarker,
   WidgetType,
+  crosshairCursor,
   gutter,
   keymap,
   lineNumbers,
+  rectangularSelection,
   type DecorationSet,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
@@ -283,6 +285,10 @@ export function CodeMirrorDiffBody({
             lineNumbers(),
             cmCommentGutter(anchors, setSelectionComment),
             cmDecorations,
+            rectangularSelection({
+              eventFilter: (event) => event.button === 1 || (event.button === 0 && event.altKey),
+            }),
+            crosshairCursor({ key: "Alt" }),
             language,
             EditorView.updateListener.of((update) => {
               if (update.docChanged) setDirty(update.state.doc.toString() !== newText);

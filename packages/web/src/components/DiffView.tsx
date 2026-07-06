@@ -419,14 +419,17 @@ const FileDiff = memo(function FileDiff({
   // diff-only as a fallback.
   const [content, setContent] = useState<FileContent | "error" | null>(null);
 
-  const canUseCodeMirror = renderer === "cm6" && readableFileContent(content);
+  const splitView = mode === DiffModeEnum.Split;
+  const canUseCodeMirror = renderer === "cm6" && !splitView && readableFileContent(content);
   const editableTarget = localDaemon && (target === "work" || target === "unstaged");
   const canEditCodeMirror = canUseCodeMirror && editableTarget;
   const editModeTitle = canEditCodeMirror
     ? "Editable: saves write to the working tree"
-    : editableTarget
-      ? "Read-only until CodeMirror can load this file"
-      : "Read-only for this review target";
+    : editableTarget && splitView
+      ? "Read-only in split view; switch to unified to edit"
+      : editableTarget
+        ? "Read-only until CodeMirror can load this file"
+        : "Read-only for this review target";
   const skipsDeletedSyntaxHighlight =
     canUseCodeMirror && hasDeletedBlockOver(file, deletedSyntaxHighlightMaxLength);
 
@@ -447,7 +450,8 @@ const FileDiff = memo(function FileDiff({
   );
 
   // Build + initialize the legacy lib's DiffFile only when CM6 cannot handle this
-  // file yet. git-diff-view remains the fallback path.
+  // file yet. Split view intentionally stays on the read-only legacy renderer;
+  // unified CM6 is the editable path.
   const diffFile = useMemo(() => {
     if (content === null || canUseCodeMirror) return null; // wait for content before first render
     const c = content === "error" ? null : content;

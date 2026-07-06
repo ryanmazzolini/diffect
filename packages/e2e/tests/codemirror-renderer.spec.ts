@@ -15,6 +15,15 @@ test("renders the default CodeMirror diff renderer", async ({ page }) => {
   await expect(page.locator(".cm-diff-host .cm-deletedChunk").first()).toBeVisible();
 });
 
+test("split view falls back to the legacy read-only renderer", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Options" }).click();
+  await page.getByRole("button", { name: "Split" }).click();
+
+  await expect(page.locator("[data-component='git-diff-view']").first()).toBeVisible();
+  await expect(page.locator(".diff-line-old-content").first()).toBeVisible();
+});
+
 test("loads GraphQL language support in the CodeMirror diff renderer", async ({ page }) => {
   await page.goto("/");
   await page.locator(".tree-file", { hasText: "schema.graphql" }).click();
