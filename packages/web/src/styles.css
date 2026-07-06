@@ -2313,6 +2313,54 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .cm-save-status {
   color: var(--muted);
 }
+.cm-comment-gutter {
+  min-width: 24px;
+}
+.cm-comment-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 20px;
+}
+.cm-comment-spacer {
+  visibility: hidden;
+  display: inline-block;
+  width: 16px;
+}
+.cm-diff-add-widget {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 14px;
+  cursor: pointer;
+}
+.cm-diff-add-widget:hover,
+.cm-diff-add-widget:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.cm-range-commented {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.cm-react-widget {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 2px 0 4px 66px;
+}
+.cm-thread-stack .inline-thread {
+  max-height: min(280px, 40vh);
+  overflow: auto;
+}
+.cm-selection-widget {
+  margin-right: 18px;
+}
 
 /* Flat file blocks — no card border/shadow; a hairline separates them. */
 .file {

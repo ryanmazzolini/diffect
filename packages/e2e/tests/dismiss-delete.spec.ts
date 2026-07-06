@@ -26,10 +26,11 @@ test("resolved thread collapses in the diff, then can be deleted", async ({
   await thread.getByRole("button", { name: "Close" }).click();
 
   // It now shows as a collapsed marker rather than the full conversation.
-  await expect(page.locator(".thread-collapsed.status-closed")).toBeVisible();
+  const collapsed = page.locator(".thread-collapsed.status-closed", { hasText: "nit: spacing here" });
+  await expect(collapsed).toBeVisible();
 
   // Expand and delete it (Delete now asks for confirmation).
-  await page.locator(".thread-collapsed").click();
+  await collapsed.click();
   page.once("dialog", (d) => d.accept());
   await page
     .locator(".inline-thread", { hasText: "nit: spacing here" })
@@ -38,7 +39,7 @@ test("resolved thread collapses in the diff, then can be deleted", async ({
     .click();
 
   // Gone from the diff entirely.
-  await expect(page.locator(".thread-collapsed")).toHaveCount(0);
+  await expect(page.locator(".thread-collapsed", { hasText: "nit: spacing here" })).toHaveCount(0);
   await expect(
     page.locator(".inline-thread", { hasText: "nit: spacing here" }),
   ).toHaveCount(0);

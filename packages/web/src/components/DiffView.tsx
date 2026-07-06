@@ -29,7 +29,7 @@ import { CommentForm } from "./CommentForm.js";
 import { FullFilePreview } from "./FullFilePreview.js";
 import { DiffStat } from "./DiffStat.js";
 import { OpenInMenu } from "./OpenInMenu.js";
-import { ThreadConversation } from "./ThreadConversation.js";
+import { InlineThread } from "./InlineThread.js";
 
 // Stable empty array so memoized children don't see a fresh [] each render.
 const EMPTY_THREADS: Thread[] = [];
@@ -775,14 +775,19 @@ const FileDiff = memo(function FileDiff({
             {canUseCodeMirror ? (
               <Suspense fallback={<div className="cm-diff-unavailable">Loading CodeMirror renderer…</div>}>
                 <CodeMirrorDiffBody
-                  path={file.path}
+                  repo={repo}
+                  worktree={worktree}
+                  target={target}
+                  file={file}
                   content={content}
+                  threads={threads}
                   wrap={wrap}
                   theme={theme}
                   deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
                   skipsDeletedSyntaxHighlight={skipsDeletedSyntaxHighlight}
                   editable={canEditCodeMirror}
                   onSave={saveCodeMirrorContent}
+                  onChanged={onChanged}
                 />
               </Suspense>
             ) : (
@@ -923,34 +928,3 @@ function OutOfDiffThread({
   );
 }
 
-/**
- * An inline thread in the diff. Open threads render in full; closed ones collapse
- * to a one-line marker that expands on click, keeping the diff uncluttered while
- * never hiding feedback outright.
- */
-function InlineThread({
-  thread,
-  onChanged,
-}: {
-  thread: Thread;
-  onChanged: () => void;
-}) {
-  const [expanded, setExpanded] = useState(thread.status === "open");
-  if (!expanded) {
-    const first = thread.comments[0]?.body.split("\n")[0] ?? "";
-    return (
-      <button
-        type="button"
-        className={`thread-collapsed status-${thread.status}`}
-        onClick={() => setExpanded(true)}
-        title="Show thread"
-      >
-        <span className={`status-badge status-${thread.status}`}>
-          {thread.status}
-        </span>
-        <span className="thread-collapsed-preview">{first}</span>
-      </button>
-    );
-  }
-  return <ThreadConversation thread={thread} onChanged={onChanged} />;
-}
