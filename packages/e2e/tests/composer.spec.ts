@@ -8,7 +8,7 @@ async function openCommentForm(page) {
 }
 
 test("Preview mode renders the markdown", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
 
   await form.locator("textarea").fill("**bold** and `code`");
@@ -19,7 +19,7 @@ test("Preview mode renders the markdown", async ({ page }) => {
 });
 
 test("the bold toolbar button wraps the selection", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
 
   const textarea = form.locator("textarea");
@@ -32,7 +32,7 @@ test("the bold toolbar button wraps the selection", async ({ page }) => {
 });
 
 test("numbered lists continue on enter", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
   const textarea = form.locator("textarea");
 
@@ -44,7 +44,7 @@ test("numbered lists continue on enter", async ({ page }) => {
 });
 
 test("home/end stay inside the markdown editor", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
   const textarea = form.locator("textarea");
   const pane = page.locator(".diff-pane");
@@ -59,7 +59,7 @@ test("home/end stay inside the markdown editor", async ({ page }) => {
 });
 
 test("preview strips unsafe markdown output", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
 
   await form.locator("textarea").fill(
@@ -72,7 +72,7 @@ test("preview strips unsafe markdown output", async ({ page }) => {
 });
 
 test("attaching a file inserts a markdown image link", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
 
   await form.locator('input[type="file"]').setInputFiles({
@@ -87,7 +87,7 @@ test("attaching a file inserts a markdown image link", async ({ page }) => {
 });
 
 test("dropping an image inserts a markdown image link", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
 
   await form.locator("textarea").evaluate((textarea) => {
@@ -108,7 +108,7 @@ test("dropping an image inserts a markdown image link", async ({ page }) => {
 });
 
 test("a comment renders as markdown once posted", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const form = await openCommentForm(page);
 
   await form.locator("textarea").fill("see `parseInt` docs");

@@ -49,13 +49,13 @@ const DIFF_RENDERER_KEY = "diffect-diff-renderer";
 type DiffRenderer = "git" | "cm6";
 
 function initialDiffRenderer(): DiffRenderer {
-  if (typeof window === "undefined") return "git";
+  if (typeof window === "undefined") return "cm6";
   const requested = new URLSearchParams(window.location.search).get("renderer");
   if (requested === "cm6" || requested === "git") {
     window.localStorage.setItem(DIFF_RENDERER_KEY, requested);
     return requested;
   }
-  return window.localStorage.getItem(DIFF_RENDERER_KEY) === "cm6" ? "cm6" : "git";
+  return window.localStorage.getItem(DIFF_RENDERER_KEY) === "git" ? "git" : "cm6";
 }
 
 function initialDeletedSyntaxHighlightMaxLength(): number {
@@ -447,7 +447,7 @@ const FileDiff = memo(function FileDiff({
   );
 
   // Build + initialize the legacy lib's DiffFile only when CM6 cannot handle this
-  // file yet. git-diff-view remains the default renderer and the fallback path.
+  // file yet. git-diff-view remains the fallback path.
   const diffFile = useMemo(() => {
     if (content === null || canUseCodeMirror) return null; // wait for content before first render
     const c = content === "error" ? null : content;

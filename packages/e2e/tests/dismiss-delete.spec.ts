@@ -7,7 +7,7 @@ import { test, expect } from "@playwright/test";
 test("resolved thread collapses in the diff, then can be deleted", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
 
   // Create a thread on the changed line.
   const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();

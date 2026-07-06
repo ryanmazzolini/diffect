@@ -10,7 +10,7 @@ async function clickAddWidget(page: Page, row: Locator) {
 }
 
 test("an in-progress comment draft survives a reload", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
 
   const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
   await clickAddWidget(page, row);
@@ -26,7 +26,7 @@ test("an in-progress comment draft survives a reload", async ({ page }) => {
 });
 
 test("restores the active file after reload", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
 
   await page.locator(".tree-file", { hasText: "math.js" }).click();
   await expect(page.locator(".tree-file.active")).toContainText("math.js");

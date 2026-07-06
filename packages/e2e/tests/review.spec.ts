@@ -7,7 +7,7 @@ import { test, expect } from "@playwright/test";
  */
 
 test("loads the workspace and shows the work diff", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   // The brand is now a compact "d" logo mark; this is just a shell-loaded smoke check.
   await expect(page.locator(".brand")).toBeVisible();
   // The fixture has a modified calc.js in the default work target.
@@ -16,7 +16,7 @@ test("loads the workspace and shows the work diff", async ({ page }) => {
 });
 
 test("creates an inline comment and it appears in the inbox", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   // Hover the changed line to reveal the comment affordance, then open the form.
   const addedLine = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
   await addedLine.hover();
@@ -61,7 +61,7 @@ test("desktop follow mode jumps to the changed file", async ({ page }) => {
 });
 
 test("thread pane comments jump to their inline thread", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await page.locator(".tree-file", { hasText: "math.js" }).click();
 
   const math = page.locator(".file", { hasText: "math.js" });
@@ -86,7 +86,7 @@ test("thread pane comments jump to their inline thread", async ({ page }) => {
 });
 
 test("resolves a thread and the open count drops", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   // Create a thread first.
   const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
   await row.hover();
@@ -122,7 +122,7 @@ test("resolves a thread and the open count drops", async ({ page }) => {
 });
 
 test("switches review target without errors", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
   // Scope to the Topbar's local-mode control: selecting a target also surfaces that
   // review as a sidebar session-item sharing the same accessible name, so an

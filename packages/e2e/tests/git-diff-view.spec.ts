@@ -8,7 +8,7 @@ import { test, expect } from "@playwright/test";
 test("renders diff rows via git-diff-view", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await page.waitForSelector(".file-path");
 
   const body = page.locator("[data-component='git-diff-view']").first();
@@ -18,7 +18,7 @@ test("renders diff rows via git-diff-view", async ({ page }) => {
 });
 
 test("comments on a line through the add-widget", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await page.waitForSelector("tbody.diff-table-body tr");
 
   const row = page.locator("tbody.diff-table-body tr").first();
@@ -39,7 +39,7 @@ test("comments on a line through the add-widget", async ({ page }) => {
 });
 
 test("toggles split (side-by-side) view", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await page.waitForSelector("tbody.diff-table-body tr");
   await expect(page.locator(".diff-line-old-content")).toHaveCount(0); // unified default
 
@@ -53,7 +53,7 @@ test("toggles split (side-by-side) view", async ({ page }) => {
 });
 
 test("toggles line wrapping", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await page.waitForSelector("tbody.diff-table-body tr");
   await expect(page.locator(".unified-diff-view-wrap").first()).toBeVisible(); // wrap default
 
@@ -66,7 +66,7 @@ test("toggles line wrapping", async ({ page }) => {
 });
 
 test("keeps the diff view controls reachable while scrolling", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await page.waitForSelector("tbody.diff-table-body tr");
 
   // The view controls live behind the fixed topbar's Options menu, not a per-pane

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test("marking a file viewed collapses it and updates the count", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   const calc = page.locator(".file", { hasText: "calc.js" });
   await expect(calc.locator("[data-component='git-diff-view']").first()).toBeVisible();
 
@@ -12,7 +12,7 @@ test("marking a file viewed collapses it and updates the count", async ({ page }
 });
 
 test("j/k move the active file", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?renderer=git");
   await expect(page.locator(".tree-file").first()).toBeVisible();
 
   // Files are in tree order (folders first), so src/util/math.js precedes calc.js.
