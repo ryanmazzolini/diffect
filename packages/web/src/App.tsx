@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
   ArchivedSession,
+  DiffChangedPayload,
   DiffFile,
   RefList,
   RepoDiff,
@@ -65,6 +66,7 @@ const EMPTY_ARCHIVED: ArchivedSession[] = [];
 const EMPTY_VIEWED: ReadonlySet<string> = new Set();
 // A repo's default review selection on first visit: its primary checkout, work target.
 const DEFAULT_TARGET = "work";
+const FOLLOW_MODE_KEY = "diffect-follow-mode";
 interface StoredSelection {
   worktree: string | null;
   target: string;
@@ -94,6 +96,16 @@ function readInitialDeepLink(): DeepLinkSelection {
     worktree: cleanQueryValue(q.get("worktree")),
     target: cleanQueryValue(q.get("target")) ?? DEFAULT_TARGET,
   };
+}
+function readFollowMode(): boolean {
+  const stored = getStored(FOLLOW_MODE_KEY);
+  if (stored === "1") return true;
+  if (stored === "0") return false;
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("shell") === "desktop";
+}
+function isFollowableTarget(target: string): boolean {
+  return target === "work" || target === "unstaged";
 }
 const PLACE_KEY = "diffect-place-v1";
 const WORKSPACE_PLACES_KEY = "diffect-workspace-places-v1";
@@ -369,6 +381,13 @@ export function App() {
       }),
     [],
   );
+  const [followMode, setFollowMode] = useState(readFollowMode);
+  const toggleFollowMode = useCallback(() => {
+    setFollowMode((enabled) => {
+      setStored(FOLLOW_MODE_KEY, enabled ? "0" : "1");
+      return !enabled;
+    });
+  }, []);
   const [addOpen, setAddOpen] = useState(false);
   const [generalComment, setGeneralComment] = useState<GeneralCommentTarget | null>(null);
   const [mainTab, setMainTab] = useState<MainPaneTab>("diff");
@@ -405,6 +424,9 @@ export function App() {
   const programmaticRepoTimerRef = useRef<number | null>(null);
   const programmaticFileRef = useRef<string | null>(null);
   const programmaticFileTimerRef = useRef<number | null>(null);
+  const followModeRef = useRef(followMode);
+  followModeRef.current = followMode;
+  const pendingFollowRef = useRef<DiffChangedPayload | null>(null);
 
   // Active-repo projection of the per-repo maps. Every reader below (memos,
   // effects, render, child props) uses these scalars exactly as before the lift,
@@ -650,6 +672,30 @@ export function App() {
     },
     [diff, diffs, lockProgrammaticFile, persistPlace, repo],
   );
+
+  useEffect(() => {
+    const pending = pendingFollowRef.current;
+    if (!pending?.repo || !pending.path) return;
+    if (!visibleRepos.some((r) => r.name === pending.repo)) {
+      pendingFollowRef.current = null;
+      return;
+    }
+    const sel = selections.get(pending.repo) ?? { worktree: null, target: DEFAULT_TARGET };
+    if ((pending.worktree ?? null) !== sel.worktree || !isFollowableTarget(sel.target)) {
+      pendingFollowRef.current = null;
+      return;
+    }
+    const changedDiff = diffs.get(pending.repo);
+    if (!changedDiff) return;
+    const match = changedDiff.files.find(
+      (f) => f.path === pending.path || f.oldPath === pending.path,
+    );
+    pendingFollowRef.current = null;
+    if (!match) return;
+    setMainTab("diff");
+    selectTreeFile(pending.repo, match.path);
+    setLive(`Following ${match.path}`);
+  }, [diffs, selections, selectTreeFile, visibleRepos]);
 
   const scrollThreadIntoView = useCallback((threadId: string) => {
     let attempts = 0;
@@ -1377,13 +1423,22 @@ export function App() {
     if (workspaceTimer.current) clearTimeout(workspaceTimer.current);
   }, []);
   useEffect(() => {
-    return api.subscribe((type) => {
+    return api.subscribe((type, payload) => {
       const r = refreshers.current;
       if (type === DAEMON_EVENTS.threadChanged) {
         r.refreshThreads();
         setPrDraftReloadKey((key) => key + 1);
         setLive("Review threads updated");
       } else if (type === DAEMON_EVENTS.diffChanged) {
+        if (followModeRef.current && payload.repo && payload.path) {
+          const sel = selectionsRef.current.get(payload.repo) ?? {
+            worktree: null,
+            target: DEFAULT_TARGET,
+          };
+          if ((payload.worktree ?? null) === sel.worktree && isFollowableTarget(sel.target)) {
+            pendingFollowRef.current = payload;
+          }
+        }
         r.refreshAllDiffs();
         refreshWorkspaceSoon();
         setLive("Diff updated");
@@ -2275,6 +2330,8 @@ export function App() {
         repoLabel={spacePreviewFile ? null : activeRepo ? basename(activeRepo.root) : repo}
         filePath={spacePreviewFile ?? activeFile}
         mode={spacePreviewFile ? "space" : "diff"}
+        follow={followMode}
+        onToggleFollow={toggleFollowMode}
       />
     </div>
   );

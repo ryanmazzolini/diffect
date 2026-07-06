@@ -1,6 +1,6 @@
 import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import type { ServerResponse } from "node:http";
-import { DAEMON_EVENTS, type DaemonEventType } from "@diffect/shared";
+import { DAEMON_EVENTS, type DaemonEventPayload, type DaemonEventType } from "@diffect/shared";
 import { repoStoreDir, spaceStoreDir } from "./store/paths.js";
 import { workspacePaths } from "./reviews/refresh.js";
 import type { Workspace } from "./workspace.js";
@@ -11,15 +11,15 @@ export type { DaemonEventType };
  * Watches the workspace's worktrees and `.reviews/` and fans filesystem changes
  * out to connected SSE clients. The daemon owns one hub for its lifetime.
  *
- * Events are intentionally coarse — "something changed, re-fetch" — not payloads.
- * The browser already knows how to load diffs and threads; this just tells it
- * when. That keeps the daemon a thin notifier over the file store, which remains
- * the source of truth.
+ * Events stay coarse — "something changed, re-fetch" — with only enough payload
+ * for follow mode to focus the changed file after the client reloads the diff.
+ * The file store remains the source of truth.
  */
 export class EventHub {
   private clients = new Set<ServerResponse>();
   private watchers: FSWatcher[] = [];
   private timers = new Map<DaemonEventType, NodeJS.Timeout>();
+  private payloads = new Map<DaemonEventType, DaemonEventPayload>();
   private started = false;
 
   constructor(private ws: Workspace) {}
@@ -76,7 +76,11 @@ export class EventHub {
       for (const wt of repo.worktrees) {
         this.addWatch(wt.root, (filename) => {
           if (isIgnoredPath(filename)) return;
-          this.emit(DAEMON_EVENTS.diffChanged);
+          this.emit(DAEMON_EVENTS.diffChanged, {
+            repo: repo.name,
+            worktree: wt.root === repo.root ? null : wt.name,
+            path: normalizeWatchPath(filename),
+          });
         });
       }
     }
@@ -120,25 +124,29 @@ export class EventHub {
    * summary, which the client refetches only on `workspaceChanged` — so the
    * route must announce that explicitly. Debounced like watch-driven events.
    */
-  notify(type: DaemonEventType): void {
-    this.emit(type);
+  notify(type: DaemonEventType, payload: DaemonEventPayload = {}): void {
+    this.emit(type, payload);
   }
 
   /** Debounced fan-out: collapse a burst of fs events into one notification. */
-  private emit(type: DaemonEventType): void {
+  private emit(type: DaemonEventType, payload: DaemonEventPayload = {}): void {
     const existing = this.timers.get(type);
     if (existing) clearTimeout(existing);
+    const previous = this.payloads.get(type);
+    this.payloads.set(type, payload.path || !previous?.path ? payload : previous);
     this.timers.set(
       type,
       setTimeout(() => {
         this.timers.delete(type);
-        this.broadcast(type);
+        const data = this.payloads.get(type) ?? {};
+        this.payloads.delete(type);
+        this.broadcast(type, data);
       }, 120),
     );
   }
 
-  private broadcast(type: DaemonEventType): void {
-    const frame = `event: ${type}\ndata: {}\n\n`;
+  private broadcast(type: DaemonEventType, payload: DaemonEventPayload): void {
+    const frame = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
     for (const res of this.clients) {
       try {
         res.write(frame);
@@ -174,4 +182,9 @@ function isIgnoredPath(filename: string | null): boolean {
   return parts.some(
     (p) => p === ".git" || p === ".reviews" || p === "node_modules",
   );
+}
+
+function normalizeWatchPath(filename: string | null): string | null {
+  if (!filename) return null;
+  return filename.split(/[/\\]/).filter(Boolean).join("/");
 }

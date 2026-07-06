@@ -26,6 +26,13 @@ export const DAEMON_EVENTS = {
 } as const;
 export type DaemonEventType = (typeof DAEMON_EVENTS)[keyof typeof DAEMON_EVENTS];
 
+export interface DiffChangedPayload {
+  repo?: string;
+  worktree?: string | null;
+  path?: string | null;
+}
+export type DaemonEventPayload = DiffChangedPayload;
+
 export type DiffLineType = "context" | "add" | "del";
 export type Side = "old" | "new";
 

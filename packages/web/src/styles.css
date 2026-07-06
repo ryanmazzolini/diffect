@@ -1305,29 +1305,32 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .statusbar-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 20px;
-  padding: 0 8px;
+  padding: 0 7px;
   color: var(--muted);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 999px;
   font-size: 11px;
 }
-.statusbar-pill:disabled {
-  opacity: 0.8;
-  cursor: not-allowed;
+.statusbar-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 .statusbar-pill.muted {
   color: var(--faint);
 }
-.statusbar-switch {
-  width: 18px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  border: 1px solid var(--border-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--shadow) 12%, transparent);
+.statusbar-follow.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.statusbar-follow-icon {
+  color: var(--faint);
+  flex: none;
+}
+.statusbar-follow.active .statusbar-follow-icon {
+  color: var(--accent);
 }
 .layout {
   flex: 1;

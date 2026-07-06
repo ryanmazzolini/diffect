@@ -34,6 +34,32 @@ test("creates an inline comment and it appears in the inbox", async ({ page }) =
   await expect(page.locator(".thread-pane")).toContainText("overflow for large ints");
 });
 
+test("desktop follow mode jumps to the changed file", async ({ page }) => {
+  await page.goto("/?shell=desktop");
+  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".tree-file", { hasText: "math.js" }).click();
+  await expect(page.locator(".tree-file.active")).toContainText("math.js");
+
+  await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((r) => r.json());
+    const repo = workspace.repos[0].name;
+    const path = "calc.js";
+    const q = new URLSearchParams({ path, target: "work" });
+    const content = await fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`).then((r) =>
+      r.json(),
+    );
+    const next = content.new.replace("TODO: overflow?", "TODO: followed?");
+    const res = await fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: next }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  });
+
+  await expect(page.locator(".tree-file.active")).toContainText("calc.js");
+});
+
 test("thread pane comments jump to their inline thread", async ({ page }) => {
   await page.goto("/");
   await page.locator(".tree-file", { hasText: "math.js" }).click();

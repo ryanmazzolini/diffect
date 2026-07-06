@@ -5,6 +5,7 @@ import type {
   ArchivedSession,
   AttachmentResponse,
   CreateThreadRequest,
+  DaemonEventPayload,
   DaemonEventType,
   FileContent,
   FileRange,
@@ -267,14 +268,25 @@ export const api = {
    * Subscribe to live daemon events; calls onChange with the event type.
    * Returns an unsubscribe function. EventSource auto-reconnects on drop.
    */
-  subscribe: (onChange: (type: DaemonEventType) => void): (() => void) => {
+  subscribe: (onChange: (type: DaemonEventType, payload: DaemonEventPayload) => void): (() => void) => {
     const es = new EventSource("/events");
     for (const type of Object.values(DAEMON_EVENTS)) {
-      es.addEventListener(type, () => onChange(type));
+      es.addEventListener(type, (event) => onChange(type, parseEventPayload(event)));
     }
     return () => es.close();
   },
 };
+
+function parseEventPayload(event: Event): DaemonEventPayload {
+  const data = event instanceof MessageEvent ? event.data : null;
+  if (typeof data !== "string") return {};
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return parsed && typeof parsed === "object" ? (parsed as DaemonEventPayload) : {};
+  } catch {
+    return {};
+  }
+}
 
 function post(path: string, body: unknown): Promise<Thread> {
   return fetch(path, {
