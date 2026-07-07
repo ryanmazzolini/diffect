@@ -625,11 +625,8 @@ export function App() {
     programmaticFileRef.current = path;
     if (programmaticFileTimerRef.current !== null) {
       window.clearTimeout(programmaticFileTimerRef.current);
-    }
-    programmaticFileTimerRef.current = window.setTimeout(() => {
-      if (programmaticFileRef.current === path) programmaticFileRef.current = null;
       programmaticFileTimerRef.current = null;
-    }, 1500);
+    }
   }, []);
 
   const selectFile = useCallback(
@@ -1225,6 +1222,20 @@ export function App() {
     selectFile(initialPlace.file);
   }, [diff, initialPlace.file, repo, selectFile]);
 
+  useEffect(() => {
+    const root = diffPaneRef.current;
+    if (!root) return;
+    const unlock = () => {
+      programmaticFileRef.current = null;
+    };
+    root.addEventListener("wheel", unlock, { passive: true });
+    root.addEventListener("touchstart", unlock, { passive: true });
+    return () => {
+      root.removeEventListener("wheel", unlock);
+      root.removeEventListener("touchstart", unlock);
+    };
+  }, []);
+
   // Scroll-spy: highlight the file in the sidebar that's at the top of the diff
   // pane as the user scrolls, so the tree tracks reading position. Tracks the
   // active repo's files; the path is read back off `data-path` (the element id is
@@ -1238,14 +1249,20 @@ export function App() {
       .filter((el): el is HTMLElement => el !== null);
     if (headers.length === 0) return;
     const observer = new IntersectionObserver(
-      (entries) => {
-        const top = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-        const path = top?.target.getAttribute("data-path");
-        if (!path) return;
+      () => {
+        const rootRect = root.getBoundingClientRect();
+        const scanBottom = rootRect.top + rootRect.height * 0.3;
+        const visible = headers
+          .map((el) => ({ el, rect: el.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.bottom >= rootRect.top && rect.top <= scanBottom)
+          .sort((a, b) => a.rect.top - b.rect.top);
         const locked = programmaticFileRef.current;
-        if (locked && path !== locked) return;
+        if (locked) {
+          setActiveFile(locked);
+          return;
+        }
+        const path = visible[0]?.el.getAttribute("data-path");
+        if (!path) return;
         setActiveFile(path);
       },
       { root, rootMargin: "0px 0px -70% 0px", threshold: 0 },

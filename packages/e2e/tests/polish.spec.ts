@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test("j/k move the active file", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   await expect(page.locator(".tree-file").first()).toBeVisible();
 
   // Files are in tree order (folders first), so src/util/math.js precedes calc.js.

@@ -9,7 +9,7 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
-import { getChunks, getOriginalDoc, unifiedMergeView } from "@codemirror/merge";
+import { getChunks, getOriginalDoc, MergeView, unifiedMergeView } from "@codemirror/merge";
 import {
   EditorState,
   RangeSet,
@@ -47,6 +47,7 @@ interface Props {
   content: FileContent;
   threads: Thread[];
   wrap: boolean;
+  split: boolean;
   theme: Theme;
   deletedSyntaxHighlightMaxLength: number;
   skipsDeletedSyntaxHighlight: boolean;
@@ -73,6 +74,13 @@ interface LineAnchors {
   new: Map<number, number>;
   targets: LineTarget[];
   targetsByDocLine: Map<number, LineTarget[]>;
+}
+
+type DiffSide = Side | "unified";
+
+interface ViewContext {
+  side: DiffSide;
+  view: EditorView;
 }
 
 interface CmLineWidgetData {
@@ -232,6 +240,7 @@ export function CodeMirrorDiffBody({
   content,
   threads,
   wrap,
+  split,
   theme,
   deletedSyntaxHighlightMaxLength,
   skipsDeletedSyntaxHighlight,
@@ -242,6 +251,8 @@ export function CodeMirrorDiffBody({
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const mergeViewRef = useRef<MergeView | null>(null);
+  const viewContextsRef = useRef<ViewContext[]>([]);
   const savingRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -253,7 +264,7 @@ export function CodeMirrorDiffBody({
 
   const saveCurrent = useCallback(async () => {
     const view = viewRef.current;
-    if (!view || savingRef.current) return;
+    if (!view || split || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     setSaveMessage("");
@@ -320,139 +331,110 @@ export function CodeMirrorDiffBody({
 
     void codeMirrorLanguage(file.path).catch(() => []).then((language) => {
       if (cancelled) return;
-      const anchors = buildLineAnchors(file, countDocLines(newText));
-      const view = new EditorView({
-        parent: host,
-        state: EditorState.create({
-          doc: newText,
-          extensions: [
-            EditorState.readOnly.of(!editable),
-            EditorView.editable.of(editable),
-            EditorView.contentAttributes.of({
-              spellcheck: "false",
-              autocorrect: "off",
-              autocapitalize: "off",
-              "aria-label": `${file.path} diff editor`,
-            }),
-            editable ? lineNumbers() : cmLineNumbers(anchors, setSelectedRange, setCommentRange),
-            editable ? [] : [cmCommentGutter(anchors, setSelectedRange, setCommentRange), cmHoverCommentHandle()],
-            cmDecorations,
-            cmGutterLineClasses,
-            editable ? [drawSelection(), singleSelectionOnly()] : [],
-            editable
-              ? []
-              : [
-                  rectangularSelection({
-                    eventFilter: (event) => event.button === 1 || (event.button === 0 && event.altKey),
-                  }),
-                  crosshairCursor({ key: "Alt" }),
-                ],
-            language,
-            EditorView.updateListener.of((update) => {
-              if (update.docChanged) {
-                setDirty(true);
-                onDirtyChange?.(true);
-              }
-            }),
-            editable ? history() : [],
-            editable
-              ? keymap.of([
-                  {
-                    key: "Mod-s",
-                    run: () => {
-                      void saveCurrent();
-                      return true;
-                    },
-                  },
-                  ...historyKeymap,
-                ])
-              : [],
-            syntaxHighlighting(diffectHighlightStyle),
-            unifiedMergeView({
-              original: oldText,
-              mergeControls: false,
-              gutter: true,
-              highlightChanges: false,
-              allowInlineDiffs: false,
-              syntaxHighlightDeletionsMaxLength: deletedSyntaxHighlightMaxLength,
-              collapseUnchanged: { margin: 3, minSize: 8 },
-            }),
-            wrap ? EditorView.lineWrapping : [],
-            EditorView.theme(
+      const editableUnified = editable && !split;
+      const baseExtensions = (side: DiffSide, anchors: LineAnchors, docPath: string): Extension[] => [
+        EditorState.readOnly.of(!editableUnified),
+        EditorView.editable.of(editableUnified),
+        EditorView.contentAttributes.of({
+          spellcheck: "false",
+          autocorrect: "off",
+          autocapitalize: "off",
+          "aria-label": `${docPath} ${side === "old" ? "old" : "new"} diff editor`,
+        }),
+        editableUnified ? lineNumbers() : cmLineNumbers(anchors, setSelectedRange, setCommentRange),
+        editableUnified ? [] : [cmCommentGutter(anchors, setSelectedRange, setCommentRange), cmHoverCommentHandle()],
+        cmDecorations,
+        cmGutterLineClasses,
+        editableUnified ? [drawSelection(), singleSelectionOnly()] : [],
+        editableUnified
+          ? []
+          : [
+              rectangularSelection({
+                eventFilter: (event) => event.button === 1 || (event.button === 0 && event.altKey),
+              }),
+              crosshairCursor({ key: "Alt" }),
+            ],
+        language,
+        EditorView.updateListener.of((update) => {
+          if (editableUnified && update.docChanged) {
+            setDirty(true);
+            onDirtyChange?.(true);
+          }
+        }),
+        editableUnified ? history() : [],
+        editableUnified
+          ? keymap.of([
               {
-                "&": {
-                  backgroundColor: "var(--panel)",
-                  color: "var(--text)",
-                  fontSize: "13px",
-                },
-                ".cm-scroller": {
-                  fontFamily: "var(--mono)",
-                  lineHeight: "1.5",
-                },
-                ".cm-gutters": {
-                  backgroundColor: "var(--panel)",
-                  color: "var(--muted)",
-                  borderRight: "1px solid var(--border)",
-                },
-                ".cm-activeLineGutter": {
-                  backgroundColor: "transparent",
-                },
-                ".cm-line": {
-                  paddingLeft: "12px",
-                  paddingRight: "16px",
-                },
-                ".cm-cursor": {
-                  borderLeftColor: "var(--text)",
-                },
-                ".cm-deletedChunk": {
-                  backgroundColor: "var(--del-bg)",
-                },
-                ".cm-deletedLine": {
-                  backgroundColor: "var(--del-bg)",
-                  color: "var(--text)",
-                  textDecoration: "none",
-                },
-                ".cm-inlineChangedLine, .cm-changedLine": {
-                  backgroundColor: "var(--add-bg)",
-                },
-                ".cm-insertedLine, ins.cm-insertedLine, .cm-insertedLine ins": {
-                  backgroundColor: "transparent",
-                  color: "inherit",
-                  textDecoration: "none",
-                },
-                "ins": {
-                  textDecoration: "none",
-                },
-                ".cm-changedText, .cm-changedText *": {
-                  backgroundColor: "transparent",
-                  backgroundImage: "none",
-                  borderBottom: "none",
-                  boxShadow: "none",
-                  textDecoration: "none",
-                },
-                ".cm-deletedText": {
-                  backgroundColor: "color-mix(in srgb, var(--del-ink) 20%, transparent)",
-                  textDecoration: "none",
-                },
-                ".cm-changedLineGutter": {
-                  backgroundColor: "transparent",
-                  boxShadow: "inset 3px 0 0 var(--add-ink)",
-                  color: "var(--muted)",
-                },
-                ".cm-deletedLineGutter": {
-                  backgroundColor: "transparent",
-                  boxShadow: "inset 3px 0 0 var(--del-ink)",
-                  color: "var(--muted)",
+                key: "Mod-s",
+                run: () => {
+                  void saveCurrent();
+                  return true;
                 },
               },
-              { dark: theme === "dark" },
-            ),
-          ],
-        }),
-      });
-      if (!editable) {
-        const onMove = (event: MouseEvent) => updateHoverCommentHandle(view, event);
-        const onLeave = () => clearHoverCommentHandles(view);
+              ...historyKeymap,
+            ])
+          : [],
+        syntaxHighlighting(diffectHighlightStyle),
+        wrap ? EditorView.lineWrapping : [],
+        cmDiffTheme(theme),
+      ];
+
+      if (split) {
+        const oldAnchors = buildSideLineAnchors("old", countDocLines(oldText), file);
+        const newAnchors = buildSideLineAnchors("new", countDocLines(newText), file);
+        const mergeView = new MergeView({
+          parent: host,
+          a: {
+            doc: oldText,
+            extensions: baseExtensions("old", oldAnchors, file.oldPath ?? file.path),
+          },
+          b: {
+            doc: newText,
+            extensions: baseExtensions("new", newAnchors, file.path),
+          },
+          orientation: "a-b",
+          gutter: true,
+          highlightChanges: false,
+          collapseUnchanged: { margin: 3, minSize: 8 },
+        });
+        mergeViewRef.current = mergeView;
+        viewRef.current = null;
+        viewContextsRef.current = [
+          { side: "old", view: mergeView.a },
+          { side: "new", view: mergeView.b },
+        ];
+      } else {
+        const anchors = buildLineAnchors(file, countDocLines(newText));
+        const view = new EditorView({
+          parent: host,
+          state: EditorState.create({
+            doc: newText,
+            extensions: [
+              ...baseExtensions("unified", anchors, file.path),
+              unifiedMergeView({
+                original: oldText,
+                mergeControls: false,
+                gutter: true,
+                highlightChanges: false,
+                allowInlineDiffs: false,
+                syntaxHighlightDeletionsMaxLength: deletedSyntaxHighlightMaxLength,
+                collapseUnchanged: { margin: 3, minSize: 8 },
+              }),
+            ],
+          }),
+        });
+        viewRef.current = view;
+        mergeViewRef.current = null;
+        viewContextsRef.current = [{ side: "unified", view }];
+      }
+
+      const onMove = (event: MouseEvent) => {
+        for (const { view } of viewContextsRef.current) updateHoverCommentHandle(view, event);
+      };
+      const onLeave = () => {
+        for (const { view } of viewContextsRef.current) clearHoverCommentHandles(view);
+      };
+      if (!editableUnified) {
         host.addEventListener("mousemove", onMove);
         host.addEventListener("mouseleave", onLeave);
         cleanupHover = () => {
@@ -460,7 +442,6 @@ export function CodeMirrorDiffBody({
           host.removeEventListener("mouseleave", onLeave);
         };
       }
-      viewRef.current = view;
       setViewVersion((version) => version + 1);
     });
 
@@ -468,29 +449,40 @@ export function CodeMirrorDiffBody({
       cancelled = true;
       cleanupHover();
       viewRef.current?.destroy();
+      mergeViewRef.current?.destroy();
       viewRef.current = null;
+      mergeViewRef.current = null;
+      viewContextsRef.current = [];
     };
-  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, editable, file.path, lineAnchorKey, onDirtyChange, saveCurrent, theme, wrap]);
+  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, editable, file, file.path, lineAnchorKey, onDirtyChange, saveCurrent, split, theme, wrap]);
 
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const anchors = buildLineAnchors(file, view.state.doc.lines);
+    const contexts = viewContextsRef.current;
+    if (contexts.length === 0) return;
     const ranges = rangeHighlights(threads, selectedRange, commentRange);
-    const host = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
-    host.classList.toggle("cm-comment-form-open", commentRange !== null);
-    host.classList.toggle("cm-diff-editable", editable);
-    view.dispatch({
-      effects: [
-        setCmDecorations.of(buildCmDecorations(view, anchors, ranges, threads, commentRange, renderLineWidget)),
-        setCmGutterLineClasses.of(
-          buildCmGutterLineClasses(view, anchors, ranges, selectedRange && !commentRange ? selectedRange : null),
-        ),
-      ],
-    });
-    syncDeletedRangeHighlights(view, ranges);
-    view.requestMeasure();
-  }, [commentRange, file, renderLineWidget, selectedRange, threads, viewVersion]);
+    for (const { side, view } of contexts) {
+      const anchors = side === "unified"
+        ? buildLineAnchors(file, view.state.doc.lines)
+        : buildSideLineAnchors(side, view.state.doc.lines, file);
+      const sideRanges = side === "unified" ? ranges : ranges.filter((range) => range.side === side);
+      const sideThreads = side === "unified" ? threads : threads.filter((thread) => thread.side === side);
+      const sideCommentRange = !commentRange || side === "unified" || commentRange.side === side ? commentRange : null;
+      const dragRange = selectedRange && !commentRange && (side === "unified" || selectedRange.side === side)
+        ? selectedRange
+        : null;
+      const host = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+      host.classList.toggle("cm-comment-form-open", commentRange !== null);
+      host.classList.toggle("cm-diff-editable", editable && !split);
+      view.dispatch({
+        effects: [
+          setCmDecorations.of(buildCmDecorations(view, anchors, sideRanges, sideThreads, sideCommentRange, renderLineWidget)),
+          setCmGutterLineClasses.of(buildCmGutterLineClasses(view, anchors, sideRanges, dragRange)),
+        ],
+      });
+      if (side === "unified") syncDeletedRangeHighlights(view, ranges);
+      view.requestMeasure();
+    }
+  }, [commentRange, editable, file, renderLineWidget, selectedRange, split, threads, viewVersion]);
 
   if (content.old === null || content.new === null) {
     return <div className="cm-diff-unavailable">CodeMirror preview needs readable old/new file content.</div>;
@@ -502,8 +494,8 @@ export function CodeMirrorDiffBody({
           Some deleted lines are shown as plain text to keep this large diff responsive.
         </div>
       )}
-      <div className={`cm-diff-shell${editable ? " edit-mode" : ""}`}>
-        {editable && (
+      <div className={`cm-diff-shell${editable && !split ? " edit-mode" : ""}${split ? " split-mode" : ""}`}>
+        {editable && !split && (
           <div className="cm-diff-save-pill">
             <button type="button" className="ghost mini" onClick={() => void saveCurrent()} disabled={!dirty || saving}>
               {saving ? "Saving…" : "Save"}
@@ -890,6 +882,29 @@ function oldDeletedLineAtPoint(view: EditorView, clientX: number, clientY: numbe
   return null;
 }
 
+function buildSideLineAnchors(side: Side, docLines: number, file: DiffFile): LineAnchors {
+  const old = new Map<number, number>();
+  const next = new Map<number, number>();
+  const targets: LineTarget[] = [];
+  const map = side === "old" ? old : next;
+  for (let line = 1; line <= docLines; line += 1) {
+    map.set(line, line);
+    targets.push({ side, line, docLine: line });
+  }
+
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      const actual = side === "old" ? line.old : line.new;
+      if (actual === null) continue;
+      map.set(actual, clampDocLine(actual, docLines));
+    }
+  }
+
+  const targetsByDocLine = new Map<number, LineTarget[]>();
+  for (const target of targets) targetsByDocLine.set(target.docLine, [target]);
+  return { old, new: next, targets, targetsByDocLine };
+}
+
 function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
   const old = new Map<number, number>();
   const next = new Map<number, number>();
@@ -953,6 +968,89 @@ function countDocLines(text: string): number {
 
 function clampDocLine(line: number, docLines: number): number {
   return Math.min(Math.max(1, line), Math.max(1, docLines));
+}
+
+function cmDiffTheme(theme: Theme): Extension {
+  return EditorView.theme(
+    {
+      "&": {
+        backgroundColor: "var(--panel)",
+        color: "var(--text)",
+        fontSize: "13px",
+      },
+      ".cm-scroller": {
+        fontFamily: "var(--mono)",
+        lineHeight: "1.5",
+      },
+      ".cm-gutters": {
+        backgroundColor: "var(--panel)",
+        color: "var(--muted)",
+        borderRight: "1px solid var(--border)",
+      },
+      ".cm-activeLineGutter": {
+        backgroundColor: "transparent",
+      },
+      ".cm-line": {
+        paddingLeft: "12px",
+        paddingRight: "16px",
+      },
+      ".cm-cursor": {
+        borderLeftColor: "var(--text)",
+      },
+      ".cm-deletedChunk": {
+        backgroundColor: "var(--del-bg)",
+      },
+      ".cm-deletedLine": {
+        backgroundColor: "var(--del-bg)",
+        color: "var(--text)",
+        textDecoration: "none",
+      },
+      ".cm-inlineChangedLine, .cm-changedLine": {
+        backgroundColor: "var(--add-bg)",
+      },
+      ".cm-insertedLine, ins.cm-insertedLine, .cm-insertedLine ins": {
+        backgroundColor: "transparent",
+        color: "inherit",
+        textDecoration: "none",
+      },
+      "ins": {
+        textDecoration: "none",
+      },
+      ".cm-changedText, .cm-changedText *": {
+        backgroundColor: "transparent",
+        backgroundImage: "none",
+        borderBottom: "none",
+        boxShadow: "none",
+        textDecoration: "none",
+      },
+      ".cm-deletedText": {
+        backgroundColor: "color-mix(in srgb, var(--del-ink) 20%, transparent)",
+        textDecoration: "none",
+      },
+      ".cm-changedLineGutter": {
+        backgroundColor: "transparent",
+        boxShadow: "inset 3px 0 0 var(--add-ink)",
+        color: "var(--muted)",
+      },
+      ".cm-deletedLineGutter": {
+        backgroundColor: "transparent",
+        boxShadow: "inset 3px 0 0 var(--del-ink)",
+        color: "var(--muted)",
+      },
+      ".cm-mergeView": {
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+        gap: "0",
+      },
+      ".cm-mergeViewEditors": {
+        display: "contents",
+      },
+      ".cm-mergeView .cm-editor:first-child": {
+        borderRight: "1px solid var(--border)",
+      },
+    },
+    { dark: theme === "dark" },
+  );
 }
 
 const diffectHighlightStyle = HighlightStyle.define([

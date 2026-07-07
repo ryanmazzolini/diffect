@@ -59,13 +59,16 @@ test("renders the default CodeMirror diff renderer", async ({ page }) => {
   await expect(page.locator(".cm-diff-host .cm-deletedChunk").first()).toBeVisible();
 });
 
-test("split view falls back to the legacy read-only renderer", async ({ page }) => {
+test("split view uses the CodeMirror merge renderer", async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem("diffect-split-view"));
   await page.goto("/");
+  const firstFile = page.locator(".file").first();
+  await expect(firstFile.locator(".cm-diff-host .cm-editor").first()).toBeVisible();
   await page.getByRole("button", { name: "Options" }).click();
   await page.getByRole("button", { name: "Split" }).click();
 
-  await expect(page.locator("[data-component='git-diff-view']").first()).toBeVisible();
-  await expect(page.locator(".diff-line-old-content").first()).toBeVisible();
+  await expect(firstFile.getByRole("textbox", { name: /old diff editor/ })).toBeVisible();
+  await expect(firstFile.getByRole("textbox", { name: /new diff editor/ })).toBeVisible();
 });
 
 test("loads GraphQL language support in the CodeMirror diff renderer", async ({ page }) => {

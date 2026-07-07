@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Thread } from "@diffect/shared";
 import { ThreadConversation } from "./ThreadConversation.js";
 
-/** Inline thread renderer shared by git-diff-view and CodeMirror. */
+/** Inline thread renderer shared by diff surfaces. */
 export function InlineThread({
   thread,
   onChanged,

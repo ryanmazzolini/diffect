@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openCmCommentForm } from "./helpers.js";
 
 /**
  * A resolved thread collapses to a marker in the diff (feedback never vanishes
@@ -7,17 +8,12 @@ import { test, expect } from "@playwright/test";
 test("resolved thread collapses in the diff, then can be deleted", async ({
   page,
 }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
 
   // Create a thread on the changed line.
-  const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await row.hover();
-  await row.locator("button.diff-add-widget").first().click();
-  await page.locator(".comment-form textarea").fill("nit: spacing here");
-  await page
-    .locator(".comment-form")
-    .getByRole("button", { name: "Comment" })
-    .click();
+  const form = await openCmCommentForm(page);
+  await form.locator("textarea").fill("nit: spacing here");
+  await form.getByRole("button", { name: "Comment" }).click();
 
   // Close it from the inline conversation.
   const thread = page
@@ -31,12 +27,10 @@ test("resolved thread collapses in the diff, then can be deleted", async ({
 
   // Expand and delete it (Delete now asks for confirmation).
   await collapsed.click();
+  const expanded = page.locator(".inline-thread", { hasText: "nit: spacing here" }).first();
+  await expect(expanded).toBeVisible();
   page.once("dialog", (d) => d.accept());
-  await page
-    .locator(".inline-thread", { hasText: "nit: spacing here" })
-    .first()
-    .getByRole("button", { name: "Delete" })
-    .click();
+  await expanded.getByRole("button", { name: "Delete" }).click({ force: true });
 
   // Gone from the diff entirely.
   await expect(page.locator(".thread-collapsed", { hasText: "nit: spacing here" })).toHaveCount(0);

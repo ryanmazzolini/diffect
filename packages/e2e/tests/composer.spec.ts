@@ -1,15 +1,9 @@
 import { test, expect } from "@playwright/test";
-
-async function openCommentForm(page) {
-  const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await row.hover();
-  await row.locator("button.diff-add-widget").first().click();
-  return page.locator(".comment-form");
-}
+import { openCmCommentForm } from "./helpers.js";
 
 test("Preview mode renders the markdown", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
 
   await form.locator("textarea").fill("**bold** and `code`");
   await form.getByRole("tab", { name: "Preview" }).click();
@@ -19,8 +13,8 @@ test("Preview mode renders the markdown", async ({ page }) => {
 });
 
 test("the bold toolbar button wraps the selection", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
 
   const textarea = form.locator("textarea");
   await textarea.fill("guard");
@@ -32,8 +26,8 @@ test("the bold toolbar button wraps the selection", async ({ page }) => {
 });
 
 test("numbered lists continue on enter", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
   const textarea = form.locator("textarea");
 
   await textarea.fill("1. first");
@@ -44,8 +38,8 @@ test("numbered lists continue on enter", async ({ page }) => {
 });
 
 test("home/end stay inside the markdown editor", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
   const textarea = form.locator("textarea");
   const pane = page.locator(".diff-pane");
 
@@ -59,8 +53,8 @@ test("home/end stay inside the markdown editor", async ({ page }) => {
 });
 
 test("preview strips unsafe markdown output", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
 
   await form.locator("textarea").fill(
     '[x](javascript:alert(1))\n\n<img src=x onerror="alert(2)">\n\n<iframe src="javascript:alert(3)"></iframe>',
@@ -72,8 +66,8 @@ test("preview strips unsafe markdown output", async ({ page }) => {
 });
 
 test("attaching a file inserts a markdown image link", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
 
   await form.locator('input[type="file"]').setInputFiles({
     name: "pic.png",
@@ -87,8 +81,8 @@ test("attaching a file inserts a markdown image link", async ({ page }) => {
 });
 
 test("dropping an image inserts a markdown image link", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
 
   await form.locator("textarea").evaluate((textarea) => {
     const data = new DataTransfer();
@@ -108,8 +102,8 @@ test("dropping an image inserts a markdown image link", async ({ page }) => {
 });
 
 test("a comment renders as markdown once posted", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const form = await openCommentForm(page);
+  await page.goto("/");
+  const form = await openCmCommentForm(page);
 
   await form.locator("textarea").fill("see `parseInt` docs");
   await form.getByRole("button", { name: "Comment" }).click();

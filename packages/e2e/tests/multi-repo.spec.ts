@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openCmCommentForm } from "./helpers.js";
 
 /**
  * The multi-repo "modules view". This project runs against a daemon seeded by
@@ -10,7 +11,7 @@ import { test, expect } from "@playwright/test";
  */
 
 test("renders the workspace identity and one module per repo", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   // N≥2 keeps the workspace picker/path in the topbar plus a repo count.
   await expect(page.locator(".workspace-trigger")).toBeVisible();
   await expect(page.locator(".workspace-path")).toBeVisible();
@@ -27,7 +28,7 @@ test("renders the workspace identity and one module per repo", async ({ page }) 
 });
 
 test("each module shows only its own repo's diff", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');
   const beta = page.locator('.module[data-repo="beta"]');
 
@@ -39,7 +40,7 @@ test("each module shows only its own repo's diff", async ({ page }) => {
 });
 
 test("PR Draft keeps one draft per repo", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   await page.getByRole("tab", { name: "PR Draft" }).click();
   const alpha = page.locator(".pr-draft-card", { hasText: "alpha" });
   const beta = page.locator(".pr-draft-card", { hasText: "beta" });
@@ -70,7 +71,7 @@ test("PR Draft keeps one draft per repo", async ({ page }) => {
 });
 
 test("selecting a repo in the sidebar focuses its module", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   // Wait until the stacked content actually overflows the scroll container. Until
   // the modules have height, selecting a repo can't scroll its module to the top,
   // and the scroll-spy would just re-pick the topmost one — a sub-second load race,
@@ -97,7 +98,7 @@ test("selecting a repo in the sidebar focuses its module", async ({ page }) => {
 });
 
 test("a comment posted in a module is scoped to that repo", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   const beta = page.locator('.module[data-repo="beta"]');
   await expect(beta).toBeVisible();
   // Beta's diff bodies start as off-screen placeholders (scroll-windowing) and
@@ -113,13 +114,7 @@ test("a comment posted in a module is scoped to that repo", async ({ page }) => 
     )
     .toBeGreaterThan(0);
   await beta.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  const row = beta.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await expect(row).toBeVisible();
-  await row.hover();
-  await row.locator("button.diff-add-widget").first().click();
-
-  const form = page.locator(".comment-form");
-  await expect(form).toBeVisible();
+  const form = await openCmCommentForm(page, beta);
   await form.locator("textarea").fill("scoped to beta only");
   await form.getByRole("button", { name: "Comment" }).click();
 
@@ -135,7 +130,7 @@ test("a comment posted in a module is scoped to that repo", async ({ page }) => 
 });
 
 test("collapsing a module hides its diff body but not its sibling", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');
   await expect(alpha.locator(".mod-body")).toBeVisible();
 
@@ -148,7 +143,7 @@ test("collapsing a module hides its diff body but not its sibling", async ({ pag
 });
 
 test("multi-repo topbar sheds per-repo controls", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
 
   // N≥2 sheds the topbar's per-repo controls — the base…compare picker now lives
   // in each module header. Global view preferences live in the topbar Options menu.
@@ -158,7 +153,7 @@ test("multi-repo topbar sheds per-repo controls", async ({ page }) => {
 });
 
 test("a module's ref picker popover escapes the module scroll clip", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');
   await expect(alpha).toBeVisible();
 

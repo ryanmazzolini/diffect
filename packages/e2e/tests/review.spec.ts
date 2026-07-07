@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openCmCommentForm } from "./helpers.js";
 
 /**
  * Customer-experience flows against a live diffectd serving the built SPA over a
@@ -7,23 +8,18 @@ import { test, expect } from "@playwright/test";
  */
 
 test("loads the workspace and shows the work diff", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   // The brand is now a compact "d" logo mark; this is just a shell-loaded smoke check.
   await expect(page.locator(".brand")).toBeVisible();
   // The fixture has a modified calc.js in the default work target.
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
-  await expect(page.locator("tbody.diff-table-body tr").first()).toBeVisible();
+  await expect(page.locator(".cm-diff-host .cm-editor").first()).toBeVisible();
 });
 
 test("creates an inline comment and it appears in the inbox", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   // Hover the changed line to reveal the comment affordance, then open the form.
-  const addedLine = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await addedLine.hover();
-  await addedLine.locator("button.diff-add-widget").first().click();
-
-  const form = page.locator(".comment-form");
-  await expect(form).toBeVisible();
+  const form = await openCmCommentForm(page);
   await form.locator("textarea").fill("Does this overflow for large ints?");
   await form.getByRole("button", { name: "Comment" }).click();
 
@@ -61,15 +57,14 @@ test("desktop follow mode jumps to the changed file", async ({ page }) => {
 });
 
 test("thread pane comments jump to their inline thread", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   await page.locator(".tree-file", { hasText: "math.js" }).click();
 
-  const math = page.locator(".file", { hasText: "math.js" });
-  const row = math.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await row.hover();
-  await row.locator("button.diff-add-widget").first().click();
-  await page.locator(".comment-form textarea").fill("jump back to math");
-  await page.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
+  const math = page.locator('.file[data-path="src/util/math.js"]');
+  await expect(math.locator(".cm-diff-host .cm-editor")).toBeVisible();
+  const form = await openCmCommentForm(page, math);
+  await form.locator("textarea").fill("jump back to math");
+  await form.getByRole("button", { name: "Comment" }).click();
 
   await page.locator(".tree-file", { hasText: "calc.js" }).click();
   await expect(page.locator(".tree-file.active")).toContainText("calc.js");
@@ -86,13 +81,11 @@ test("thread pane comments jump to their inline thread", async ({ page }) => {
 });
 
 test("resolves a thread and the open count drops", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   // Create a thread first.
-  const row = page.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await row.hover();
-  await row.locator("button.diff-add-widget").first().click();
-  await page.locator(".comment-form textarea").fill("please rename this");
-  await page.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
+  const form = await openCmCommentForm(page);
+  await form.locator("textarea").fill("please rename this");
+  await form.getByRole("button", { name: "Comment" }).click();
 
   // Wait for the new thread to render inline — that means the store and the
   // scoped counts have refreshed.
@@ -122,7 +115,7 @@ test("resolves a thread and the open count drops", async ({ page }) => {
 });
 
 test("switches review target without errors", async ({ page }) => {
-  await page.goto("/?renderer=git");
+  await page.goto("/");
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
   // Scope to the Topbar's local-mode control: selecting a target also surfaces that
   // review as a sidebar session-item sharing the same accessible name, so an

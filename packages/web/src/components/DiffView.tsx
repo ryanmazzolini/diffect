@@ -7,18 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
-import {
-  DiffViewWithMultiSelect,
-  DiffFile as LibDiffFile,
-  DiffModeEnum,
-  SplitSide,
-  type DiffViewWithMultiSelectRef,
-  type LineRange,
-  type MultiSelectResult,
-  type MultiSelectState,
-} from "@git-diff-view/react";
 import type { DiffFile, DiffHunk, FileContent, RepoDiff, Side, Thread } from "@diffect/shared";
 import type { Theme } from "../theme.js";
 import { api } from "../api.js";
@@ -45,19 +34,9 @@ const DELETED_SYNTAX_HIGHLIGHT_MAX_QUERY = "cm6DeletedSyntaxHighlightMax";
 const CodeMirrorDiffBody = lazy(() =>
   import("./CodeMirrorDiffBody.js").then((m) => ({ default: m.CodeMirrorDiffBody })),
 );
-const DIFF_RENDERER_KEY = "diffect-diff-renderer";
-type DiffRenderer = "git" | "cm6";
 type CodeMirrorInteractionMode = "review" | "edit";
 
-function initialDiffRenderer(): DiffRenderer {
-  if (typeof window === "undefined") return "cm6";
-  const requested = new URLSearchParams(window.location.search).get("renderer");
-  if (requested === "cm6" || requested === "git") {
-    window.localStorage.setItem(DIFF_RENDERER_KEY, requested);
-    return requested;
-  }
-  return window.localStorage.getItem(DIFF_RENDERER_KEY) === "git" ? "git" : "cm6";
-}
+
 
 function initialDeletedSyntaxHighlightMaxLength(): number {
   if (typeof window === "undefined") return DEFAULT_DELETED_SYNTAX_HIGHLIGHT_MAX_LENGTH;
@@ -113,7 +92,6 @@ export const DiffView = memo(function DiffView({
   onEditor,
   onOpenFile,
 }: Props) {
-  const [renderer] = useState<DiffRenderer>(initialDiffRenderer);
   const [deletedSyntaxHighlightMaxLength] = useState(initialDeletedSyntaxHighlightMaxLength);
   const [localDaemon] = useState(isLocalOrigin);
   // One pass to bucket threads by file, kept stable across renders so each file
@@ -137,7 +115,6 @@ export const DiffView = memo(function DiffView({
         [file, ts.filter((t) => t.line !== null)] as [string, Thread[]],
     )
     .filter(([, ts]) => ts.length > 0);
-  const mode = split ? DiffModeEnum.Split : DiffModeEnum.Unified;
   const showingPreview =
     previewFile !== null && !files.some((f) => f.path === previewFile || f.oldPath === previewFile);
 
@@ -171,8 +148,7 @@ export const DiffView = memo(function DiffView({
             target={diff.target}
             file={file}
             threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
-            mode={mode}
-            renderer={renderer}
+            split={split}
             wrap={wrap}
             theme={theme}
             deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
@@ -203,50 +179,6 @@ export const DiffView = memo(function DiffView({
   );
 });
 
-const sigil = (type: DiffHunk["lines"][number]["type"]) =>
-  type === "add" ? "+" : type === "del" ? "-" : " ";
-
-/** Re-serialize our parsed file back into a full unified-diff string (with
- *  `diff --git`/`---`/`+++` headers) — the form git-diff-view's parser expects. */
-function toFullDiff(file: DiffFile): string {
-  const oldPath = file.oldPath ?? file.path;
-  const isAdd = file.status === "added" || file.status === "untracked";
-  const isDel = file.status === "deleted";
-  const out: string[] = [
-    `diff --git a/${oldPath} b/${file.path}`,
-    `--- ${isAdd ? "/dev/null" : `a/${oldPath}`}`,
-    `+++ ${isDel ? "/dev/null" : `b/${file.path}`}`,
-  ];
-  for (const hunk of file.hunks) {
-    out.push(hunk.header);
-    for (const l of hunk.lines) {
-      out.push(sigil(l.type) + l.text);
-      // Round-trip git's no-trailing-newline marker so the renderer's content
-      // check lines up with the real file content on either side.
-      if (l.noNewline) out.push("\\ No newline at end of file");
-    }
-  }
-  // Terminate every line — git's output always ends in a newline (even after a
-  // marker), and @git-diff-view reads a diff that doesn't as an un-terminated
-  // final line, which mismatches content that does end in a newline.
-  return out.join("\n") + "\n";
-}
-
-interface SelectionComment {
-  side: Side;
-  start: number;
-  end: number;
-}
-
-interface LineWidgetData {
-  threads: Thread[];
-  selection: SelectionComment | null;
-}
-
-function emptyLineWidgetData(): LineWidgetData {
-  return { threads: [], selection: null };
-}
-
 function readableFileContent(content: FileContent | "error" | null): content is { old: string; new: string } {
   return content !== null && content !== "error" && content.old !== null && content.new !== null;
 }
@@ -267,105 +199,6 @@ function hasDeletedBlockOver(file: DiffFile, maxLength: number): boolean {
   return false;
 }
 
-/** Thread/form bucket keyed by line number, split by side — git-diff-view's extendData shape. */
-function buildExtendData(
-  threads: Thread[],
-  selection: SelectionComment | null,
-): {
-  oldFile: Record<string, { data: LineWidgetData }>;
-  newFile: Record<string, { data: LineWidgetData }>;
-} {
-  const oldFile: Record<string, { data: LineWidgetData }> = {};
-  const newFile: Record<string, { data: LineWidgetData }> = {};
-  for (const t of threads) {
-    if (t.line === null || t.side === null) continue;
-    const bucket = t.side === "old" ? oldFile : newFile;
-    const renderLine = Math.max(t.line, t.endLine ?? t.line);
-    (bucket[String(renderLine)] ??= { data: emptyLineWidgetData() }).data.threads.push(t);
-  }
-  if (selection) {
-    const bucket = selection.side === "old" ? oldFile : newFile;
-    (bucket[String(selection.end)] ??= { data: emptyLineWidgetData() }).data.selection = selection;
-  }
-  return { oldFile, newFile };
-}
-
-const RANGE_HIGHLIGHT_CLASS = "diff-range-commented";
-
-function clearRangeHighlights(root: HTMLElement): void {
-  root
-    .querySelectorAll(`.${RANGE_HIGHLIGHT_CLASS}`)
-    .forEach((el) => el.classList.remove(RANGE_HIGHLIGHT_CLASS));
-}
-
-function addRangeHighlight(root: HTMLElement, { side, start, end }: SelectionComment): void {
-  for (let line = start; line <= end; line += 1) {
-    root
-      .querySelectorAll<HTMLElement>(`.diff-line-${side}-num span[data-line-num="${line}"]`)
-      .forEach((span) => {
-        const numberCell = span.closest(`.diff-line-${side}-num`);
-        const contentCell = numberCell
-          ?.closest("tr[data-line]")
-          ?.querySelector(`.diff-line-${side}-content`);
-        numberCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
-        contentCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
-      });
-
-    root
-      .querySelectorAll<HTMLElement>(`.diff-line-num span[data-line-${side}-num="${line}"]`)
-      .forEach((span) => {
-        const numberCell = span.closest(".diff-line-num");
-        const contentCell = numberCell
-          ?.closest("tr[data-line]")
-          ?.querySelector(".diff-line-content");
-        numberCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
-        contentCell?.classList.add(RANGE_HIGHLIGHT_CLASS);
-      });
-  }
-}
-
-function threadRange(thread: Thread): SelectionComment | null {
-  if (thread.line === null || thread.side === null) return null;
-  const end = thread.endLine ?? thread.line;
-  return {
-    side: thread.side,
-    start: Math.min(thread.line, end),
-    end: Math.max(thread.line, end),
-  };
-}
-
-const toSide = (side: SplitSide): Side => (side === SplitSide.old ? "old" : "new");
-
-function rangeLines(a: number, b: number): number[] {
-  const start = Math.min(a, b);
-  const end = Math.max(a, b);
-  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
-}
-
-function readLineFromElement(el: HTMLElement | null, side: Side): number | null {
-  if (!el) return null;
-  const splitNum =
-    el.closest(`.diff-line-${side}-num`) ??
-    el.closest(`.diff-line-${side}-content`)?.parentElement?.querySelector(`.diff-line-${side}-num`);
-  const splitLine = splitNum?.querySelector("span[data-line-num]")?.getAttribute("data-line-num");
-  if (splitLine && Number.isFinite(Number(splitLine))) return Number(splitLine);
-
-  const unifiedNum =
-    el.closest(".diff-line-num") ??
-    el.closest("tr[data-line]")?.querySelector(".diff-line-num");
-  const attr = side === "old" ? "data-line-old-num" : "data-line-new-num";
-  const unifiedLine = unifiedNum?.querySelector(`span[${attr}]`)?.getAttribute(attr);
-  return unifiedLine && Number.isFinite(Number(unifiedLine)) ? Number(unifiedLine) : null;
-}
-
-function readAddWidgetStart(target: HTMLElement): SelectionComment | null {
-  const widget = target.closest(".diff-add-widget-wrapper") as HTMLElement | null;
-  const rawSide = widget?.getAttribute("data-add-widget");
-  if (rawSide !== "old" && rawSide !== "new") return null;
-  const line = readLineFromElement(widget, rawSide);
-  return line === null ? null : { side: rawSide, start: line, end: line };
-}
-
 // Memoized so a thread change on one file doesn't re-render every other file.
 const FileDiff = memo(function FileDiff({
   repo,
@@ -373,8 +206,7 @@ const FileDiff = memo(function FileDiff({
   target,
   file,
   threads,
-  mode,
-  renderer,
+  split,
   wrap,
   theme,
   deletedSyntaxHighlightMaxLength,
@@ -390,8 +222,7 @@ const FileDiff = memo(function FileDiff({
   target: string;
   file: DiffFile;
   threads: Thread[];
-  mode: DiffModeEnum;
-  renderer: DiffRenderer;
+  split: boolean;
   wrap: boolean;
   theme: Theme;
   deletedSyntaxHighlightMaxLength: number;
@@ -403,15 +234,11 @@ const FileDiff = memo(function FileDiff({
   onOpenFile: (path: string, line?: number) => void;
 }) {
   // Real old/new content for the diff's two sides, fetched lazily once the body
-  // mounts. Giving git-diff-view the content (vs. just the diff) switches it to
-  // the "merge" compose path, which (a) enables expandable collapsed context and
-  // (b) stops its dev-mode self-check from warning about a file it can't
-  // reconstruct. `null` = still loading; `"error"` = fetch failed, render
-  // diff-only as a fallback.
+  // mounts. `null` = still loading; `"error"` = fetch failed, render a readable
+  // unavailable state rather than mounting CodeMirror.
   const [content, setContent] = useState<FileContent | "error" | null>(null);
 
-  const splitView = mode === DiffModeEnum.Split;
-  const canUseCodeMirror = renderer === "cm6" && !splitView && readableFileContent(content);
+  const canUseCodeMirror = readableFileContent(content);
   const editableTarget = localDaemon && (target === "work" || target === "unstaged");
   const deletedFile = file.status === "deleted";
   const canEditCodeMirror = canUseCodeMirror && editableTarget && !deletedFile;
@@ -421,7 +248,7 @@ const FileDiff = memo(function FileDiff({
   const codeMirrorEditable = canEditCodeMirror && codeMirrorMode === "edit";
   const unavailableEditTitle = deletedFile
     ? "Deleted files can’t be edited here"
-    : editableTarget && splitView
+    : editableTarget && split
       ? "Edit is unavailable in split view; switch to unified"
       : editableTarget && !canUseCodeMirror
         ? "Edit is unavailable until CodeMirror can load this file"
@@ -454,43 +281,6 @@ const FileDiff = memo(function FileDiff({
     [file.path, onChanged, repo, target, worktree],
   );
 
-  // Build + initialize the legacy lib's DiffFile only when CM6 cannot handle this
-  // file yet. Split view intentionally stays on the read-only legacy renderer;
-  // unified CM6 owns the explicit review/edit modes.
-  const diffFile = useMemo(() => {
-    if (content === null || canUseCodeMirror) return null; // wait for content before first render
-    const c = content === "error" ? null : content;
-    const f = LibDiffFile.createInstance({
-      oldFile: {
-        fileName: file.oldPath ?? file.path,
-        fileLang: langForPath(file.oldPath ?? file.path) ?? undefined,
-        content: c?.old ?? undefined,
-      },
-      newFile: {
-        fileName: file.path,
-        fileLang: langForPath(file.path) ?? undefined,
-        content: c?.new ?? undefined,
-      },
-      hunks: [toFullDiff(file)],
-    });
-    f.init();
-    f.buildSplitDiffLines();
-    f.buildUnifiedDiffLines();
-    return f;
-  }, [file, content, canUseCodeMirror]);
-  const multiSelectRef = useRef<DiffViewWithMultiSelectRef>(null);
-  const [selectionComment, setSelectionComment] = useState<SelectionComment | null>(null);
-  const extendData = useMemo(
-    () => buildExtendData(threads, selectionComment),
-    [threads, selectionComment],
-  );
-  const rangeHighlights = useMemo(
-    () => [
-      ...threads.map(threadRange).filter((r): r is SelectionComment => r !== null),
-      ...(selectionComment ? [selectionComment] : []),
-    ],
-    [threads, selectionComment],
-  );
   // Click-to-collapse the diff body; clicking the header toggles it independently.
   const [collapsed, setCollapsed] = useState(false);
 
@@ -508,10 +298,8 @@ const FileDiff = memo(function FileDiff({
   // an unrelated new-but-equal `file` reference can't trigger a needless refetch.
   useEffect(() => {
     setContent(null);
-    setSelectionComment(null);
     setCodeMirrorModeState("review");
     setCodeMirrorDirty(false);
-    multiSelectRef.current?.clearSelection();
     measuredHeight.current = null;
   }, [repo, worktree, target, file.path, file.oldPath]);
   useEffect(() => {
@@ -545,7 +333,7 @@ const FileDiff = memo(function FileDiff({
   }, [near, content, repo, worktree, target, file.path, file.oldPath]);
 
   // The body only renders once content has arrived and the selected renderer is ready.
-  const showBody = mounted && content !== null && (canUseCodeMirror || diffFile !== null);
+  const showBody = mounted && content !== null && canUseCodeMirror;
   // Remember the real rendered height so the placeholder reserves the same space
   // when the body unmounts (keeps the scrollbar stable). ResizeObserver also
   // catches height changes from a wrap/mode toggle while mounted.
@@ -565,151 +353,6 @@ const FileDiff = memo(function FileDiff({
     const rows = file.hunks.reduce((n, h) => n + h.lines.length + 1, 0);
     return Math.max(120, rows * EST_ROW_PX);
   }, [file]);
-
-  useEffect(() => {
-    const root = bodyRef.current;
-    if (!showBody || !root) return;
-    clearRangeHighlights(root);
-    rangeHighlights.forEach((range) => addRangeHighlight(root, range));
-    return () => clearRangeHighlights(root);
-  }, [showBody, rangeHighlights, mode, wrap]);
-
-  const closeSelectionComment = useCallback((onUpdate?: () => void) => {
-    setSelectionComment(null);
-    multiSelectRef.current?.clearSelection();
-    onUpdate?.();
-  }, []);
-
-  const showSelectedRange = useCallback((side: Side, start: number, end: number) => {
-    const lines = rangeLines(start, end);
-    multiSelectRef.current?.setPreselectedLines({
-      old: side === "old" ? lines : [],
-      new: side === "new" ? lines : [],
-    });
-  }, []);
-
-  const onAddWidgetMouseDownCapture = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return;
-      const start = readAddWidgetStart(e.target as HTMLElement);
-      if (!start) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-      setSelectionComment(null);
-      showSelectedRange(start.side, start.start, start.end);
-
-      const drag = { ...start };
-      const updateEnd = (clientX: number, clientY: number) => {
-        const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-        const line = readLineFromElement(el, drag.side);
-        if (line === null) return;
-        drag.end = line;
-        showSelectedRange(drag.side, drag.start, drag.end);
-      };
-      const onMove = (ev: MouseEvent) => updateEnd(ev.clientX, ev.clientY);
-      const onUp = (ev: MouseEvent) => {
-        document.removeEventListener("mousemove", onMove);
-        updateEnd(ev.clientX, ev.clientY);
-        setSelectionComment({
-          side: drag.side,
-          start: Math.min(drag.start, drag.end),
-          end: Math.max(drag.start, drag.end),
-        });
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp, { once: true });
-    },
-    [showSelectedRange],
-  );
-
-  const onMultiSelectChange = useCallback(
-    (_range: LineRange | null, state: MultiSelectState) => {
-      if (state.isSelecting) setSelectionComment(null);
-    },
-    [],
-  );
-
-  const onMultiSelectComplete = useCallback((result: MultiSelectResult) => {
-    const start = Math.min(result.range.startLineNumber, result.range.endLineNumber);
-    const end = Math.max(result.range.startLineNumber, result.range.endLineNumber);
-    if (start === end) return;
-    setSelectionComment({ side: result.range.side === "old" ? "old" : "new", start, end });
-  }, []);
-
-  // Existing threads, plus a pending multi-line comment form under the selected range.
-  const renderExtendLine = useCallback(
-    ({ data, onUpdate }: { data: LineWidgetData; onUpdate: () => void }) => (
-      <div className="lib-thread-stack">
-        {data.threads.map((t) => (
-          <InlineThread
-            key={`${t.id}:${t.status}`}
-            thread={t}
-            onChanged={() => {
-              onChanged();
-              onUpdate();
-            }}
-          />
-        ))}
-        {data.selection && (
-          <div className="lib-selection-widget">
-            <CommentForm
-              repo={repo}
-              worktree={worktree}
-              target={target}
-              file={file.path}
-              side={data.selection.side}
-              line={data.selection.start}
-              endLine={data.selection.end}
-              onCancel={() => closeSelectionComment(onUpdate)}
-              onCreated={() => {
-                closeSelectionComment(onUpdate);
-                onChanged();
-              }}
-            />
-          </div>
-        )}
-      </div>
-    ),
-    [closeSelectionComment, file.path, onChanged, repo, target, worktree],
-  );
-
-  // The new-comment form, opened by the + button or a drag range selection.
-  const renderWidgetLine = useCallback(
-    ({
-      side,
-      lineNumber,
-      fromLineNumber,
-      onClose,
-    }: {
-      side: SplitSide;
-      lineNumber: number;
-      fromLineNumber: number;
-      onClose: () => void;
-    }) => {
-      const start = Math.min(lineNumber, fromLineNumber);
-      const end = Math.max(lineNumber, fromLineNumber);
-      return (
-        <div className="lib-widget">
-          <CommentForm
-            repo={repo}
-            worktree={worktree}
-            target={target}
-            file={file.path}
-            side={toSide(side)}
-            line={start}
-            endLine={end}
-            onCancel={onClose}
-            onCreated={() => {
-              onClose();
-              onChanged();
-            }}
-          />
-        </div>
-      );
-    },
-    [repo, worktree, target, file.path, onChanged],
-  );
 
   const threadCount = threads.length;
   const slash = file.path.lastIndexOf("/");
@@ -787,45 +430,26 @@ const FileDiff = memo(function FileDiff({
           <div
             ref={bodyRef}
             className={`file-body${canUseCodeMirror ? " cm6-file-body" : ""}${codeMirrorEditable ? " edit-mode" : ""}`}
-            onMouseDownCapture={onAddWidgetMouseDownCapture}
           >
-            {canUseCodeMirror ? (
-              <Suspense fallback={<div className="cm-diff-unavailable">Loading CodeMirror renderer…</div>}>
-                <CodeMirrorDiffBody
-                  repo={repo}
-                  worktree={worktree}
-                  target={target}
-                  file={file}
-                  content={content}
-                  threads={threads}
-                  wrap={wrap}
-                  theme={theme}
-                  deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
-                  skipsDeletedSyntaxHighlight={skipsDeletedSyntaxHighlight}
-                  editable={codeMirrorEditable}
-                  onSave={saveCodeMirrorContent}
-                  onChanged={onChanged}
-                  onDirtyChange={setCodeMirrorDirty}
-                />
-              </Suspense>
-            ) : (
-              <DiffViewWithMultiSelect<LineWidgetData>
-                ref={multiSelectRef}
-                diffFile={diffFile!}
-                extendData={extendData}
-                diffViewMode={mode}
-                diffViewWrap={wrap}
-                diffViewTheme={theme}
-                diffViewHighlight
-                diffViewAddWidget
-                enableMultiSelect
-                onMultiSelectChange={onMultiSelectChange}
-                onMultiSelectComplete={onMultiSelectComplete}
-                onAddWidgetClick={() => setSelectionComment(null)}
-                renderExtendLine={renderExtendLine}
-                renderWidgetLine={renderWidgetLine}
+            <Suspense fallback={<div className="cm-diff-unavailable">Loading CodeMirror renderer…</div>}>
+              <CodeMirrorDiffBody
+                repo={repo}
+                worktree={worktree}
+                target={target}
+                file={file}
+                content={content}
+                threads={threads}
+                wrap={wrap}
+                split={split}
+                theme={theme}
+                deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
+                skipsDeletedSyntaxHighlight={skipsDeletedSyntaxHighlight}
+                editable={codeMirrorEditable}
+                onSave={saveCodeMirrorContent}
+                onChanged={onChanged}
+                onDirtyChange={setCodeMirrorDirty}
               />
-            )}
+            </Suspense>
           </div>
         ) : (
           <div
