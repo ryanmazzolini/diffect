@@ -4,23 +4,17 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   addComment,
-  archiveSession,
   createThread,
   deleteThread,
-  loadArchivedSessions,
   loadThreads,
   readEvents,
   replay,
-  replaySessions,
   resolveThread,
   spaceThreadStore,
   UnknownThreadError,
-  UnscopedSessionError,
 } from "../src/reviews/event-log.js";
 import { threadsLogPath } from "../src/store/paths.js";
-import { sessionIdForScope } from "../src/reviews/scope.js";
 import {
-  THREAD_EVENT_TYPES,
   THREAD_SCHEMA_VERSION,
   type ReviewScope,
   type SessionArchivedEvent,
@@ -405,93 +399,30 @@ describe("event log", () => {
   });
 });
 
-describe("session lifecycle (archive/revive)", () => {
-  it("rides session.archived at v2 — a new type, not a schema bump", () => {
-    // The version gate must stay at 2: bumping to 3 would make a v2-only reader
-    // reject *all* v3 events, including thread.created, and hide live threads.
-    expect(THREAD_SCHEMA_VERSION).toBe(2);
-    expect(THREAD_EVENT_TYPES).toContain("session.archived");
-  });
-
-  it("toggles state: archive → revive → archive ends archived", async () => {
-    await archiveSession(dir, { scope: SCOPE, archived: true }, T0);
-    await archiveSession(dir, { scope: SCOPE, archived: false }, T1);
-    await archiveSession(dir, { scope: SCOPE, archived: true }, T2);
-    const archived = await loadArchivedSessions(dir);
-    expect(archived).toHaveLength(1);
-    expect(archived[0]!.sessionId).toBe(sessionIdForScope(SCOPE));
-    // Last writer in log order wins — the latest archive sets archivedAt.
-    expect(archived[0]!.archivedAt).toBe(T2);
-  });
-
-  it("collapses a double-archive to one entry, refreshing the note/timestamp", async () => {
-    await archiveSession(dir, { scope: SCOPE, archived: true, note: "first" }, T0);
-    await archiveSession(dir, { scope: SCOPE, archived: true, note: "second" }, T2);
-    const archived = await loadArchivedSessions(dir);
-    expect(archived).toHaveLength(1);
-    expect(archived[0]!.archivedAt).toBe(T2);
-    expect(archived[0]!.note).toBe("second");
-  });
-
-  it("archives a session that has no threads (scope carried inline)", async () => {
-    // No createThread — a review can be archived with zero comments because the
-    // event carries its own scope; the reducer never consults a thread.
-    const result = await archiveSession(dir, { scope: SCOPE, archived: true }, T0);
-    expect(result).toMatchObject({ sessionId: sessionIdForScope(SCOPE), archivedAt: T0 });
-    const archived = await loadArchivedSessions(dir);
-    expect(archived.map((a) => a.sessionId)).toEqual([sessionIdForScope(SCOPE)]);
-  });
-
-  it("treats reviving a never-archived session as a no-op", async () => {
-    const result = await archiveSession(dir, { scope: SCOPE, archived: false }, T0);
-    expect(result).toBeNull();
-    expect(await loadArchivedSessions(dir)).toEqual([]);
-  });
-
-  it("derives the session id from scope, never from the client", async () => {
-    // ArchiveSessionRequest has no id field by design; the id is always
-    // re-derived from the scope, so two scopes with the same kind+refs collapse.
-    const a = await archiveSession(dir, { scope: SCOPE, archived: true }, T0);
-    expect(a!.sessionId).toBe(sessionIdForScope(SCOPE));
-  });
-
-  it("replaySessions rewinds correctly from a truncated prefix (last-writer-wins)", () => {
-    const ev = (archived: boolean, ts: string): SessionArchivedEvent => ({
+describe("legacy session archive events", () => {
+  it("keeps accepting session.archived records but ignores them during thread replay", async () => {
+    const thread = await createThread(
+      dir,
+      { repo: "repo", file: "a.ts", body: "hello", scope: SCOPE, sessionId: "sess_x" },
+      T0,
+    );
+    const path = threadsLogPath(dir);
+    const existing = await readFile(path, "utf8");
+    const legacyEvent: SessionArchivedEvent = {
       v: THREAD_SCHEMA_VERSION,
       type: "session.archived",
-      ts,
+      ts: T1,
       sessionId: "sess_x",
       scope: SCOPE,
-      archived,
+      archived: true,
       author: { type: "user" },
-      note: null,
-    });
-    const full = [ev(true, T0), ev(false, T1), ev(true, T2)];
-    expect([...replaySessions(full.slice(0, 1)).keys()]).toEqual(["sess_x"]);
-    expect([...replaySessions(full.slice(0, 2)).keys()]).toEqual([]);
-    expect([...replaySessions(full).keys()]).toEqual(["sess_x"]);
-  });
+    };
+    await writeFile(path, `${existing}${JSON.stringify(legacyEvent)}\n`);
 
-  it("round-trips session.archived through readEvents without touching thread replay", async () => {
-    await createThread(dir, { repo: "r", file: "a", line: 1, body: "live" }, T0);
-    await archiveSession(dir, { scope: SCOPE, archived: true }, T1);
-    const events = await readEvents(dir);
-    expect(events.map((e) => e.type)).toEqual(["thread.created", "session.archived"]);
-    // The archive event must not leak into thread reconstruction.
-    const threads = await loadThreads(dir);
-    expect(threads).toHaveLength(1);
-    expect(threads[0]!.comments[0]!.body).toBe("live");
-  });
-
-  it("refuses to archive without a scope (the unscoped bucket is un-archivable)", async () => {
-    await expect(
-      archiveSession(
-        dir,
-        { scope: null as unknown as ReviewScope, archived: true },
-        T0,
-      ),
-    ).rejects.toBeInstanceOf(UnscopedSessionError);
-    // Nothing was written.
-    expect(await loadArchivedSessions(dir)).toEqual([]);
+    expect((await readEvents(dir)).map((e) => e.type)).toEqual([
+      "thread.created",
+      "session.archived",
+    ]);
+    expect(await loadThreads(dir)).toEqual([thread]);
   });
 });

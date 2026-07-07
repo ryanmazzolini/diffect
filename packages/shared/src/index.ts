@@ -198,27 +198,6 @@ export interface ReviewSession {
   worktree: string | null;
 }
 
-/**
- * A review that has been archived (Slice 4) — folded out of the active sidebar
- * into a collapsed "Archived" group, revivable. The archived state is a durable
- * fact in the per-repo log (`session.archived` events, last-writer-wins), not
- * browser state, so every reader sees the same set.
- *
- * The full `scope` is carried so an archived session can be labelled and revived
- * from its stored id even when its branch is no longer checked out — the id is
- * never re-derived (re-derivation needs the live branch, which may have moved).
- */
-export interface ArchivedSession {
-  /** The archived session's id; equals `sessionIdForScope(scope)`. */
-  sessionId: string;
-  /** The scope this session reviewed — for labelling and revival. */
-  scope: ReviewScope;
-  /** ISO timestamp of the winning `session.archived` (archived:true) event. */
-  archivedAt: string;
-  /** Optional note recorded when the review was archived. */
-  note: string | null;
-}
-
 /** Branches, tags, remote-tracking branches, and recent commits for the compare picker (GET /repos/:repo/refs). */
 export interface RefList {
   branches: string[];
@@ -331,12 +310,6 @@ export interface RepoSummary {
    * augments these with sessions reconstructed from existing threads' scopes.
    */
   sessions: ReviewSession[];
-  /**
-   * Sessions archived in this repo's log (Slice 4), newest first. The client
-   * routes any matching id out of the active list into a collapsed "Archived"
-   * group; the overlay wins, so an archived id never appears as active.
-   */
-  archivedSessions: ArchivedSession[];
 }
 
 export interface WorkspaceInfo {
@@ -549,18 +522,8 @@ export interface ThreadDeletedEvent extends BaseEvent {
   author: Author;
 }
 
-/**
- * Archive or revive a review session (Slice 4). One *toggling* type:
- * `archived: true` archives, `archived: false` revives. Last writer in log
- * order wins, so a separate `replaySessions` reducer needs no pairing logic.
- *
- * Rides at v2 — a new event *type*, not a version bump — so older readers drop
- * it via the allowlist (degraded: no archive state) rather than rejecting the
- * whole log. The `scope` is carried inline so the reducer never has to consult a
- * thread to learn the session's scope (a session can be archived with zero
- * threads); `sessionId` is always server-derived from that scope, never trusted
- * from a client.
- */
+/** Legacy event from the removed review archive/revive flow.
+ * Readers keep accepting it so old logs replay; it no longer drives any state. */
 export interface SessionArchivedEvent extends BaseEvent {
   type: "session.archived";
   sessionId: string;
@@ -568,7 +531,6 @@ export interface SessionArchivedEvent extends BaseEvent {
   /** true = archived, false = revived. */
   archived: boolean;
   author: Author;
-  /** Optional note recorded with the archive/revive. */
   note?: string | null;
 }
 
@@ -624,21 +586,6 @@ export interface CreateThreadRequest {
   anchor?: ThreadAnchor | null;
   author?: Author;
   body: string;
-}
-
-/**
- * Body for `POST /repos/:repo/sessions/archive` (Slice 4). The server re-derives
- * the session id from `scope` (`sessionIdForScope`) and never trusts a
- * client-supplied id; a falsy/legacy scope is refused, so the unscoped bucket is
- * structurally un-archivable. `archived: true` archives, `false` revives.
- */
-export interface ArchiveSessionRequest {
-  /** The scope identifying the review to archive/revive. Required, non-falsy. */
-  scope: ReviewScope;
-  /** true = archive, false = revive. */
-  archived: boolean;
-  author?: Author;
-  note?: string | null;
 }
 
 export interface AddCommentRequest {

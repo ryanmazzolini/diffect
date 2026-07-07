@@ -1,8 +1,6 @@
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
   AddCommentRequest,
-  ArchiveSessionRequest,
-  ArchivedSession,
   AttachmentResponse,
   CreateThreadRequest,
   DaemonEventPayload,
@@ -254,18 +252,6 @@ export const api = {
       body: JSON.stringify(req),
     }).then((r) => json<PrDraft>(r));
   },
-
-  /**
-   * Archive (`archived: true`) or revive (`archived: false`) a review session.
-   * Sends only the scope — the server re-derives the session id from it and never
-   * trusts a client-supplied id, so the unscoped bucket (no scope) is un-archivable.
-   */
-  archiveSession: (repo: string, req: ArchiveSessionRequest) =>
-    fetch(`/repos/${encodeURIComponent(repo)}/sessions/archive`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(req),
-    }).then((r) => json<{ ok: boolean; archived: ArchivedSession | null }>(r)),
 
   /**
    * Subscribe to live daemon events; calls onChange with the event type.

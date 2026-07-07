@@ -6,7 +6,6 @@ import { extname, join, resolve, sep } from "node:path";
 import {
   DAEMON_EVENTS,
   type AddCommentRequest,
-  type ArchiveSessionRequest,
   type CreateThreadRequest,
   type DeleteThreadRequest,
   type OpenRequest,
@@ -30,13 +29,11 @@ import {
 } from "./reviews/scope.js";
 import {
   addComment,
-  archiveSession,
   createThread,
   deleteThread,
   resolveThread,
   spaceThreadStore,
   UnknownThreadError,
-  UnscopedSessionError,
   type ThreadStoreRef,
 } from "./reviews/event-log.js";
 import {
@@ -200,7 +197,6 @@ async function handle(
   if (await workspaceRoutes(ctx, req, res, url, method, path)) return;
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
-  if (await sessionRoutes(ctx, req, res, method, path)) return;
   if (await prDraftRoutes(ctx, req, res, url, method, path)) return;
   if (await spaceFileRoutes(ctx, res, url, method, path)) return;
   if (await repoRoutes(ctx, res, url, method, path)) return;
@@ -514,50 +510,6 @@ async function deleteThreadRoute(
   } catch (err) {
     if (err instanceof UnknownThreadError) {
       sendJson(res, 404, { error: err.message });
-    } else {
-      throw err;
-    }
-  }
-  return true;
-}
-
-/**
- * `POST /repos/:repo/sessions/archive` — archive or revive a review session.
- * The body's `scope` identifies the review; the server re-derives the session id
- * from it (never trusting a client-supplied id) and refuses a falsy/legacy scope.
- */
-async function sessionRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  const m = /^\/repos\/(.+)\/sessions\/archive$/.exec(path);
-  if (!(method === "POST" && m)) return false;
-  const repoName = decodeURIComponent(m[1]!);
-  const repo = findRepo(ctx.ws, repoName);
-  if (!repo) {
-    sendJson(res, 404, { error: `unknown repo: ${repoName}` });
-    return true;
-  }
-  const body = await readJsonBody<ArchiveSessionRequest>(req);
-  if (!body || !body.scope || typeof body.archived !== "boolean") {
-    sendJson(res, 400, { error: "scope and archived are required" });
-    return true;
-  }
-  try {
-    // The store is keyed by the repo's PRIMARY root so all worktrees share one
-    // log; archiveSession re-derives the session id from the scope and refuses a
-    // falsy/legacy scope (the unscoped bucket is structurally un-archivable).
-    const result = await archiveSession(repo.root, body, ctx.now());
-    // archivedSessions rides on the workspace summary, which the client refetches
-    // only on workspaceChanged — the thread-log write alone fires threadChanged.
-    ctx.events.notify(DAEMON_EVENTS.workspaceChanged);
-    sendJson(res, 200, { ok: true, archived: result });
-  } catch (err) {
-    if (err instanceof UnscopedSessionError) {
-      sendJson(res, 400, { error: err.message });
     } else {
       throw err;
     }

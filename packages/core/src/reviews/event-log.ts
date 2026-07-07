@@ -5,19 +5,15 @@ import {
   THREAD_EVENT_TYPES,
   THREAD_SCHEMA_VERSION,
   type AddCommentRequest,
-  type ArchivedSession,
-  type ArchiveSessionRequest,
   type Author,
   type CreateThreadRequest,
   type DeleteThreadRequest,
   type ResolveThreadRequest,
-  type SessionArchivedEvent,
   type Thread,
   type ThreadCreatedEvent,
   type ThreadEvent,
 } from "@diffect/shared";
 import { genId } from "./ids.js";
-import { sessionIdForScope } from "./scope.js";
 import {
   spaceThreadsLogPath,
   threadsLogPath as repoThreadsLogPath,
@@ -57,18 +53,6 @@ export class UnknownThreadError extends Error {
   constructor(public readonly threadId: string) {
     super(`unknown thread: ${threadId}`);
     this.name = "UnknownThreadError";
-  }
-}
-
-/**
- * Raised when a session-lifecycle action is attempted without a scope. The
- * legacy/unscoped bucket has no scope and therefore no derivable session id, so
- * it is structurally un-archivable — the caller maps this to a 400.
- */
-export class UnscopedSessionError extends Error {
-  constructor() {
-    super("cannot archive a review without a scope");
-    this.name = "UnscopedSessionError";
   }
 }
 
@@ -174,77 +158,6 @@ export async function deleteThread(
     thread: threadId,
     author: req.author ?? { type: "user" },
   });
-}
-
-/**
- * Append a `session.archived` event toggling a review's archived state. Returns
- * the resulting `ArchivedSession` when archiving, or null when reviving.
- *
- * The session id is ALWAYS re-derived from `req.scope` via `sessionIdForScope` —
- * a client-supplied id is never trusted — and a falsy/legacy scope is refused
- * (`UnscopedSessionError`), so the unscoped bucket can't be archived. The scope
- * is carried inline on the event so `replaySessions` never has to consult a
- * thread to label the session (a review can be archived with zero threads).
- */
-export async function archiveSession(
-  repoRoot: string,
-  req: ArchiveSessionRequest,
-  now: string,
-): Promise<ArchivedSession | null> {
-  if (!req.scope) throw new UnscopedSessionError();
-  const sessionId = sessionIdForScope(req.scope);
-  const event: SessionArchivedEvent = {
-    v: THREAD_SCHEMA_VERSION,
-    type: "session.archived",
-    ts: now,
-    sessionId,
-    scope: req.scope,
-    archived: req.archived,
-    author: req.author ?? { type: "user" },
-    note: req.note ?? null,
-  };
-  await appendEvent(repoRoot, event);
-  return req.archived
-    ? { sessionId, scope: req.scope, archivedAt: now, note: req.note ?? null }
-    : null;
-}
-
-/**
- * Fold `session.archived` events into the current archived set, in log order
- * (last writer wins): `archived:true` records/refreshes the entry, `archived:false`
- * removes it. A single pass with no pairing logic — that's the whole point of one
- * toggling event type. Independent of {@link replay}: archiving a review never
- * touches its threads, and a revive simply drops the entry so the review returns
- * to the active set unchanged.
- */
-export function replaySessions(
-  events: ThreadEvent[],
-): Map<string, ArchivedSession> {
-  const archived = new Map<string, ArchivedSession>();
-  for (const e of events) {
-    if (e.type !== "session.archived") continue;
-    if (e.archived) {
-      archived.set(e.sessionId, {
-        sessionId: e.sessionId,
-        scope: e.scope,
-        archivedAt: e.ts,
-        note: e.note ?? null,
-      });
-    } else {
-      archived.delete(e.sessionId);
-    }
-  }
-  return archived;
-}
-
-/** Load the repo's currently-archived sessions, newest archive first. */
-export async function loadArchivedSessions(
-  repoRoot: string,
-): Promise<ArchivedSession[]> {
-  const archived = replaySessions(await readEvents(repoRoot));
-  return [...archived.values()].sort((a, b) =>
-    a.archivedAt === b.archivedAt ? 0 : a.archivedAt < b.archivedAt ? 1 : -1,
-  );
 }
 
 async function appendEvent(
@@ -386,9 +299,8 @@ export function replay(events: ThreadEvent[]): Thread[] {
 
   // Pass 2: apply comments and status changes in log order.
   for (const e of events) {
-    // thread.created is handled in pass 1; session.archived is a session-lifecycle
-    // event that never touches threads (see replaySessions) — neither has a
-    // `.thread` target, so both skip the thread-mutation switch below.
+    // thread.created is handled in pass 1; legacy session.archived events never
+    // touched threads, so both skip the thread-mutation switch below.
     if (e.type === "thread.created" || e.type === "session.archived") continue;
     const t = byId.get(e.thread);
     if (!t) continue;

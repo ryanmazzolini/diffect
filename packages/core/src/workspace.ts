@@ -10,7 +10,6 @@ import {
 import { pullRequestForBranch } from "./git/pull-request.js";
 import { normalizeTarget } from "./git/target.js";
 import { resolveScope, sessionIdForScope } from "./reviews/scope.js";
-import { loadArchivedSessions } from "./reviews/event-log.js";
 import { realpathSafe } from "./path-safe.js";
 
 export interface Workspace {
@@ -284,10 +283,6 @@ export async function summarizeRepos(
           }),
         ),
         sessions: await deriveWorktreeSessions(r),
-        // Archived reviews ride on the summary so the client can route them into a
-        // collapsed group; the archive overlay wins, so an archived id is excluded
-        // from `sessions` client-side (Slice 4).
-        archivedSessions: await loadArchivedSessions(r.root),
       };
     }),
   );
