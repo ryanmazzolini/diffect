@@ -51,6 +51,7 @@ interface Props {
   activeSpaceFile: string | null;
   onSelectFile: (repo: string | null, path: string) => void;
   onShowDiff: () => void;
+  onFileModeChange: (mode: "diff" | "all") => void;
   onCollapse: () => void;
   editorLabel: string | null;
   onOpenRepoFile: (repo: string, path: string) => void;
@@ -139,6 +140,7 @@ export const Sidebar = memo(function Sidebar({
   activeSpaceFile,
   onSelectFile,
   onShowDiff,
+  onFileModeChange,
   onCollapse,
   editorLabel,
   onOpenRepoFile,
@@ -149,6 +151,7 @@ export const Sidebar = memo(function Sidebar({
   const [menu, setMenu] = useState<{ repo: string | null; path: string; x: number; y: number } | null>(null);
 
   useEffect(() => setCollapsedRepos(loadCollapsedRepos(spacePath)), [spacePath]);
+  useEffect(() => onFileModeChange(fileMode), [fileMode, onFileModeChange]);
 
   const repoEntries = useMemo(
     () =>

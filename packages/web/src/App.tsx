@@ -337,6 +337,7 @@ export function App() {
     () => new Map(),
   );
   const [spaceFiles, setSpaceFiles] = useState<string[]>([]);
+  const [sidebarFileMode, setSidebarFileMode] = useState<"diff" | "all">("diff");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
@@ -448,6 +449,8 @@ export function App() {
   // EventSource nor defeat the module memo on every selection change.
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
+  const activeWorkspacePathRef = useRef(activeWorkspacePath);
+  activeWorkspacePathRef.current = activeWorkspacePath;
   const selectionsRef = useRef(selections);
   selectionsRef.current = selections;
   const activeEntry = useMemo(
@@ -1063,10 +1066,13 @@ export function App() {
     }
   }, [refreshDiffFor]);
 
-  const refreshWorkspace = useCallback(() => {
+  const workspaceSeq = useRef(0);
+  const refreshWorkspace = useCallback((workspacePath = activeWorkspacePathRef.current) => {
+    const seq = ++workspaceSeq.current;
     api
-      .workspace()
+      .workspace(workspacePath)
       .then((ws) => {
+        if (seq !== workspaceSeq.current) return;
         setWorkspace(ws);
         setError(null);
         // Keep the current repo only if it still exists (a removed workspace must
@@ -1077,7 +1083,9 @@ export function App() {
             : (ws.repos[0]?.name ?? null),
         );
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        if (seq === workspaceSeq.current) setError(String(e));
+      });
   }, []);
 
   useEffect(() => {
@@ -1093,10 +1101,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    refreshWorkspace();
+    refreshWorkspace(activeWorkspacePath);
+  }, [activeWorkspacePath, refreshWorkspace]);
+
+  useEffect(() => {
     loadWorkspaces();
     refreshThreads();
-  }, [refreshWorkspace, loadWorkspaces, refreshThreads]);
+  }, [loadWorkspaces, refreshThreads]);
 
   // (Switching repos no longer resets the unscoped bucket or optimistic highlight:
   // both are now per-repo (`showUnscopedByRepo`/`pendingByRepo`), so entering a repo
@@ -1220,23 +1231,22 @@ export function App() {
       }
     }
   }, []);
-  // Fan-out refs fetch: every module loads its own repo's refs against its current
-  // checkout, in parallel and cached independently — so each stacked module's
-  // compare picker is populated, not just the active one's. A repo is skipped when
-  // its worktree signature is unchanged. At N=1 this fetches the one repo on
-  // checkout change, exactly as the active-only effect it replaced.
+  // Load compare refs only for the focused repo. Other modules can still search
+  // server-side from their picker, and focusing a module preloads its ref summary.
   useEffect(() => {
-    if (!workspace) return;
-    for (const r of visibleRepos) {
-      const wt = selections.get(r.name)?.worktree ?? null;
-      if (loadedRefsRef.current.get(r.name) === (wt ?? "")) continue;
-      void refreshRefsFor(r.name, wt);
-    }
-  }, [workspace, visibleRepos, selections, refreshRefsFor]);
+    if (!workspace || !repo) return;
+    const activeRepo = visibleRepos.find((r) => r.name === repo);
+    if (!activeRepo) return;
+    const wt = selections.get(activeRepo.name)?.worktree ?? null;
+    if (loadedRefsRef.current.get(activeRepo.name) === (wt ?? "")) return;
+    void refreshRefsFor(activeRepo.name, wt);
+  }, [workspace, visibleRepos, repo, selections, refreshRefsFor]);
 
-  // Load every tracked repo file plus non-repo space files for the sidebar's All files mode.
+  // The tracked-file and space-file scans are only needed for the sidebar's All
+  // files mode. Avoid running them on every workspace switch while the default
+  // Changed files tree is showing.
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace || sidebarFileMode !== "all") return;
     let live = true;
     Promise.all(
       visibleRepos.map(async (r) => {
@@ -1247,14 +1257,21 @@ export function App() {
           return [r.name, [] as string[]] as const;
         }
       }),
-    ).then((rows) => live && setAllFilesByRepo(new Map(rows)));
+    ).then((rows) => {
+      if (!live) return;
+      setAllFilesByRepo((prev) => {
+        const next = new Map(prev);
+        for (const [name, files] of rows) next.set(name, files);
+        return next;
+      });
+    });
     return () => {
       live = false;
     };
-  }, [workspace, visibleRepos, selections]);
+  }, [workspace, visibleRepos, selections, sidebarFileMode]);
 
   useEffect(() => {
-    if (!activeSpacePath) return;
+    if (!activeSpacePath || sidebarFileMode !== "all") return;
     let live = true;
     api
       .spaceFiles(activeSpacePath)
@@ -1263,27 +1280,37 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [activeSpacePath]);
+  }, [activeSpacePath, sidebarFileMode]);
 
-  // Fan-out diff fetch: each repo loads its own selection, in parallel and cached
-  // independently. A module is skipped when its (worktree, target) is already
-  // loaded — so scroll-focus promoting a repo to active never refetches it — UNLESS
-  // a reselect tick targeted the active repo (re-clicking its row forces a retry).
-  // At N=1 this reduces to "fetch the one repo on selection change / reselect."
+  // Load the focused repo's diff first, then hydrate sibling modules shortly
+  // after. Workspace switching should show the selected repo promptly instead of
+  // waiting behind every repo in a multi-repo space.
   useEffect(() => {
     if (!workspace) return;
     const forced = lastReselectRef.current !== reselectTick;
     lastReselectRef.current = reselectTick;
-    for (const r of visibleRepos) {
+    const pending = visibleRepos.filter((r) => {
       const sel = selections.get(r.name) ?? {
         worktree: null,
         target: DEFAULT_TARGET,
       };
       const loaded = loadedSelRef.current.get(r.name) === selSig(sel.worktree, sel.target);
       const isFocused = r.name === repo;
-      if (loaded && !(isFocused && forced)) continue;
+      return !loaded || (isFocused && forced);
+    });
+    const focused = pending.find((r) => r.name === repo);
+    const refresh = (r: RepoSummary) => {
+      const sel = selections.get(r.name) ?? {
+        worktree: null,
+        target: DEFAULT_TARGET,
+      };
       void refreshDiffFor(r.name, sel);
-    }
+    };
+    if (focused) refresh(focused);
+    const rest = pending.filter((r) => r.name !== repo);
+    if (rest.length === 0) return;
+    const timer = window.setTimeout(() => rest.forEach(refresh), 150);
+    return () => window.clearTimeout(timer);
   }, [workspace, visibleRepos, repo, selections, reselectTick, refreshDiffFor]);
 
   const sidebarFiles = useMemo(() => diff?.files ?? EMPTY_FILES, [diff]);
@@ -2048,6 +2075,7 @@ export function App() {
               activeSpaceFile={spacePreviewFile}
               onSelectFile={selectTreeFile}
               onShowDiff={backToDiff}
+              onFileModeChange={setSidebarFileMode}
               onCollapse={toggleSidebar}
               editorLabel={activeEditorLabel}
               onOpenRepoFile={(repoName, path) => {

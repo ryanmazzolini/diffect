@@ -50,7 +50,10 @@ function prDraftQuery(workspacePath: string, repo?: string, worktree?: string | 
 }
 
 export const api = {
-  workspace: () => fetch("/workspace").then((r) => json<WorkspaceInfo>(r)),
+  workspace: (workspacePath?: string | null) => {
+    const q = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : "";
+    return fetch(`/workspace${q}`).then((r) => json<WorkspaceInfo>(r));
+  },
 
   uiState: () => fetch("/ui-state").then((r) => json<UiState>(r)),
 

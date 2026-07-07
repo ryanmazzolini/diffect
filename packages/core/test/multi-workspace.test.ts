@@ -66,6 +66,23 @@ describe("multi-workspace daemon", () => {
         "beta",
       ]);
 
+      // The UI can also ask for only the active workspace, avoiding an expensive
+      // aggregate summary when switching spaces.
+      const scoped = await (
+        await fetch(`${base}/workspace?workspace=${encodeURIComponent(repoB)}`)
+      ).json();
+      expect(scoped.root).toBe(repoB);
+      expect(scoped.repos.map((r: { name: string }) => r.name)).toEqual(["beta"]);
+
+      // A repeat lightweight registration is idempotent and avoids returning the
+      // expensive workspace summary body used by the UI picker.
+      const repeat = await fetch(`${base}/workspaces?summary=0`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: repoB }),
+      });
+      expect(repeat.status).toBe(204);
+
       // /workspaces breaks it down per registered path.
       const entries = await (await fetch(`${base}/workspaces`)).json();
       expect(entries).toHaveLength(2);

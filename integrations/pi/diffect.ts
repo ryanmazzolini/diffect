@@ -269,7 +269,7 @@ async function diffectUrl(
   const baseUrl = await ensureDaemon(pi, workspaceRoot, signal);
   await registerWorkspace(baseUrl, workspaceRoot, signal);
   const loc = await locateRepo(baseUrl, workspaceRoot, anchorRoot, signal);
-  const q = new URLSearchParams({ repo: loc.repo, target });
+  const q = new URLSearchParams({ workspace: workspaceRoot, repo: loc.repo, target });
   if (loc.worktree) q.set("worktree", loc.worktree);
   return { url: `${baseUrl}/?${q}`, workspaceRoot, repoRoot: anchorRoot };
 }
@@ -560,7 +560,7 @@ async function isDiffectd(baseUrl: string, signal?: AbortSignal): Promise<boolea
 }
 
 async function registerWorkspace(baseUrl: string, workspaceRoot: string, signal?: AbortSignal) {
-  const res = await fetch(`${baseUrl}/workspaces`, {
+  const res = await fetch(`${baseUrl}/workspaces?summary=0`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path: workspaceRoot }),

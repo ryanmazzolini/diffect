@@ -197,7 +197,7 @@ async function handle(
 
   // Delegate to route groups; each returns true once it has sent a response.
   if (await uiStateRoutes(req, res, method, path)) return;
-  if (await workspaceRoutes(ctx, req, res, method, path)) return;
+  if (await workspaceRoutes(ctx, req, res, url, method, path)) return;
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
   if (await sessionRoutes(ctx, req, res, method, path)) return;
@@ -243,13 +243,22 @@ async function workspaceRoutes(
   ctx: RouteContext,
   req: IncomingMessage,
   res: ServerResponse,
+  url: URL,
   method: string,
   path: string,
 ): Promise<boolean> {
   if (method === "GET" && path === "/workspace") {
-    const threads = await loadAllThreads(ctx.ws);
+    const requested = url.searchParams.get("workspace");
+    const workspace = requested
+      ? ctx.workspaces.find((candidate) => resolve(candidate.root) === resolve(requested))
+      : ctx.ws;
+    if (!workspace) {
+      sendJson(res, 404, { error: `unknown workspace: ${requested}` });
+      return true;
+    }
+    const threads = await loadAllThreads(workspace);
     const open = threads.filter((t) => t.status === "open").length;
-    sendJson(res, 200, await summarizeWorkspace(ctx.ws, open, ctx.editors));
+    sendJson(res, 200, await summarizeWorkspace(workspace, open, ctx.editors));
     return true;
   }
   if (method === "GET" && path === "/workspaces") {
@@ -257,7 +266,7 @@ async function workspaceRoutes(
     return true;
   }
   if ((method === "POST" || method === "DELETE") && path === "/workspaces") {
-    return mutateWorkspaceRoute(ctx, req, res, method);
+    return mutateWorkspaceRoute(ctx, req, res, method, url.searchParams);
   }
   return false;
 }
@@ -267,6 +276,7 @@ async function mutateWorkspaceRoute(
   req: IncomingMessage,
   res: ServerResponse,
   method: string,
+  searchParams: URLSearchParams,
 ): Promise<boolean> {
   if (!isLoopback(ctx.host)) {
     // Adding/removing a workspace opens an arbitrary host path; only allow it
@@ -281,19 +291,30 @@ async function mutateWorkspaceRoute(
     sendJson(res, 400, { error: "path is required" });
     return true;
   }
+  const workspacePath = resolve(body.path);
+  const summary = searchParams.get("summary") !== "0";
   if (method === "POST") {
-    // Validate it's a real workspace (has a git repo) before registering.
-    try {
-      await discoverWorkspace(resolve(body.path));
-    } catch (err) {
-      sendJson(res, 400, { error: (err as Error).message });
-      return true;
+    const alreadyLoaded = ctx.workspaces.some((workspace) => resolve(workspace.root) === workspacePath);
+    if (!alreadyLoaded) {
+      // Validate it's a real workspace (has a git repo) before registering.
+      try {
+        await discoverWorkspace(workspacePath);
+      } catch (err) {
+        sendJson(res, 400, { error: (err as Error).message });
+        return true;
+      }
     }
-    await addWorkspaceToRegistry(body.path);
+    await addWorkspaceToRegistry(workspacePath);
+    if (!alreadyLoaded) await rebuildWorkspaces(ctx);
   } else {
-    await removeWorkspaceFromRegistry(body.path);
+    await removeWorkspaceFromRegistry(workspacePath);
+    await rebuildWorkspaces(ctx);
   }
-  await rebuildWorkspaces(ctx);
+  if (!summary) {
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
   sendJson(res, 200, await listWorkspaces(ctx));
   return true;
 }
