@@ -207,12 +207,20 @@ test("saves edits from the CodeMirror diff renderer", async ({ page }) => {
   await file.locator(".cm-comment-gutter .cm-gutterElement").nth(1).hover();
   await expect(file.locator("button.cm-diff-add-widget").first()).toHaveCSS("opacity", "1");
 
+  await expect(file.locator(".file-header")).not.toHaveClass(/edit-mode/);
   await file.getByRole("button", { name: "Edit" }).click();
   await expect(file.locator(".edit-mode-badge")).toHaveText("Edit");
+  await expect(file.locator(".file-header")).toHaveClass(/edit-mode/);
   await expect(file.locator("button.cm-diff-add-widget")).toHaveCount(0);
   await file.locator(".cm-line", { hasText: "return x * x // TODO" }).click();
   await page.keyboard.press("End");
   await page.keyboard.insertText("!");
+  await expect(file.locator(".cm-line", { hasText: "return x * x // TODO!" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+Z");
+  await expect(file.locator(".cm-line", { hasText: "return x * x // TODO!" })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+Shift+Z");
+  await expect(file.locator(".cm-line", { hasText: "return x * x // TODO!" })).toBeVisible();
+  await expect(file.locator(".cm-cursor-secondary")).toHaveCount(0);
 
   await expect(file.getByRole("button", { name: "Save" })).toBeEnabled();
   const saved = page.waitForResponse(

@@ -2426,7 +2426,11 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   font-size: 12.5px;
-  transition: opacity var(--motion);
+  transition: background var(--motion), border-color var(--motion), opacity var(--motion);
+}
+.file-header.edit-mode {
+  background: color-mix(in srgb, var(--success) 6%, var(--panel));
+  border-bottom-color: color-mix(in srgb, var(--success) 22%, var(--border));
 }
 .file-header.collapsed {
   border-bottom-color: transparent;

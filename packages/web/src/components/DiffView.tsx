@@ -741,7 +741,7 @@ const FileDiff = memo(function FileDiff({
       ref={fileRef}
       style={{ containIntrinsicSize: `auto ${measuredHeight.current ?? estHeight}px` }}
     >
-      <div className={`file-header${collapsed ? " collapsed" : ""}`}>
+      <div className={`file-header${collapsed ? " collapsed" : ""}${codeMirrorEditable ? " edit-mode" : ""}`}>
         <button
           type="button"
           className="fh-main"

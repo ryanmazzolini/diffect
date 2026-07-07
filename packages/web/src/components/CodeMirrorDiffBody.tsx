@@ -7,15 +7,25 @@ import {
   type ReactNode,
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { getChunks, getOriginalDoc, unifiedMergeView } from "@codemirror/merge";
-import { EditorState, RangeSet, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
+import {
+  EditorState,
+  RangeSet,
+  StateEffect,
+  StateField,
+  type Extension,
+  type Range,
+  type TransactionSpec,
+} from "@codemirror/state";
 import {
   Decoration,
   EditorView,
   GutterMarker,
   WidgetType,
   crosshairCursor,
+  drawSelection,
   gutter,
   gutterLineClass,
   keymap,
@@ -196,9 +206,16 @@ class CommentGutterMarker extends GutterMarker {
     return wrap;
   }
 
-  override eq() {
-    return false;
+  override eq(other: GutterMarker) {
+    return other instanceof CommentGutterMarker && sameLineTargets(this.targets, other.targets);
   }
+}
+
+function sameLineTargets(a: LineTarget[], b: LineTarget[]): boolean {
+  return a.length === b.length && a.every((target, index) => {
+    const other = b[index];
+    return other?.side === target.side && other.line === target.line && other.docLine === target.docLine;
+  });
 }
 
 function setCommentButtonTarget(button: HTMLButtonElement, side: Side, line: number): void {
@@ -321,10 +338,15 @@ export function CodeMirrorDiffBody({
             editable ? [] : [cmCommentGutter(anchors, setSelectedRange, setCommentRange), cmHoverCommentHandle()],
             cmDecorations,
             cmGutterLineClasses,
-            rectangularSelection({
-              eventFilter: (event) => event.button === 1 || (event.button === 0 && event.altKey),
-            }),
-            crosshairCursor({ key: "Alt" }),
+            editable ? [drawSelection(), singleSelectionOnly()] : [],
+            editable
+              ? []
+              : [
+                  rectangularSelection({
+                    eventFilter: (event) => event.button === 1 || (event.button === 0 && event.altKey),
+                  }),
+                  crosshairCursor({ key: "Alt" }),
+                ],
             language,
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
@@ -332,6 +354,7 @@ export function CodeMirrorDiffBody({
                 onDirtyChange?.(true);
               }
             }),
+            editable ? history() : [],
             editable
               ? keymap.of([
                   {
@@ -341,6 +364,7 @@ export function CodeMirrorDiffBody({
                       return true;
                     },
                   },
+                  ...historyKeymap,
                 ])
               : [],
             syntaxHighlighting(diffectHighlightStyle),
@@ -376,6 +400,9 @@ export function CodeMirrorDiffBody({
                 ".cm-line": {
                   paddingLeft: "12px",
                   paddingRight: "16px",
+                },
+                ".cm-cursor": {
+                  borderLeftColor: "var(--text)",
                 },
                 ".cm-deletedChunk": {
                   backgroundColor: "var(--del-bg)",
@@ -487,6 +514,23 @@ export function CodeMirrorDiffBody({
       <div className="cm-diff-host" ref={hostRef} />
     </>
   );
+}
+
+function singleSelectionOnly(): Extension {
+  return EditorState.transactionFilter.of((tr) => {
+    if (tr.newSelection.ranges.length <= 1) return tr as unknown as TransactionSpec;
+    return [
+      {
+        changes: tr.changes,
+        effects: tr.effects,
+      },
+      {
+        selection: tr.newSelection.asSingle(),
+        scrollIntoView: tr.scrollIntoView,
+        sequential: true,
+      },
+    ];
+  });
 }
 
 function cmLineNumbers(
@@ -755,7 +799,9 @@ function startCommentRangeDrag(
   preview();
   const updateEnd = (ev: MouseEvent) => {
     const line = targetLineAtPoint(view, targets, start.side, ev.clientX, ev.clientY);
-    if (line !== null) end = line;
+    if (line === null || line === end) return false;
+    end = line;
+    return true;
   };
   const cleanup = () => {
     document.removeEventListener("mousemove", onMove);
@@ -763,8 +809,7 @@ function startCommentRangeDrag(
     root.classList.remove("cm-range-drag-active");
   };
   const onMove = (ev: MouseEvent) => {
-    updateEnd(ev);
-    preview();
+    if (updateEnd(ev)) preview();
   };
   const onUp = (ev: MouseEvent) => {
     cleanup();
