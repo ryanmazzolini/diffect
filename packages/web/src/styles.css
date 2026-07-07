@@ -45,7 +45,7 @@ html[data-density="compact"] {
   --panel: #16171b;
   --panel-2: #1c1d22;
   --active: #25262c; /* neutral "you are here" fill */
-  --border: #26272c;
+  --border: #1f2025;
   --border-strong: #34353b;
   --text: #e7e8ea;
   --ink: #e7e8ea;
@@ -104,7 +104,7 @@ html[data-density="compact"] {
   --panel: #ffffff;
   --panel-2: #f4f4f5;
   --active: #ececef;
-  --border: #e8e8ea;
+  --border: #ececef;
   --border-strong: #d6d6da;
   --text: #1a1a1e;
   --ink: #1a1a1e;
@@ -492,7 +492,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--r);
   background: transparent;
   color: var(--text);
@@ -513,7 +513,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .open-in-split {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--r);
 }
 .open-in-split:hover {
@@ -613,7 +613,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   align-items: center;
   gap: 6px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--r);
   background: transparent;
   color: var(--text);
@@ -954,13 +954,18 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   font-weight: 600;
 }
 .selector {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 6px;
   padding: 3px 8px;
   font: inherit;
   font-size: 12px;
+}
+.selector:hover,
+.selector[aria-expanded="true"] {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
 }
 .target-picker {
   display: flex;
@@ -971,14 +976,14 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .local-targets {
   display: flex;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--r);
   overflow: hidden;
-  background: var(--panel);
+  background: var(--panel-2);
 }
 .target-mode {
   border: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid transparent;
   background: transparent;
   color: var(--muted);
   padding: 4px 9px;
@@ -997,7 +1002,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .target-mode:hover {
   color: var(--text);
-  background: var(--panel-2);
+  background: var(--active);
 }
 .target-mode.active {
   color: var(--on-accent);
@@ -2648,7 +2653,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   align-items: center;
   gap: 1px;
   padding: 2px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 8px;
   background: var(--panel-2);
 }
@@ -3296,6 +3301,7 @@ button.primary:hover:not(:disabled) {
 }
 button.ghost {
   background: transparent;
+  border-color: transparent;
   color: var(--text);
 }
 button.ghost:hover:not(:disabled) {
