@@ -2251,6 +2251,259 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--must-fix);
 }
 
+.workspace-skeleton {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.sk-topbar {
+  flex: none;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.sk-workbench {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.sk-sidebar,
+.sk-threads {
+  flex: none;
+  width: var(--sidebar-w, 220px);
+  padding: 12px 12px;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+.sk-threads {
+  width: var(--thread-w, 340px);
+  border-right: 0;
+  border-left: 1px solid var(--border);
+}
+.sk-main {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+.sk-tabs {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+.sk-module {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.sk-module-head,
+.sk-file-head {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sk-file {
+  border-bottom: 1px solid var(--border);
+}
+.sk-file:last-child {
+  border-bottom: 0;
+}
+.sk-code-row,
+.sk-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sk-code-row {
+  height: 24px;
+  padding: 0 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+.sk-code-row:last-child {
+  border-bottom: 0;
+}
+.sk-tree-row {
+  height: 28px;
+}
+.sk-thread {
+  padding: 10px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.sk-statusbar {
+  flex: none;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.sk-block {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+  border-radius: var(--radius-sm);
+}
+.sk-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text) 9%, transparent),
+    transparent
+  );
+  animation: sk-shimmer 1.4s infinite;
+}
+.sk-brand,
+.sk-icon {
+  width: 22px;
+  height: 22px;
+}
+.sk-brand {
+  border-radius: var(--r);
+}
+.sk-title {
+  width: 132px;
+  height: 16px;
+}
+.sk-path {
+  width: min(34vw, 360px);
+  height: 12px;
+}
+.sk-spacer {
+  flex: 1;
+}
+.sk-pill {
+  width: 88px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+}
+.sk-panel-title {
+  width: 120px;
+  height: 14px;
+  margin: 3px 0 14px;
+}
+.sk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.sk-tree-line {
+  height: 11px;
+  width: 74%;
+}
+.sk-tree-line.w1,
+.sk-code-line.w1 {
+  width: 44%;
+}
+.sk-tree-line.w2,
+.sk-code-line.w2 {
+  width: 62%;
+}
+.sk-tree-line.w3,
+.sk-code-line.w3 {
+  width: 78%;
+}
+.sk-tree-line.w4,
+.sk-code-line.w4 {
+  width: 54%;
+}
+.sk-tab {
+  width: 64px;
+  height: 22px;
+}
+.sk-tab.short {
+  width: 76px;
+}
+.sk-module-title {
+  width: 180px;
+  height: 15px;
+}
+.sk-module-stat,
+.sk-file-stat {
+  width: 84px;
+  height: 12px;
+}
+.sk-file-name {
+  width: 156px;
+  height: 13px;
+}
+.sk-line-no {
+  width: 34px;
+  height: 11px;
+  flex: none;
+}
+.sk-code-line {
+  height: 11px;
+}
+.sk-thread-line {
+  height: 12px;
+  width: 72%;
+  margin-bottom: 8px;
+}
+.sk-thread-line.short {
+  width: 44%;
+}
+.sk-thread-body {
+  height: 46px;
+  width: 100%;
+}
+.sk-status {
+  width: 240px;
+  height: 12px;
+}
+.sk-status.short {
+  width: 120px;
+}
+@keyframes sk-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (max-width: 900px) {
+  .sk-threads {
+    display: none;
+  }
+  .sk-path,
+  .sk-pill:nth-of-type(2) {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .sk-sidebar {
+    width: 160px;
+  }
+  .sk-title {
+    width: 96px;
+  }
+  .sk-pill {
+    display: none;
+  }
+}
+
 /* Diff */
 /* Per-file diffstat: counts + the five-square block. */
 .diffstat {

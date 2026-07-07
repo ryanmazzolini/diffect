@@ -269,6 +269,74 @@ const EMPTY_THREADS: Thread[] = [];
 type RefThreadCount = { open: number; total: number };
 const EMPTY_REF_THREAD_COUNTS: ReadonlyMap<string, RefThreadCount> = new Map();
 
+function WorkspaceSkeleton() {
+  return (
+    <div className="workspace-skeleton" aria-label="Loading workspace" aria-busy="true">
+      <div className="sk-topbar">
+        <div className="sk-brand sk-block" />
+        <div className="sk-title sk-block" />
+        <div className="sk-path sk-block" />
+        <div className="sk-spacer" />
+        <div className="sk-pill sk-block" />
+        <div className="sk-pill sk-block" />
+        <div className="sk-icon sk-block" />
+      </div>
+      <div className="sk-workbench">
+        <aside className="sk-sidebar" aria-hidden="true">
+          <div className="sk-panel-title sk-block" />
+          {Array.from({ length: 8 }, (_, index) => (
+            <div className="sk-tree-row" key={index}>
+              <div className="sk-dot sk-block" />
+              <div className={`sk-tree-line sk-block w${(index % 4) + 1}`} />
+            </div>
+          ))}
+        </aside>
+        <main className="sk-main" aria-hidden="true">
+          <div className="sk-tabs">
+            <div className="sk-tab sk-block" />
+            <div className="sk-tab short sk-block" />
+          </div>
+          <section className="sk-module">
+            <div className="sk-module-head">
+              <div className="sk-module-title sk-block" />
+              <div className="sk-module-stat sk-block" />
+            </div>
+            {Array.from({ length: 3 }, (_, fileIndex) => (
+              <div className="sk-file" key={fileIndex}>
+                <div className="sk-file-head">
+                  <div className="sk-file-name sk-block" />
+                  <div className="sk-file-stat sk-block" />
+                </div>
+                {Array.from({ length: 5 }, (_, lineIndex) => (
+                  <div className="sk-code-row" key={lineIndex}>
+                    <div className="sk-line-no sk-block" />
+                    <div className={`sk-code-line sk-block w${((fileIndex + lineIndex) % 4) + 1}`} />
+                  </div>
+                ))}
+              </div>
+            ))}
+          </section>
+        </main>
+        <aside className="sk-threads" aria-hidden="true">
+          <div className="sk-panel-title sk-block" />
+          {Array.from({ length: 3 }, (_, index) => (
+            <div className="sk-thread" key={index}>
+              <div className="sk-thread-line sk-block" />
+              <div className="sk-thread-line short sk-block" />
+              <div className="sk-thread-body sk-block" />
+            </div>
+          ))}
+        </aside>
+      </div>
+      <div className="sk-statusbar">
+        <div className="sk-status sk-block" />
+        <div className="sk-status short sk-block" />
+      </div>
+      <span className="sr-only">Loading workspace…</span>
+    </div>
+  );
+}
+
 export function App() {
   const [initialDeepLink] = useState(readInitialDeepLink);
   const [initialPlace] = useState(readStoredPlace);
@@ -1988,7 +2056,7 @@ export function App() {
       <div className="app">
         {toast}
         {liveRegion}
-        <div className="loading">Loading workspace…</div>
+        <WorkspaceSkeleton />
       </div>
     );
   }
