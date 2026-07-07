@@ -2271,6 +2271,15 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .cm6-file-body {
   background: var(--panel);
 }
+.cm6-file-body.edit-mode {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--suggestion) 48%, var(--border));
+}
+.cm-diff-shell {
+  position: relative;
+}
+.cm-diff-shell.edit-mode {
+  background: color-mix(in srgb, var(--suggestion) 4%, var(--panel));
+}
 .cm-diff-host {
   width: 100%;
   overflow: auto;
@@ -2302,18 +2311,24 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   background: var(--panel-2);
   font-size: 12px;
 }
-.cm-diff-editbar {
+.cm-diff-save-pill {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  background: var(--panel-2);
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--suggestion) 32%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 88%, var(--suggestion));
+  box-shadow: var(--shadow-md);
   font-size: 12px;
 }
 .cm-save-status {
   color: var(--muted);
+  padding-right: 4px;
 }
 .cm-comment-gutter {
   min-width: 36px;
@@ -2429,8 +2444,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   transition: background var(--motion), border-color var(--motion), opacity var(--motion);
 }
 .file-header.edit-mode {
-  background: color-mix(in srgb, var(--success) 6%, var(--panel));
-  border-bottom-color: color-mix(in srgb, var(--success) 22%, var(--border));
+  background: color-mix(in srgb, var(--suggestion) 10%, var(--panel));
+  border-bottom-color: color-mix(in srgb, var(--suggestion) 38%, var(--border));
 }
 .file-header.collapsed {
   border-bottom-color: transparent;
@@ -2491,9 +2506,9 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   text-transform: uppercase;
 }
 .edit-mode-badge.editable {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 45%, transparent);
-  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--suggestion);
+  border-color: color-mix(in srgb, var(--suggestion) 55%, transparent);
+  background: color-mix(in srgb, var(--suggestion) 14%, transparent);
 }
 .edit-mode-badge.review {
   color: var(--accent-ink);
@@ -2528,6 +2543,14 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .cm-mode-toggle button:hover {
   color: var(--text);
+}
+.cm-mode-toggle button:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.cm-mode-toggle button:disabled:hover {
+  color: var(--faint);
 }
 .cm-mode-toggle button.active {
   background: var(--panel);

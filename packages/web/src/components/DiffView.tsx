@@ -423,21 +423,26 @@ const FileDiff = memo(function FileDiff({
   const splitView = mode === DiffModeEnum.Split;
   const canUseCodeMirror = renderer === "cm6" && !splitView && readableFileContent(content);
   const editableTarget = localDaemon && (target === "work" || target === "unstaged");
-  const canToggleCodeMirrorEdit = canUseCodeMirror && editableTarget;
+  const deletedFile = file.status === "deleted";
+  const canEditCodeMirror = canUseCodeMirror && editableTarget && !deletedFile;
+  const showCodeMirrorModeToggle = canUseCodeMirror || editableTarget;
   const [codeMirrorMode, setCodeMirrorModeState] = useState<CodeMirrorInteractionMode>("review");
   const [codeMirrorDirty, setCodeMirrorDirty] = useState(false);
-  const codeMirrorEditable = canToggleCodeMirrorEdit && codeMirrorMode === "edit";
+  const codeMirrorEditable = canEditCodeMirror && codeMirrorMode === "edit";
+  const unavailableEditTitle = deletedFile
+    ? "Deleted files can’t be edited here"
+    : editableTarget && splitView
+      ? "Edit is unavailable in split view; switch to unified"
+      : editableTarget && !canUseCodeMirror
+        ? "Edit is unavailable until CodeMirror can load this file"
+        : "Edit is only available for working tree changes";
   const editModeTitle = codeMirrorEditable
     ? "Edit mode: saves write to the working tree"
-    : canToggleCodeMirrorEdit
+    : canEditCodeMirror
       ? "Review mode: comments enabled; switch to edit to change this file"
-      : editableTarget && splitView
-        ? "Read-only in split view; switch to unified to edit"
-        : editableTarget
-          ? "Read-only until CodeMirror can load this file"
-          : "Read-only for this review target";
-  const editModeClass = codeMirrorEditable ? "editable" : canToggleCodeMirrorEdit ? "review" : "readonly";
-  const editModeLabel = codeMirrorEditable ? "Edit" : canToggleCodeMirrorEdit ? "Review" : "Read-only";
+      : unavailableEditTitle;
+  const editModeClass = codeMirrorEditable ? "editable" : canEditCodeMirror ? "review" : "readonly";
+  const editModeLabel = codeMirrorEditable ? "Edit" : canEditCodeMirror ? "Review" : "Read-only";
   const setCodeMirrorMode = useCallback(
     (nextMode: CodeMirrorInteractionMode) => {
       if (nextMode === "review" && codeMirrorDirty && !window.confirm("Discard unsaved edits and return to review mode?")) {
@@ -770,12 +775,12 @@ const FileDiff = memo(function FileDiff({
           )}
         </button>
         <div className="right">
-          {canToggleCodeMirrorEdit && (
+          {showCodeMirrorModeToggle && (
             <div className="cm-mode-toggle" role="group" aria-label={`CodeMirror mode for ${file.path}`}>
               <button
                 type="button"
-                className={codeMirrorMode === "review" ? "active" : ""}
-                aria-pressed={codeMirrorMode === "review"}
+                className={codeMirrorMode === "review" || !codeMirrorEditable ? "active" : ""}
+                aria-pressed={codeMirrorMode === "review" || !codeMirrorEditable}
                 title="Review mode: comment on the diff"
                 onClick={() => setCodeMirrorMode("review")}
               >
@@ -784,9 +789,10 @@ const FileDiff = memo(function FileDiff({
               </button>
               <button
                 type="button"
-                className={codeMirrorMode === "edit" ? "active" : ""}
-                aria-pressed={codeMirrorMode === "edit"}
-                title="Edit mode: change this file"
+                className={codeMirrorEditable ? "active" : ""}
+                aria-pressed={codeMirrorEditable}
+                disabled={!canEditCodeMirror}
+                title={canEditCodeMirror ? "Edit mode: change this file" : unavailableEditTitle}
                 onClick={() => setCodeMirrorMode("edit")}
               >
                 <Icon name="code" size={13} />
@@ -816,7 +822,7 @@ const FileDiff = memo(function FileDiff({
         (showBody ? (
           <div
             ref={bodyRef}
-            className={`file-body${canUseCodeMirror ? " cm6-file-body" : ""}`}
+            className={`file-body${canUseCodeMirror ? " cm6-file-body" : ""}${codeMirrorEditable ? " edit-mode" : ""}`}
             onMouseDownCapture={onAddWidgetMouseDownCapture}
           >
             {canUseCodeMirror ? (

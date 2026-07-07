@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { test, expect, type Locator, type Page } from "@playwright/test";
 
@@ -15,17 +17,38 @@ async function openMathFile(page: Page, target = "work", repo?: string): Promise
   return file;
 }
 
-async function withStagedMathFile(page: Page, run: (file: Locator) => Promise<void>): Promise<void> {
+async function fixtureRepo(page: Page): Promise<{ name: string; root: string }> {
   const response = await page.request.get("/workspace");
   const workspace = (await response.json()) as { repos: Array<{ name: string; root: string }> };
   const repo = workspace.repos[0];
   if (!repo) throw new Error("fixture repo missing");
+  return repo;
+}
+
+async function withStagedMathFile(page: Page, run: (file: Locator) => Promise<void>): Promise<void> {
+  const repo = await fixtureRepo(page);
 
   await execFileAsync("git", ["add", "src/util/math.js"], { cwd: repo.root });
   try {
     await run(await openMathFile(page, "staged", repo.name));
   } finally {
     await execFileAsync("git", ["reset", "--", "src/util/math.js"], { cwd: repo.root });
+  }
+}
+
+async function withDeletedMathFile(page: Page, run: (file: Locator) => Promise<void>): Promise<void> {
+  const repo = await fixtureRepo(page);
+  const path = "src/util/math.js";
+  const absolutePath = join(repo.root, path);
+  const original = await readFile(absolutePath, "utf8");
+
+  await execFileAsync("git", ["rm", "-f", path], { cwd: repo.root });
+  try {
+    await run(await openMathFile(page, "work", repo.name));
+  } finally {
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, original);
+    await execFileAsync("git", ["reset", "--", path], { cwd: repo.root });
   }
 }
 
@@ -200,6 +223,22 @@ test("old-side CodeMirror comments highlight deleted lines", async ({ page }) =>
   });
 });
 
+test("deleted CodeMirror files disable edit but allow old-side comments", async ({ page }) => {
+  await withDeletedMathFile(page, async (file) => {
+    await expect(file.locator(".status-deleted")).toHaveText("deleted");
+    await expect(file.locator(".edit-mode-badge")).toHaveText("Read-only");
+    const edit = file.locator(".cm-mode-toggle").getByRole("button", { name: "Edit" });
+    await expect(edit).toBeDisabled();
+    await expect(edit).toHaveAttribute("title", "Deleted files can’t be edited here");
+
+    await file.locator(".cm-deletedLine", { hasText: "return x * x" }).hover();
+    await file.locator("button.cm-diff-add-widget.cm-hover-line[data-side='old'][data-line='3']").click();
+    await expect(file.locator(".comment-form")).toBeVisible();
+    await expect(file.locator(".cm-deletedLine.cm-range-commented-deleted")).toHaveCount(1);
+    await expect(file.locator(".cm-deletedLine.cm-range-commented-deleted")).toContainText("return x * x");
+  });
+});
+
 test("saves edits from the CodeMirror diff renderer", async ({ page }) => {
   const file = await openMathFile(page);
 
@@ -211,6 +250,8 @@ test("saves edits from the CodeMirror diff renderer", async ({ page }) => {
   await file.getByRole("button", { name: "Edit" }).click();
   await expect(file.locator(".edit-mode-badge")).toHaveText("Edit");
   await expect(file.locator(".file-header")).toHaveClass(/edit-mode/);
+  await expect(file.locator(".cm-diff-editbar")).toHaveCount(0);
+  await expect(file.locator(".cm-diff-save-pill")).toBeVisible();
   await expect(file.locator("button.cm-diff-add-widget")).toHaveCount(0);
   await file.locator(".cm-line", { hasText: "return x * x // TODO" }).click();
   await page.keyboard.press("End");

@@ -502,16 +502,17 @@ export function CodeMirrorDiffBody({
           Some deleted lines are shown as plain text to keep this large diff responsive.
         </div>
       )}
-      {editable && (
-        <div className="cm-diff-editbar">
-          <span>Editable working-tree file</span>
-          <button type="button" className="ghost mini" onClick={() => void saveCurrent()} disabled={!dirty || saving}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-          {saveMessage && <span className="cm-save-status">{saveMessage}</span>}
-        </div>
-      )}
-      <div className="cm-diff-host" ref={hostRef} />
+      <div className={`cm-diff-shell${editable ? " edit-mode" : ""}`}>
+        {editable && (
+          <div className="cm-diff-save-pill">
+            <button type="button" className="ghost mini" onClick={() => void saveCurrent()} disabled={!dirty || saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            {saveMessage && <span className="cm-save-status">{saveMessage}</span>}
+          </div>
+        )}
+        <div className="cm-diff-host" ref={hostRef} />
+      </div>
     </>
   );
 }
@@ -593,7 +594,9 @@ function updateHoverCommentHandle(view: EditorView, event: MouseEvent): void {
 
   const oldLine = oldDeletedLineAtPoint(view, event.clientX, event.clientY);
   if (oldLine !== null) {
-    const oldButton = host.querySelector<HTMLButtonElement>(`button.cm-diff-add-widget[data-old-line="${oldLine}"]`);
+    const oldButton =
+      host.querySelector<HTMLButtonElement>(`button.cm-diff-add-widget[data-old-line="${oldLine}"]`) ??
+      host.querySelector<HTMLButtonElement>("button.cm-diff-add-widget[data-old-line]");
     if (oldButton) {
       setCommentButtonTarget(oldButton, "old", oldLine);
       oldButton.classList.add("cm-hover-line");
@@ -790,6 +793,7 @@ function startCommentRangeDrag(
   root.classList.add("cm-range-drag-active");
 
   let end = start.line;
+  let moved = false;
   const selection = () => ({
     side: start.side,
     start: Math.min(start.line, end),
@@ -809,11 +813,13 @@ function startCommentRangeDrag(
     root.classList.remove("cm-range-drag-active");
   };
   const onMove = (ev: MouseEvent) => {
-    if (updateEnd(ev)) preview();
+    if (!updateEnd(ev)) return;
+    moved = true;
+    preview();
   };
   const onUp = (ev: MouseEvent) => {
     cleanup();
-    updateEnd(ev);
+    if (moved) updateEnd(ev);
     const range = selection();
     onPreview(range);
     onCommit(range);
@@ -899,7 +905,7 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
 
   for (let line = 1; line <= docLines; line += 1) {
     next.set(line, line);
-    pushTarget("new", line, line);
+    if (file.status !== "deleted") pushTarget("new", line, line);
   }
 
   for (const hunk of file.hunks) {
