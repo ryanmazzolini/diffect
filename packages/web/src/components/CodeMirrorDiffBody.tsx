@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -42,6 +43,7 @@ interface Props {
   editable: boolean;
   onSave: (content: string) => Promise<void>;
   onChanged: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 interface SelectionComment {
@@ -219,6 +221,7 @@ export function CodeMirrorDiffBody({
   editable,
   onSave,
   onChanged,
+  onDirtyChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -229,6 +232,7 @@ export function CodeMirrorDiffBody({
   const [selectedRange, setSelectedRange] = useState<SelectionComment | null>(null);
   const [commentRange, setCommentRange] = useState<SelectionComment | null>(null);
   const [viewVersion, setViewVersion] = useState(0);
+  const lineAnchorKey = useMemo(() => diffLineAnchorKey(file), [file]);
 
   const saveCurrent = useCallback(async () => {
     const view = viewRef.current;
@@ -239,6 +243,7 @@ export function CodeMirrorDiffBody({
     try {
       await onSave(view.state.doc.toString());
       setDirty(false);
+      onDirtyChange?.(false);
       setSaveMessage("Saved");
     } catch (e) {
       setSaveMessage(e instanceof Error ? e.message : "Save failed");
@@ -246,7 +251,7 @@ export function CodeMirrorDiffBody({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onSave]);
+  }, [onDirtyChange, onSave]);
 
   const closeSelectionComment = useCallback(() => {
     setSelectedRange(null);
@@ -289,6 +294,7 @@ export function CodeMirrorDiffBody({
     if (!host || oldText === null || newText === null) return;
 
     setDirty(false);
+    onDirtyChange?.(false);
     setSaveMessage("");
     setSelectedRange(null);
     setCommentRange(null);
@@ -321,7 +327,10 @@ export function CodeMirrorDiffBody({
             crosshairCursor({ key: "Alt" }),
             language,
             EditorView.updateListener.of((update) => {
-              if (update.docChanged) setDirty(true);
+              if (update.docChanged) {
+                setDirty(true);
+                onDirtyChange?.(true);
+              }
             }),
             editable
               ? keymap.of([
@@ -434,7 +443,7 @@ export function CodeMirrorDiffBody({
       viewRef.current?.destroy();
       viewRef.current = null;
     };
-  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, editable, file, saveCurrent, theme, wrap]);
+  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, editable, file.path, lineAnchorKey, onDirtyChange, saveCurrent, theme, wrap]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -809,7 +818,7 @@ function oldDeletedLineAtPoint(view: EditorView, clientX: number, clientY: numbe
   const oldDoc = getOriginalDoc(view.state);
   const chunkEl = lineEl.closest<HTMLElement>(".cm-deletedChunk");
   if (chunkEl) {
-      const root = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+    const root = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
     const chunkIndex = [...root.querySelectorAll(".cm-deletedChunk")].indexOf(chunkEl);
     const chunk = chunks[chunkIndex];
     if (!chunk) return null;
@@ -843,6 +852,11 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
     targets.push({ side, line, docLine: clampDocLine(docLine, docLines) });
   };
 
+  for (let line = 1; line <= docLines; line += 1) {
+    next.set(line, line);
+    pushTarget("new", line, line);
+  }
+
   for (const hunk of file.hunks) {
     for (let i = 0; i < hunk.lines.length; i += 1) {
       const line = hunk.lines[i];
@@ -872,6 +886,14 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
     else targetsByDocLine.set(target.docLine, [target]);
   }
   return { old, new: next, targets, targetsByDocLine };
+}
+
+function diffLineAnchorKey(file: DiffFile): string {
+  return file.hunks
+    .map((hunk) =>
+      hunk.lines.map((line) => `${line.old ?? ""}/${line.new ?? ""}`).join(","),
+    )
+    .join("|");
 }
 
 function countDocLines(text: string): number {

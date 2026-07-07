@@ -164,6 +164,24 @@ test("dragging the CodeMirror comment handle opens a range comment", async ({ pa
   });
 });
 
+test("comments on expanded unchanged CodeMirror lines", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".tree-file", { hasText: "calc.js" }).click();
+  const file = page.locator(".file", { hasText: "calc.js" });
+  await expect(file.locator(".edit-mode-badge")).toHaveText("Review");
+
+  await file.locator(".cm-collapsedLines").click();
+  const unchangedLine = file.locator(".cm-line", { hasText: "export const k10 = 10;" });
+  await expect(unchangedLine).toBeVisible();
+  await unchangedLine.hover();
+
+  const plus = file.locator("button.cm-diff-add-widget.cm-hover-line[data-side='new'][data-line='11']");
+  await expect(plus).toHaveCSS("opacity", "1");
+  await plus.click();
+  await expect(file.locator(".comment-form")).toBeVisible();
+  await expect(file.locator(".cm-range-commented")).toHaveCount(1);
+});
+
 test("old-side CodeMirror comments highlight deleted lines", async ({ page }) => {
   await withStagedMathFile(page, async (file) => {
     await file.locator(".cm-deletedLine").first().hover();
@@ -185,7 +203,12 @@ test("old-side CodeMirror comments highlight deleted lines", async ({ page }) =>
 test("saves edits from the CodeMirror diff renderer", async ({ page }) => {
   const file = await openMathFile(page);
 
-  await expect(file.locator(".edit-mode-badge")).toHaveText("Editable");
+  await expect(file.locator(".edit-mode-badge")).toHaveText("Review");
+  await file.locator(".cm-comment-gutter .cm-gutterElement").nth(1).hover();
+  await expect(file.locator("button.cm-diff-add-widget").first()).toHaveCSS("opacity", "1");
+
+  await file.getByRole("button", { name: "Edit" }).click();
+  await expect(file.locator(".edit-mode-badge")).toHaveText("Edit");
   await expect(file.locator("button.cm-diff-add-widget")).toHaveCount(0);
   await file.locator(".cm-line", { hasText: "return x * x // TODO" }).click();
   await page.keyboard.press("End");

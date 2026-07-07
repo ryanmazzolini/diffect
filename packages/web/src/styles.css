@@ -2491,9 +2491,44 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   border-color: color-mix(in srgb, var(--success) 45%, transparent);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
+.edit-mode-badge.review {
+  color: var(--accent-ink);
+  border-color: color-mix(in srgb, var(--accent-ink) 45%, transparent);
+  background: color-mix(in srgb, var(--accent-ink) 10%, transparent);
+}
 .edit-mode-badge.readonly {
   color: var(--muted);
   background: var(--panel-2);
+}
+.cm-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.cm-mode-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cm-mode-toggle button:hover {
+  color: var(--text);
+}
+.cm-mode-toggle button.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
 }
 /* Right-side controls: viewed toggle, overflow. */
 .file-header .right {
