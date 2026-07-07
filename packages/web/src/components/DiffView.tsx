@@ -79,13 +79,11 @@ interface Props {
   /** Files in display (tree) order — matches the sidebar so scrolling tracks it. */
   files: DiffFile[];
   threads: Thread[];
-  viewed: Set<string>;
   /** Side-by-side rendering when true, inline (unified) when false. */
   split: boolean;
   /** Wrap long lines when true; scroll horizontally when false. */
   wrap: boolean;
   theme: Theme;
-  onToggleViewed: (path: string) => void;
   /** A tracked file outside the current diff selected from the All files sidebar. */
   previewFile: string | null;
   onBackToDiff: () => void;
@@ -96,19 +94,17 @@ interface Props {
   onOpenFile: (path: string, line?: number) => void;
 }
 
-// Memoized: re-renders only when the diff/threads/viewed-set actually change —
-// not on scroll-spy active-file updates, pane resizes, or filter changes.
+// Memoized: re-renders only when the diff/threads actually change — not on
+// scroll-spy active-file updates, pane resizes, or filter changes.
 export const DiffView = memo(function DiffView({
   repo,
   worktree,
   diff,
   files,
   threads,
-  viewed,
   split,
   wrap,
   theme,
-  onToggleViewed,
   previewFile,
   onBackToDiff,
   onChanged,
@@ -175,14 +171,12 @@ export const DiffView = memo(function DiffView({
             target={diff.target}
             file={file}
             threads={threadsByFile.get(file.path) ?? EMPTY_THREADS}
-            viewed={viewed.has(file.path)}
             mode={mode}
             renderer={renderer}
             wrap={wrap}
             theme={theme}
             deletedSyntaxHighlightMaxLength={deletedSyntaxHighlightMaxLength}
             localDaemon={localDaemon}
-            onToggleViewed={onToggleViewed}
             onChanged={onChanged}
             editors={editors}
             editor={editor}
@@ -379,14 +373,12 @@ const FileDiff = memo(function FileDiff({
   target,
   file,
   threads,
-  viewed,
   mode,
   renderer,
   wrap,
   theme,
   deletedSyntaxHighlightMaxLength,
   localDaemon,
-  onToggleViewed,
   onChanged,
   editors,
   editor,
@@ -398,14 +390,12 @@ const FileDiff = memo(function FileDiff({
   target: string;
   file: DiffFile;
   threads: Thread[];
-  viewed: boolean;
   mode: DiffModeEnum;
   renderer: DiffRenderer;
   wrap: boolean;
   theme: Theme;
   deletedSyntaxHighlightMaxLength: number;
   localDaemon: boolean;
-  onToggleViewed: (path: string) => void;
   onChanged: () => void;
   editors: string[];
   editor: string | null;
@@ -436,13 +426,6 @@ const FileDiff = memo(function FileDiff({
       : editableTarget && !canUseCodeMirror
         ? "Edit is unavailable until CodeMirror can load this file"
         : "Edit is only available for working tree changes";
-  const editModeTitle = codeMirrorEditable
-    ? "Edit mode: saves write to the working tree"
-    : canEditCodeMirror
-      ? "Review mode: comments enabled; switch to edit to change this file"
-      : unavailableEditTitle;
-  const editModeClass = codeMirrorEditable ? "editable" : canEditCodeMirror ? "review" : "readonly";
-  const editModeLabel = codeMirrorEditable ? "Edit" : canEditCodeMirror ? "Review" : "Read-only";
   const setCodeMirrorMode = useCallback(
     (nextMode: CodeMirrorInteractionMode) => {
       if (nextMode === "review" && codeMirrorDirty && !window.confirm("Discard unsaved edits and return to review mode?")) {
@@ -508,13 +491,8 @@ const FileDiff = memo(function FileDiff({
     ],
     [threads, selectionComment],
   );
-  // Click-to-collapse the diff body; seeded from "viewed" so viewed files start
-  // collapsed. Marking a file viewed/unviewed (here or anywhere) drives the
-  // collapse via the effect; clicking the header still toggles it independently.
-  const [collapsed, setCollapsed] = useState(viewed);
-  useEffect(() => {
-    setCollapsed(viewed);
-  }, [viewed]);
+  // Click-to-collapse the diff body; clicking the header toggles it independently.
+  const [collapsed, setCollapsed] = useState(false);
 
   // Scroll-windowing. `near` starts false so the initial render is just headers
   // + placeholders (a big diff paints instantly); an IntersectionObserver then
@@ -551,8 +529,8 @@ const FileDiff = memo(function FileDiff({
     return () => io.disconnect();
   }, []);
   // Prefetch content as soon as the file is near the viewport — even while it's
-  // still collapsed — so expanding a viewed file is instant instead of a
-  // blank-then-pop. Fetches once per identity (content reset clears it).
+  // still collapsed — so expanding a file is instant instead of a blank-then-pop.
+  // Fetches once per identity (content reset clears it).
   const mounted = !collapsed && near;
   useEffect(() => {
     if (!near || content !== null) return;
@@ -740,7 +718,7 @@ const FileDiff = memo(function FileDiff({
 
   return (
     <div
-      className={`file${viewed ? " viewed" : ""}`}
+      className="file"
       id={fileElementId(repo, file.path)}
       data-path={file.path}
       ref={fileRef}
@@ -761,12 +739,6 @@ const FileDiff = memo(function FileDiff({
             {dir && <span className="fp-dir">{dir}</span>}
             {base}
           </span>
-          <span
-            className={`edit-mode-badge ${editModeClass}`}
-            title={editModeTitle}
-          >
-            {editModeLabel}
-          </span>
           <DiffStat additions={file.additions} deletions={file.deletions} />
           {threadCount > 0 && (
             <span className="fh-threads">
@@ -785,7 +757,7 @@ const FileDiff = memo(function FileDiff({
                 onClick={() => setCodeMirrorMode("review")}
               >
                 <Icon name="eye" size={13} />
-                Review
+                <span className="sr-only">Comment on diff</span>
               </button>
               <button
                 type="button"
@@ -796,7 +768,7 @@ const FileDiff = memo(function FileDiff({
                 onClick={() => setCodeMirrorMode("edit")}
               >
                 <Icon name="code" size={13} />
-                Edit
+                <span className="sr-only">Edit file</span>
               </button>
             </div>
           )}
@@ -806,16 +778,8 @@ const FileDiff = memo(function FileDiff({
             editor={editor}
             onEditor={onEditor}
             primaryAction={() => onOpenFile(file.path)}
+            compact
           />
-          <label className="viewed-toggle" title="Mark this file viewed (collapses it)">
-            <input
-              type="checkbox"
-              aria-label="Viewed"
-              checked={viewed}
-              onChange={() => onToggleViewed(file.path)}
-            />
-            Viewed
-          </label>
         </div>
       </div>
       {!collapsed &&

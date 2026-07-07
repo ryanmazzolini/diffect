@@ -10,15 +10,9 @@ import type {
   PullRequestLink,
   RefList,
   RepoDiff,
-  ReviewSession,
   Thread,
 } from "@diffect/shared";
 import type { Theme } from "../theme.js";
-import {
-  LIFECYCLE_DOT,
-  LIFECYCLE_LABEL,
-  type Lifecycle,
-} from "../lifecycle.js";
 import { orderedDiffFiles } from "../fileTree.js";
 import { CurrentSnapshotContext } from "../currentSnapshot.js";
 import { Icon } from "../icons.js";
@@ -55,7 +49,6 @@ interface Props {
   diff: RepoDiff | null;
   /** Threads already scoped to this module's repo + session by App. */
   threads: Thread[];
-  viewed: Set<string>;
   split: boolean;
   wrap: boolean;
   theme: Theme;
@@ -67,19 +60,10 @@ interface Props {
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch?: string | null;
   onTarget?: (repo: string, target: string) => void;
-  /** This module's durable review state (the status crumb) plus the session its
-   * Mark complete / Revive action archives or revives. `onArchive` is
-   * repo-parameterized so a background module finishes its OWN review. */
-  lifecycle?: Lifecycle;
-  lifecycleSession?: ReviewSession | null;
-  onArchive?: (repo: string, session: ReviewSession, archived: boolean) => void;
   /** Collapse is owned by App (so the repo rail can drive it too); this module is
    * controlled. Stacked layout only. */
   collapsed?: boolean;
   onToggleCollapse?: (repo: string) => void;
-  /** Repo-parameterized so a module writes "viewed" to its own per-repo set even
-   * if scroll-focus hasn't yet promoted it to the active repo. */
-  onToggleViewed: (repo: string, path: string) => void;
   previewFile: string | null;
   onBackToDiff: () => void;
   onChanged: () => void;
@@ -92,7 +76,7 @@ interface Props {
 /**
  * One repo's diff surface. At N=1 it's the single headerless diff pane, literally
  * the inline pane it replaced. At N≥2 it grows a sticky module header (collapse
- * caret, repo name, its own diffstat/viewed progress) and stacks with its siblings
+ * caret, repo name, and its own diffstat) and stacks with its siblings
  * inside one shared scroll container — the multi-repo "modules view".
  *
  * Each module provides its own `CurrentSnapshotContext` so the earlier-iteration
@@ -112,7 +96,6 @@ export const ModuleSection = memo(function ModuleSection({
   pullRequest = null,
   diff,
   threads,
-  viewed,
   split,
   wrap,
   theme,
@@ -121,12 +104,8 @@ export const ModuleSection = memo(function ModuleSection({
   refThreadCounts,
   defaultBranch = null,
   onTarget,
-  lifecycle = "idle",
-  lifecycleSession = null,
-  onArchive,
   collapsed = false,
   onToggleCollapse,
-  onToggleViewed,
   previewFile,
   onBackToDiff,
   onChanged,
@@ -139,25 +118,10 @@ export const ModuleSection = memo(function ModuleSection({
   // own list without App looping hooks; stable per `diff` so the memoized DiffView
   // isn't churned when an unrelated sibling re-renders.
   const files = useMemo(() => orderedDiffFiles(diff?.files ?? EMPTY_FILES), [diff]);
-  // Bind the viewed toggle to THIS module's repo. Stable across renders (repo is
-  // constant per module, the factory is stable), so it doesn't defeat the memo.
-  const handleToggleViewed = useCallback(
-    (path: string) => onToggleViewed(repo, path),
-    [onToggleViewed, repo],
-  );
-  // Bind the target change to THIS module's repo, mirroring handleToggleViewed —
-  // stable across renders so it doesn't defeat the memo.
+  // Bind the target change to THIS module's repo so it doesn't defeat the memo.
   const handleTarget = useCallback(
     (t: string) => onTarget?.(repo, t),
     [onTarget, repo],
-  );
-  // Bind the crumb's Mark complete / Revive to THIS module's repo + session, so a
-  // background module finishes its own review without first becoming active.
-  const handleArchive = useCallback(
-    (archived: boolean) => {
-      if (lifecycleSession) onArchive?.(repo, lifecycleSession, archived);
-    },
-    [onArchive, repo, lifecycleSession],
   );
   // Bind the collapse toggle to THIS module's repo, mirroring the others.
   const handleToggleCollapse = useCallback(
@@ -173,11 +137,9 @@ export const ModuleSection = memo(function ModuleSection({
         diff={diff}
         files={files}
         threads={threads}
-        viewed={viewed}
         split={split}
         wrap={wrap}
         theme={theme}
-        onToggleViewed={handleToggleViewed}
         previewFile={previewFile}
         onBackToDiff={onBackToDiff}
         onChanged={onChanged}
@@ -199,7 +161,6 @@ export const ModuleSection = memo(function ModuleSection({
           focused={false}
           collapsible={false}
           files={files}
-          viewed={viewed}
           worktree={worktree}
           branch={branch}
           pullRequest={pullRequest}
@@ -208,9 +169,6 @@ export const ModuleSection = memo(function ModuleSection({
           refThreadCounts={refThreadCounts}
           defaultBranch={defaultBranch}
           onTarget={handleTarget}
-          lifecycle={lifecycle}
-          canArchive={false}
-          onArchive={handleArchive}
           collapsed={false}
           onToggleCollapse={handleToggleCollapse}
         >
@@ -228,7 +186,6 @@ export const ModuleSection = memo(function ModuleSection({
       focused={focused}
       collapsible
       files={files}
-      viewed={viewed}
       worktree={worktree}
       branch={branch}
       pullRequest={pullRequest}
@@ -237,9 +194,6 @@ export const ModuleSection = memo(function ModuleSection({
       refThreadCounts={refThreadCounts}
       defaultBranch={defaultBranch}
       onTarget={handleTarget}
-      lifecycle={lifecycle}
-      canArchive={lifecycleSession !== null}
-      onArchive={handleArchive}
       collapsed={collapsed}
       onToggleCollapse={handleToggleCollapse}
     >
@@ -257,7 +211,6 @@ function StackedModule({
   focused,
   collapsible,
   files,
-  viewed,
   worktree,
   branch,
   pullRequest,
@@ -266,9 +219,6 @@ function StackedModule({
   refThreadCounts,
   defaultBranch,
   onTarget,
-  lifecycle,
-  canArchive,
-  onArchive,
   collapsed,
   onToggleCollapse,
   children,
@@ -279,7 +229,6 @@ function StackedModule({
   focused: boolean;
   collapsible: boolean;
   files: DiffFile[];
-  viewed: Set<string>;
   worktree: string | null;
   branch: string | null;
   pullRequest: PullRequestLink | null;
@@ -288,10 +237,6 @@ function StackedModule({
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch: string | null;
   onTarget: (target: string) => void;
-  lifecycle: Lifecycle;
-  /** A settled session exists, so Mark complete / Revive can act. */
-  canArchive: boolean;
-  onArchive: (archived: boolean) => void;
   /** Collapse is controlled by App (so the rail can drive it too). */
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -300,7 +245,6 @@ function StackedModule({
   const additions = files.reduce((n, f) => n + f.additions, 0);
   const deletions = files.reduce((n, f) => n + f.deletions, 0);
   const filesChanged = files.length;
-  const viewedCount = files.reduce((n, f) => (viewed.has(f.path) ? n + 1 : n), 0);
   const hasFiles = filesChanged > 0;
 
   return (
@@ -333,45 +277,12 @@ function StackedModule({
             </span>
           </span>
           <PullRequestBadge pullRequest={pullRequest} />
-          <span className="mh-state-wrap">
-            <span
-              className="status-crumb"
-              title={`Review state: ${LIFECYCLE_LABEL[lifecycle]}`}
-            >
-              <span
-                className={`sc-dot ${LIFECYCLE_DOT[lifecycle]}`}
-                aria-hidden="true"
-              />
-              <span className="sc-label">{LIFECYCLE_LABEL[lifecycle]}</span>
-              {canArchive && lifecycle === "ready" && (
-                <button
-                  type="button"
-                  className="sc-ready-action"
-                  onClick={() => onArchive(true)}
-                >
-                  Mark complete
-                </button>
-              )}
-              {canArchive && lifecycle === "archived" && (
-                <button
-                  type="button"
-                  className="sc-ready-action"
-                  onClick={() => onArchive(false)}
-                >
-                  Revive
-                </button>
-              )}
-            </span>
-          </span>
           <span className="mh-stat">
             {hasFiles ? (
               <>
                 <DiffStat additions={additions} deletions={deletions} />
                 <span className="mh-files">
                   {filesChanged} file{filesChanged === 1 ? "" : "s"}
-                </span>
-                <span className="mh-viewed" title="Files marked viewed">
-                  {viewedCount}/{filesChanged} viewed
                 </span>
               </>
             ) : (

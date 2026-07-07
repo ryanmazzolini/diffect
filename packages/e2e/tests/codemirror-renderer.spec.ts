@@ -88,7 +88,8 @@ test("explains when CodeMirror skips deleted syntax highlighting", async ({ page
 
 test("comments, replies, and closes from the CodeMirror diff renderer", async ({ page }) => {
   await withStagedMathFile(page, async (file) => {
-    await expect(file.locator(".edit-mode-badge")).toHaveText("Read-only");
+    const editMode = file.locator(".cm-mode-toggle").getByRole("button", { name: "Edit file" });
+    await expect(editMode).toBeDisabled();
     await file.locator(".cm-comment-gutter .cm-gutterElement").nth(1).hover();
     await file.locator("button.cm-diff-add-widget[data-side='new']").first().click();
     const form = file.locator(".comment-form");
@@ -191,7 +192,7 @@ test("comments on expanded unchanged CodeMirror lines", async ({ page }) => {
   await page.goto("/");
   await page.locator(".tree-file", { hasText: "calc.js" }).click();
   const file = page.locator(".file", { hasText: "calc.js" });
-  await expect(file.locator(".edit-mode-badge")).toHaveText("Review");
+  await expect(file.locator(".cm-mode-toggle").getByRole("button", { name: "Comment on diff" })).toHaveClass(/active/);
 
   await file.locator(".cm-collapsedLines").click();
   const unchangedLine = file.locator(".cm-line", { hasText: "export const k10 = 10;" });
@@ -226,8 +227,7 @@ test("old-side CodeMirror comments highlight deleted lines", async ({ page }) =>
 test("deleted CodeMirror files disable edit but allow old-side comments", async ({ page }) => {
   await withDeletedMathFile(page, async (file) => {
     await expect(file.locator(".status-deleted")).toHaveText("deleted");
-    await expect(file.locator(".edit-mode-badge")).toHaveText("Read-only");
-    const edit = file.locator(".cm-mode-toggle").getByRole("button", { name: "Edit" });
+    const edit = file.locator(".cm-mode-toggle").getByRole("button", { name: "Edit file" });
     await expect(edit).toBeDisabled();
     await expect(edit).toHaveAttribute("title", "Deleted files can’t be edited here");
 
@@ -242,13 +242,14 @@ test("deleted CodeMirror files disable edit but allow old-side comments", async 
 test("saves edits from the CodeMirror diff renderer", async ({ page }) => {
   const file = await openMathFile(page);
 
-  await expect(file.locator(".edit-mode-badge")).toHaveText("Review");
+  await expect(file.locator(".cm-mode-toggle").getByRole("button", { name: "Comment on diff" })).toHaveClass(/active/);
   await file.locator(".cm-comment-gutter .cm-gutterElement").nth(1).hover();
   await expect(file.locator("button.cm-diff-add-widget").first()).toHaveCSS("opacity", "1");
 
   await expect(file.locator(".file-header")).not.toHaveClass(/edit-mode/);
-  await file.getByRole("button", { name: "Edit" }).click();
-  await expect(file.locator(".edit-mode-badge")).toHaveText("Edit");
+  const edit = file.getByRole("button", { name: "Edit file" });
+  await edit.click();
+  await expect(edit).toHaveClass(/active/);
   await expect(file.locator(".file-header")).toHaveClass(/edit-mode/);
   await expect(file.locator(".cm-diff-editbar")).toHaveCount(0);
   await expect(file.locator(".cm-diff-save-pill")).toBeVisible();

@@ -16,6 +16,7 @@ interface Props {
   actions?: OpenInAction[];
   primaryAction?: () => void;
   className?: string;
+  compact?: boolean;
 }
 
 export function OpenInMenu({
@@ -25,6 +26,7 @@ export function OpenInMenu({
   actions = [],
   primaryAction,
   className = "",
+  compact = false,
 }: Props) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const close = () => {
@@ -85,7 +87,7 @@ export function OpenInMenu({
 
   if (primaryAction) {
     return (
-      <div className={`open-in-menu open-in-split ${className}`.trim()}>
+      <div className={`open-in-menu open-in-split${compact ? " compact" : ""} ${className}`.trim()}>
         <button
           type="button"
           className="open-in-trigger open-in-primary"
@@ -111,8 +113,7 @@ export function OpenInMenu({
   }
 
   return (
-    <details className={`open-in-menu ${className}`.trim()} ref={detailsRef}>
-      <summary className="open-in-trigger" title={label}>
+    <details className={`open-in-menu${compact ? " compact" : ""} ${className}`.trim()} ref={detailsRef}>      <summary className="open-in-trigger" title={label}>
         <EditorIcon editor={editor} size={16} />
         <span>{label}</span>
         <Icon name="chevron-down" size={12} />

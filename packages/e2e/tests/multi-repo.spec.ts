@@ -150,9 +150,8 @@ test("collapsing a module hides its diff body but not its sibling", async ({ pag
 test("multi-repo topbar sheds per-repo controls", async ({ page }) => {
   await page.goto("/?renderer=git");
 
-  // N≥2 sheds the topbar's per-repo controls — the base…compare picker now lives in
-  // each module header and viewed progress in the module headers. Global view
-  // preferences live in the topbar Options menu.
+  // N≥2 sheds the topbar's per-repo controls — the base…compare picker now lives
+  // in each module header. Global view preferences live in the topbar Options menu.
   await expect(page.locator(".rheader .target-picker")).toHaveCount(0);
   await expect(page.locator(".rheader .metaitem")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Options" })).toBeVisible();
@@ -202,58 +201,4 @@ test("a module's ref picker popover escapes the module scroll clip", async ({ pa
   await page.getByPlaceholder("Find a branch, tag, or commit…").press("Escape");
   await expect(page.locator(".ref-popover")).toHaveCount(0);
   await expect(baseTrigger).toBeFocused();
-});
-
-test("a module's status crumb walks its review lifecycle", async ({ page }) => {
-  await page.goto("/?renderer=git");
-  const alpha = page.locator('.module[data-repo="alpha"]');
-  const crumb = alpha.locator(".status-crumb");
-
-  // Idle: alpha has a diff but no comments yet.
-  await expect(crumb).toContainText("Not started");
-
-  // Post a comment on alpha → in progress.
-  // Wait for the stack to gain height first (rows only mount once scrolled in).
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const m = document.querySelector(".modmain");
-        return m ? m.scrollHeight - m.clientHeight : 0;
-      }),
-    )
-    .toBeGreaterThan(0);
-  await alpha.evaluate((el) => el.scrollIntoView({ block: "start" }));
-  const row = alpha.locator("tbody.diff-table-body tr", { hasText: "TODO" }).first();
-  await expect(row).toBeVisible();
-  await row.hover();
-  await row.locator("button.diff-add-widget").first().click();
-  const form = page.locator(".comment-form");
-  await expect(form).toBeVisible();
-  await form.locator("textarea").fill("crumb walk");
-  await form.getByRole("button", { name: "Comment" }).click();
-
-  await expect(crumb).toContainText("In progress");
-  await expect(crumb.locator(".sc-dot.progress")).toBeVisible();
-
-  // Close the thread → ready (all resolved), with a Mark complete affordance.
-  const card = page
-    .locator(".thread-pane .thread-card", { hasText: "crumb walk" })
-    .first();
-  await card.getByRole("button", { name: "Close", exact: true }).first().click();
-  await expect(crumb).toContainText("Ready");
-  await expect(crumb.locator(".sc-dot.ready")).toBeVisible();
-
-  // Mark complete from the crumb → archived, with a Revive affordance.
-  await crumb.getByRole("button", { name: "Mark complete" }).click();
-  await expect(crumb).toContainText("Archived");
-  await expect(crumb.locator(".sc-dot.arch")).toBeVisible();
-  await expect(crumb.getByRole("button", { name: "Revive" })).toBeVisible();
-
-  // Sidebar history is navigational, not a revive action: clicking the archived
-  // review opens its closed thread in the thread pane.
-  await page.locator(".review-recovery > summary").click();
-  await page.locator(".review-recovery .session-item").first().click();
-  await expect(
-    page.locator(".thread-pane .thread-card", { hasText: "crumb walk" }),
-  ).toBeVisible();
 });

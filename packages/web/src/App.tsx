@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DAEMON_EVENTS } from "@diffect/shared";
 import type {
-  ArchivedSession,
   DiffChangedPayload,
   DiffFile,
   RefList,
   RepoDiff,
   RepoSummary,
-  ReviewSession,
   Thread,
   ThreadStatus,
   UiReviewSelection,
@@ -25,8 +23,7 @@ import {
   pickEditor,
   savePreferredEditor,
 } from "./editorPreference.js";
-import { getSessionStored, getStored, removeStored, setSessionStored, setStored } from "./storage.js";
-import { deriveLifecycle, type Lifecycle } from "./lifecycle.js";
+import { getSessionStored, getStored, setSessionStored, setStored } from "./storage.js";
 import { fileElementId, orderedDiffFiles } from "./fileTree.js";
 import { CurrentSnapshotContext } from "./currentSnapshot.js";
 import { usePaneLayout } from "./usePaneLayout.js";
@@ -59,11 +56,6 @@ type GeneralCommentTarget = {
 const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 // Stable empty references so memoized children don't re-render on the null paths.
 const EMPTY_FILES: DiffFile[] = [];
-const EMPTY_SESSIONS: ReviewSession[] = [];
-const EMPTY_ARCHIVED: ArchivedSession[] = [];
-// Shared empty "viewed" set so a repo with no per-file state yet projects a
-// stable reference (memoized panels don't churn on the empty path).
-const EMPTY_VIEWED: ReadonlySet<string> = new Set();
 // A repo's default review selection on first visit: its primary checkout, work target.
 const DEFAULT_TARGET = "work";
 const FOLLOW_MODE_KEY = "diffect-follow-mode";
@@ -212,26 +204,6 @@ function recentSelectionsFor(
   }
   return out;
 }
-// Per-session dismissal of the "looks complete" suggestion. This is a UI
-// preference (correctly browser-local), unlike the archive *fact* itself, which
-// is a durable shared event in the per-repo log. Entries are keyed by
-// `${repo}:${sessionId}` so the same id surfaced from two repos doesn't share a
-// dismissal (session ids aren't repo-qualified — isolation is client-side, per the
-// plan's invariant).
-const COMPLETE_DISMISS_KEY = "diffect-complete-dismissed-v2";
-// The pre-multi-repo key stored bare session ids with no repo context, so it can't
-// be faithfully promoted to the composite form — drop it (a previously-dismissed
-// banner may resurface once, then re-dismiss into the new key).
-const LEGACY_COMPLETE_DISMISS_KEY = "diffect-complete-dismissed";
-function loadDismissedComplete(): Set<string> {
-  try {
-    removeStored(LEGACY_COMPLETE_DISMISS_KEY);
-    const raw = getStored(COMPLETE_DISMISS_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
 // The session-count map key standing in for legacy (pre-scope, sessionId === null)
 // threads, which share the dedicated unscoped bucket rather than any one session.
 const LEGACY_KEY = "__legacy__";
@@ -240,13 +212,6 @@ const LEGACY_KEY = "__legacy__";
 // whose selection is already loaded.
 const selSig = (worktree: string | null, target: string) =>
   `${worktree ?? ""}::${target}`;
-// Shallow set equality so re-reading a repo's stored "viewed" set preserves the
-// existing reference when nothing changed — the memoized modules don't churn.
-function sameSet(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const v of a) if (!b.has(v)) return false;
-  return true;
-}
 // CSS.escape guard for the rare attribute selector (a repo name with a quote or
 // backslash); falls back to the raw string where CSS.escape is unavailable.
 function cssEscape(s: string): string {
@@ -461,24 +426,6 @@ export function App() {
   const [generalComment, setGeneralComment] = useState<GeneralCommentTarget | null>(null);
   const [mainTab, setMainTab] = useState<MainPaneTab>("diff");
   const [prDraftReloadKey, setPrDraftReloadKey] = useState(0);
-  // Per-repo per-file "viewed" sets, projected to `viewed` for the active repo.
-  const [viewedByRepo, setViewedByRepo] = useState<Map<string, Set<string>>>(
-    () => new Map(),
-  );
-  // Optimistic archive/revive overrides keyed by session id, applied over the
-  // server's archivedSessions until the SSE refetch catches up. Lets the
-  // banner/sidebar react instantly, and rolls back on a failed POST. The session
-  // is carried so an optimistically-archived id can render in the Archived group
-  // (with its scope) before the durable event round-trips. The origin `repo` is
-  // carried too: session ids aren't repo-qualified, so an override is only ever
-  // applied/reconciled while that repo is active — switching repos mid-flight
-  // must not leak the pin into another repo's Archived group.
-  const [archiveOverrides, setArchiveOverrides] = useState<
-    Map<string, { archived: boolean; session: ReviewSession; repo: string }>
-  >(() => new Map());
-  const [dismissedComplete, setDismissedComplete] = useState<Set<string>>(
-    loadDismissedComplete,
-  );
   // Which repos render collapsed in the stacked layout. Lifted out of the module
   // so the repo rail's caret and its Collapse-all/Expand-all can drive the same
   // state the in-module caret does. A repo absent from the set is expanded — the
@@ -505,16 +452,14 @@ export function App() {
   const target = selection?.target ?? DEFAULT_TARGET;
   const diff = (repo ? diffs.get(repo) : undefined) ?? null;
   const refs = (repo ? refsByRepo.get(repo) : undefined) ?? null;
-  const viewed = ((repo ? viewedByRepo.get(repo) : undefined) ??
-    EMPTY_VIEWED) as Set<string>;
   const showUnscoped = repo ? (showUnscopedByRepo.get(repo) ?? false) : false;
   const pendingSession = repo ? (pendingByRepo.get(repo) ?? null) : null;
   const threadSession = repo ? (threadSessionByRepo.get(repo) ?? null) : null;
 
   // Latest workspace/selections for callbacks that must read current state without
-  // subscribing to it (the SSE fan-out, the per-repo refreshers, the viewed
-  // toggle). A ref keeps those callbacks stable so they neither tear down the
-  // EventSource nor defeat the module memo on every selection change.
+  // subscribing to it (the SSE fan-out, the per-repo refreshers). A ref keeps
+  // those callbacks stable so they neither tear down the EventSource nor defeat
+  // the module memo on every selection change.
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
   const activeWorkspacePathRef = useRef(activeWorkspacePath);
@@ -968,65 +913,6 @@ export function App() {
   }, [visibleRepos]);
   const expandAllModules = useCallback(() => setCollapsedRepos(new Set()), []);
 
-  // Per-file "viewed" state, scoped per repo to that repo's (worktree, target) —
-  // the diff's identity — and persisted under one key each. The key is computed
-  // from a repo's own selection, not a single active-repo key, so a stacked module
-  // reads and writes its own set.
-  const viewedKeyFor = useCallback(
-    (forRepo: string, sel: { worktree: string | null; target: string }) =>
-      `diffect-viewed:${forRepo}:${sel.worktree ?? ""}:${sel.target}`,
-    [],
-  );
-  // Load every repo's stored viewed set for its current selection. `sameSet`
-  // preserves the existing reference when a repo's set is unchanged so the memoized
-  // modules don't churn. At N=1 this is the single active repo — the old behavior.
-  useEffect(() => {
-    if (!workspace) return;
-    setViewedByRepo((prev) => {
-      let changed = false;
-      const next = new Map(prev);
-      for (const r of visibleRepos) {
-        const sel = selections.get(r.name) ?? {
-          worktree: null,
-          target: DEFAULT_TARGET,
-        };
-        let loaded: Set<string>;
-        try {
-          const raw = getStored(viewedKeyFor(r.name, sel));
-          loaded = new Set(raw ? (JSON.parse(raw) as string[]) : []);
-        } catch {
-          loaded = new Set();
-        }
-        const cur = prev.get(r.name);
-        if (!cur || !sameSet(cur, loaded)) {
-          next.set(r.name, loaded);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [workspace, visibleRepos, selections, viewedKeyFor]);
-
-  // Toggle "viewed" for a file in a SPECIFIC repo (a stacked module passes its own
-  // repo, so a click writes the right set even if scroll-focus hasn't yet promoted
-  // it to active). Reads the repo's selection from the ref so the callback stays
-  // stable and doesn't defeat the module memo.
-  const toggleViewedFor = useCallback(
-    (forRepo: string, path: string) => {
-      const sel = selectionsRef.current.get(forRepo) ?? {
-        worktree: null,
-        target: DEFAULT_TARGET,
-      };
-      setViewedByRepo((prevMap) => {
-        const next = new Set(prevMap.get(forRepo) ?? EMPTY_VIEWED);
-        next.has(path) ? next.delete(path) : next.add(path);
-        setStored(viewedKeyFor(forRepo, sel), JSON.stringify([...next]));
-        return new Map(prevMap).set(forRepo, next);
-      });
-    },
-    [viewedKeyFor],
-  );
-
   const {
     collapsed: paneCollapsed,
     toggleCollapsed,
@@ -1206,70 +1092,6 @@ export function App() {
     setUnscopedFor(repo, true);
   }, [repo, setPendingFor, setThreadSessionFor, setUnscopedFor]);
 
-  const selectReviewSession = useCallback(
-    (session: ReviewSession) => {
-      if (!repo) return;
-      setUnscopedFor(repo, false);
-      setPendingFor(repo, null);
-      setThreadSessionFor(repo, session.id);
-      const sel = { worktree: session.worktree, target: session.scope.target };
-      setSelections((prev) => new Map(prev).set(repo, sel));
-      markReviewOpened(repo, sel);
-      setFilter("all");
-      if (paneCollapsed) toggleCollapsed();
-    },
-    [markReviewOpened, paneCollapsed, repo, setPendingFor, setThreadSessionFor, setUnscopedFor, toggleCollapsed],
-  );
-
-  // Archive (`archived: true`) or revive (`archived: false`) a session. Optimistic:
-  // record the override so the banner/sidebar flip immediately, POST the scope (the
-  // server re-derives the id), and roll the override back if the write fails. The
-  // SSE `workspace.changed` broadcast refetches the durable set, which the
-  // reconciler below then folds in, retiring the override.
-  // Repo-parameterized so a stacked module archives/revives its OWN session even
-  // when it isn't the focused repo. The override carries `forRepo`, so the
-  // reconciler retires it against that repo's server set, never the active one's.
-  const setArchivedFor = useCallback(
-    async (forRepo: string, session: ReviewSession, archived: boolean) => {
-      setArchiveOverrides((prev) =>
-        new Map(prev).set(session.id, { archived, session, repo: forRepo }),
-      );
-      try {
-        await api.archiveSession(forRepo, { scope: session.scope, archived });
-      } catch (e) {
-        setError(String(e));
-        setArchiveOverrides((prev) => {
-          const next = new Map(prev);
-          next.delete(session.id);
-          return next;
-        });
-      }
-    },
-    [],
-  );
-  // Active-repo archive — the N=1 banner/sidebar path, unchanged: delegates to the
-  // repo-parameterized form bound to the active repo (a no-op when none is active).
-  const setArchived = useCallback(
-    (session: ReviewSession, archived: boolean) => {
-      if (!repo) return;
-      void setArchivedFor(repo, session, archived);
-    },
-    [repo, setArchivedFor],
-  );
-  // Dismissals are keyed by `${repo}:${sessionId}` so the same session id surfaced
-  // from two repos doesn't share a dismissal (ids aren't repo-qualified).
-  const dismissComplete = useCallback(
-    (id: string) => {
-      if (!repo) return;
-      setDismissedComplete((prev) => {
-        const next = new Set(prev).add(`${repo}:${id}`);
-        setStored(COMPLETE_DISMISS_KEY, JSON.stringify([...next]));
-        return next;
-      });
-    },
-    [repo],
-  );
-
   useEffect(() => {
     setPreviewFile(null);
     setSpacePreviewFile(null);
@@ -1385,9 +1207,9 @@ export function App() {
   // Render the diff in the same order the sidebar tree shows, so the active-file
   // highlight walks the tree top-to-bottom as you scroll instead of jumping.
   const orderedFiles = useMemo(() => orderedDiffFiles(sidebarFiles), [sidebarFiles]);
-  // Files backing the topbar's aggregate diffstat + viewed progress. At N≥2 it's
-  // every module's files (the header summarizes the whole modules view); at N=1
-  // it's the single repo's — identical to `sidebarFiles`.
+  // Files backing the topbar's aggregate diffstat. At N≥2 it's every module's
+  // files (the header summarizes the whole modules view); at N=1 it's the single
+  // repo's — identical to `sidebarFiles`.
   const headerFiles = useMemo(
     () =>
       stacked
@@ -1570,99 +1392,6 @@ export function App() {
     ? selectedWorktreeSummary(activeRepo, worktree)
     : null;
 
-  // The active diff's own session, stabilized so a benign refetch re-creating the
-  // RepoDiff (and a fresh `scope` object) doesn't churn the sidebar's session memo.
-  // The session id is sha256(kind+baseRef+headRef), so an equal id guarantees an
-  // equal symbolic scope; only `baseSha` (commit drift) and `target` (the raw
-  // spec, e.g. `a..b` vs `a...b`) can differ for one id. baseSha is unused by the
-  // label or navigation, but `target` drives re-selection, so we re-key the cache
-  // on it too — keeping identity stable while
-  // (id, worktree, target) hold, and refreshing the scope when any of them move.
-  const diffSessionId = diff?.sessionId ?? null;
-  // Stabilized per repo: each module's diff carries its own session, cached so a
-  // benign refetch (new RepoDiff/scope object, same id) doesn't churn the memos.
-  // Keyed by repo so stacked modules never share or clobber each other's session;
-  // an inactive repo whose diff cleared has its entry dropped, not the whole cache.
-  const diffSessionsRef = useRef<Map<string, ReviewSession>>(new Map());
-  if (repo) {
-    if (diffSessionId && diff?.scope) {
-      const cur = diffSessionsRef.current.get(repo);
-      if (
-        !cur ||
-        cur.id !== diffSessionId ||
-        cur.worktree !== worktree ||
-        cur.scope.target !== diff.scope.target
-      ) {
-        diffSessionsRef.current.set(repo, {
-          id: diffSessionId,
-          scope: diff.scope,
-          worktree,
-        });
-      }
-    } else {
-      diffSessionsRef.current.delete(repo);
-    }
-  }
-  const diffSession = repo ? (diffSessionsRef.current.get(repo) ?? null) : null;
-
-  // The archived-session list: the durable set (from the per-repo log, on the
-  // workspace summary, carrying each session's scope) with optimistic overrides
-  // folded in. Off-checkout sessions live here by their stored id/scope — never
-  // re-derived, since re-derivation needs the live branch, which may have moved.
-  // Drives the "complete" suggestion (an archived session never re-suggests) and
-  // the sidebar's Archived group.
-  const archivedSessions = useMemo<ReviewSession[]>(() => {
-    const byId = new Map<string, ReviewSession>();
-    for (const a of activeRepo?.archivedSessions ?? EMPTY_ARCHIVED) {
-      byId.set(a.sessionId, { id: a.sessionId, scope: a.scope, worktree: null });
-    }
-    for (const [id, ov] of archiveOverrides) {
-      if (ov.repo !== repo) continue; // a foreign repo's pin never shows here
-      if (ov.archived) byId.set(id, ov.session);
-      else byId.delete(id);
-    }
-    return byId.size ? [...byId.values()] : EMPTY_SESSIONS;
-  }, [activeRepo, archiveOverrides, repo]);
-  const archivedSet = useMemo(
-    () => new Set(archivedSessions.map((s) => s.id)),
-    [archivedSessions],
-  );
-  // Each repo's durable archived-session id set, taken from the workspace summary
-  // (every repo across entries). Feeds both the override reconciler and the
-  // per-module status crumbs. At N=1 it's a single entry equal to the active
-  // repo's set, so the reconciler below stays byte-identical to its prior form.
-  const serverArchivedByRepo = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const r of entries.flatMap((e) => e.repos)) {
-      map.set(
-        r.name,
-        new Set((r.archivedSessions ?? EMPTY_ARCHIVED).map((a) => a.sessionId)),
-      );
-    }
-    return map;
-  }, [entries]);
-  // Retire optimistic overrides the server view has caught up to, so a later
-  // server-side flip (e.g. a teammate revives) isn't masked by a stale local pin.
-  // Each override reconciles against ITS OWN repo's server set, so a background
-  // module's pin retires as soon as that repo's durable event round-trips — not
-  // only when the user focuses it. (At N=1 there's one repo; same as before.)
-  useEffect(() => {
-    setArchiveOverrides((prev) => {
-      if (prev.size === 0) return prev;
-      let changed = false;
-      const next = new Map(prev);
-      for (const [id, ov] of prev) {
-        const serverArchived = serverArchivedByRepo.get(ov.repo);
-        if (!serverArchived) continue; // repo not in the workspace view yet
-        if (serverArchived.has(id) === ov.archived) {
-          next.delete(id);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [serverArchivedByRepo]);
-
   // Thread count per session id (and the legacy bucket) over ALL the repo's
   // threads — the sidebar badge reads "how many comments live under this review",
   // independent of which session is currently shown.
@@ -1678,20 +1407,6 @@ export function App() {
   }, [threads, repo, activeSpacePath]);
   const legacyCount = sessionCounts.get(LEGACY_KEY) ?? 0;
 
-  // Open-thread count per session — the open-only sibling of `sessionCounts`. The
-  // "looks complete" suggestion fires when a session has comments but none open,
-  // so it needs the open tally kept apart from the total.
-  const openCountsBySession = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of threads) {
-      if (t.spacePath && t.spacePath !== activeSpacePath) continue;
-      if (t.repo !== repo || t.status !== "open") continue;
-      const key = t.sessionId ?? LEGACY_KEY;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return counts;
-  }, [threads, repo, activeSpacePath]);
-
   const refThreadCountsByRepo = useMemo(() => {
     const map = new Map<string, Map<string, RefThreadCount>>();
     for (const t of threads) {
@@ -1706,104 +1421,6 @@ export function App() {
     }
     return map;
   }, [threads, activeSpacePath]);
-
-  // The settled session the user is looking at — the one "Mark complete" would
-  // archive. Only the diff's own settled session qualifies: not mid-selection (the
-  // threads on screen still belong to the previous session) and not the unscoped
-  // bucket (not a session; its null scope the server refuses anyway). It carries
-  // the scope the archive POST needs.
-  const completableSession =
-    !showUnscoped && !pendingSession && !threadSession ? diffSession : null;
-  // Detection keyed on review *activity*, not tree state (plan/critic fix #1): this
-  // review collected at least one comment, every one is now resolved, it isn't
-  // already archived, and its suggestion hasn't been dismissed.
-  const sessionDone =
-    completableSession !== null &&
-    (sessionCounts.get(completableSession.id) ?? 0) > 0 &&
-    (openCountsBySession.get(completableSession.id) ?? 0) === 0 &&
-    !archivedSet.has(completableSession.id) &&
-    !dismissedComplete.has(`${repo}:${completableSession.id}`);
-  const markComplete = useCallback(() => {
-    if (completableSession) void setArchived(completableSession, true);
-  }, [completableSession, setArchived]);
-
-  // Each repo's effective archived-session id set: its durable server set with
-  // this repo's optimistic pins folded in, so a module's crumb flips the instant
-  // its archive/revive POST fires (before the SSE round-trip). At N=1 the active
-  // repo's entry equals `archivedSet`; the crumb only reads this when stacked.
-  const archivedByRepo = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const [name, set] of serverArchivedByRepo) map.set(name, new Set(set));
-    for (const [id, ov] of archiveOverrides) {
-      let set = map.get(ov.repo);
-      if (!set) {
-        set = new Set();
-        map.set(ov.repo, set);
-      }
-      if (ov.archived) set.add(id);
-      else set.delete(id);
-    }
-    return map;
-  }, [serverArchivedByRepo, archiveOverrides]);
-
-  // The durable lifecycle state each module's status crumb renders, plus the
-  // session that crumb's Mark complete / Revive acts on. Per repo it mirrors the
-  // active-repo derivation: the module's settled session is the diff's own session
-  // (unless showing the unscoped bucket or mid-selection); its total/open comment
-  // tallies and archived flag then resolve to one of the four resting states. The
-  // active repo's entry tracks `completableSession`, so the crumb and the N=1
-  // banner never disagree about whether a review is ready.
-  const lifecycleByRepo = useMemo(() => {
-    const map = new Map<
-      string,
-      { state: Lifecycle; session: ReviewSession | null }
-    >();
-    for (const r of visibleRepos) {
-      const name = r.name;
-      const d = diffs.get(name) ?? null;
-      const rShow = showUnscopedByRepo.get(name) ?? false;
-      const rPending = pendingByRepo.get(name) ?? null;
-      const session: ReviewSession | null =
-        !rShow && !rPending && d?.sessionId && d.scope
-          ? {
-              id: d.sessionId,
-              scope: d.scope,
-              worktree: selections.get(name)?.worktree ?? null,
-            }
-          : null;
-      if (!session) {
-        map.set(name, { state: "idle", session: null });
-        continue;
-      }
-      let total = 0;
-      let open = 0;
-      for (const t of threads) {
-        if (t.spacePath && t.spacePath !== activeSpacePath) continue;
-        if (t.repo !== name || t.sessionId !== session.id) continue;
-        total++;
-        if (t.status === "open") open++;
-      }
-      const archived = archivedByRepo.get(name)?.has(session.id) ?? false;
-      map.set(name, {
-        state: deriveLifecycle({
-          totalComments: total,
-          openComments: open,
-          archived,
-        }),
-        session,
-      });
-    }
-    return map;
-  }, [
-    visibleRepos,
-    diffs,
-    threads,
-    showUnscopedByRepo,
-    pendingByRepo,
-    selections,
-    archivedByRepo,
-    activeSpacePath,
-  ]);
 
   // Per-repo scoped thread lists: each repo's threads filtered to its own current
   // session (or its unscoped bucket). Built as a Map in one pass so the stacked
@@ -2126,17 +1743,13 @@ export function App() {
               repos={visibleRepos}
               currentSession={currentSession}
               showUnscoped={showUnscoped}
-              archivedSessions={archivedSessions}
-              sessionCounts={sessionCounts}
               legacyCount={legacyCount}
               onSelectRepo={selectRepo}
-              onSelectSession={selectReviewSession}
               onSelectLegacy={selectLegacy}
               spacePath={activeEntry?.path ?? visibleWorkspace.root}
               spaceFiles={spaceFiles}
               filesByRepo={diffFilesByRepo}
               allFilesByRepo={allFilesByRepo}
-              viewedByRepo={viewedByRepo}
               threadCountsByRepo={threadCountsByRepo}
               spaceThreadCounts={spaceFileThreadCounts}
               activeFile={activeFile}
@@ -2234,7 +1847,6 @@ export function App() {
                           pullRequest={worktreeSummary?.pullRequest ?? null}
                           diff={diffs.get(r.name) ?? null}
                           threads={scopedThreadsByRepo.get(r.name) ?? EMPTY_THREADS}
-                          viewed={(viewedByRepo.get(r.name) ?? EMPTY_VIEWED) as Set<string>}
                           split={splitView}
                           wrap={wrapLines}
                           theme={theme}
@@ -2243,12 +1855,8 @@ export function App() {
                           refThreadCounts={refThreadCountsByRepo.get(r.name) ?? EMPTY_REF_THREAD_COUNTS}
                           defaultBranch={r.defaultBranch}
                           onTarget={changeTargetFor}
-                          lifecycle={lifecycleByRepo.get(r.name)?.state ?? "idle"}
-                          lifecycleSession={lifecycleByRepo.get(r.name)?.session ?? null}
-                          onArchive={setArchivedFor}
                           collapsed={collapsedRepos.has(r.name)}
                           onToggleCollapse={toggleCollapseFor}
-                          onToggleViewed={toggleViewedFor}
                           previewFile={r.name === repo ? previewFile : null}
                           onBackToDiff={backToDiff}
                           onChanged={refreshThreads}
@@ -2270,7 +1878,6 @@ export function App() {
                     pullRequest={activeWorktree?.pullRequest ?? null}
                     diff={diff}
                     threads={scopedThreads}
-                    viewed={viewed}
                     split={splitView}
                     wrap={wrapLines}
                     theme={theme}
@@ -2279,10 +1886,6 @@ export function App() {
                     refThreadCounts={refThreadCountsByRepo.get(repo) ?? EMPTY_REF_THREAD_COUNTS}
                     defaultBranch={activeRepo?.defaultBranch ?? null}
                     onTarget={changeTargetFor}
-                    lifecycle={lifecycleByRepo.get(repo)?.state ?? "idle"}
-                    lifecycleSession={lifecycleByRepo.get(repo)?.session ?? null}
-                    onArchive={setArchivedFor}
-                    onToggleViewed={toggleViewedFor}
                     previewFile={previewFile}
                     onBackToDiff={backToDiff}
                     onChanged={refreshThreads}
@@ -2368,34 +1971,6 @@ export function App() {
                       </button>
                     ))}
                   </div>
-                  {/* The "looks complete" banner is the N=1 chrome for completion. In the
-                      modules view each module's status crumb owns Mark complete/Revive, so
-                      the global banner (which can only speak for the active repo) yields to
-                      the per-module crumbs to avoid a duplicate, repo-ambiguous affordance. */}
-                  {!stacked && sessionDone && completableSession && (
-                    <div className="complete-banner" role="status">
-                      <Icon name="check" size={14} className="complete-icon" />
-                      <span className="complete-msg">
-                        Every comment here is resolved — this review looks complete.
-                      </span>
-                      <button
-                        type="button"
-                        className="complete-action"
-                        onClick={markComplete}
-                      >
-                        Mark complete
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn complete-dismiss"
-                        aria-label="Dismiss suggestion"
-                        title="Dismiss"
-                        onClick={() => dismissComplete(completableSession.id)}
-                      >
-                        <Icon name="x" size={14} />
-                      </button>
-                    </div>
-                  )}
                   {!showUnscoped && scopedThreads.length === 0 && legacyCount > 0 && (
                     <button
                       type="button"

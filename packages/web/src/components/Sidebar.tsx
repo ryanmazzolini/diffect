@@ -10,8 +10,6 @@ import {
 import type {
   DiffFile,
   RepoSummary,
-  ReviewScope,
-  ReviewSession,
 } from "@diffect/shared";
 import { Icon } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
@@ -29,21 +27,14 @@ interface Props {
   currentSession: string | null;
   /** The unscoped/legacy bucket is open; no session entry is highlighted. */
   showUnscoped: boolean;
-  /** Sessions archived for the active repo (durable + optimistic), routed to a
-   *  collapsed Archived group instead of the active list. */
-  archivedSessions: ReviewSession[];
-  /** Thread count per session id, plus the legacy bucket under `__legacy__`. */
-  sessionCounts: Map<string, number>;
   /** Pre-scope thread count; the unscoped bucket renders only when > 0. */
   legacyCount: number;
   repos: RepoSummary[];
   onSelectRepo: (repo: string) => void;
-  onSelectSession: (session: ReviewSession) => void;
   onSelectLegacy: () => void;
   spaceFiles: string[];
   filesByRepo: Map<string, DiffFile[]>;
   allFilesByRepo: Map<string, string[]>;
-  viewedByRepo: Map<string, Set<string>>;
   /** Open-thread count per repo/file path, plus space files. */
   threadCountsByRepo: Map<string, Map<string, number>>;
   spaceThreadCounts: Map<string, number>;
@@ -56,37 +47,6 @@ interface Props {
   editorLabel: string | null;
   onOpenRepoFile: (repo: string, path: string) => void;
   onOpenSpaceFile: (path: string) => void;
-}
-
-type ProgressFile = { repo: string; path: string };
-
-/**
- * Human label for a review session, derived from its scope so the client never
- * duplicates the server's ref-resolution. Work on a feature branch reads as the
- * branch; on the default branch it's local-state work (base === head); ranges
- * and refs read as `base..head`; index/worktree scopes name themselves.
- */
-function sessionLabel(scope: ReviewScope): string {
-  switch (scope.kind) {
-    case "work":
-      if (scope.branch) {
-        return scope.baseRef === scope.headRef
-          ? `${scope.branch} (local)`
-          : scope.branch;
-      }
-      return `${scope.headRef.replace(/^wt:/, "")} (detached)`;
-    case "staged":
-      return "Staged changes";
-    case "unstaged":
-      return "Unstaged changes";
-    case "ref":
-    case "range":
-      return `${scope.baseRef}..${scope.headRef}`;
-  }
-}
-
-function sessionDetail(_scope: ReviewScope): string | null {
-  return null;
 }
 
 function diffFileEntries(files: DiffFile[]): FileTreeEntry[] {
@@ -124,16 +84,12 @@ export const Sidebar = memo(function Sidebar({
   repos,
   currentSession,
   showUnscoped,
-  archivedSessions,
-  sessionCounts,
   legacyCount,
   onSelectRepo,
-  onSelectSession,
   onSelectLegacy,
   spaceFiles,
   filesByRepo,
   allFilesByRepo,
-  viewedByRepo,
   threadCountsByRepo,
   spaceThreadCounts,
   activeFile,
@@ -174,16 +130,8 @@ export const Sidebar = memo(function Sidebar({
         : [],
     [fileMode, spaceFiles],
   );
-  const changedProgress = useMemo<ProgressFile[]>(
-    () =>
-      repos.flatMap((r) =>
-        (filesByRepo.get(r.name) ?? []).map((file) => ({ repo: r.name, path: file.path })),
-      ),
-    [filesByRepo, repos],
-  );
   const showFiles =
     spaceEntries.length > 0 || repoEntries.some((entry) => entry.entries.length > 0) || repos.length > 0;
-  const showRecovery = legacyCount > 0 || archivedSessions.length > 0;
 
   useEffect(() => {
     if (!menu) return;
@@ -238,15 +186,6 @@ export const Sidebar = memo(function Sidebar({
           <div className="sidebar-head files-head">
             <span>{fileMode === "all" ? "Space tree" : "Diff tree"}</span>
             <span className="files-head-actions">
-              {fileMode === "diff" && (
-                <ReviewProgress
-                  files={changedProgress}
-                  viewedByRepo={viewedByRepo}
-                  activeRepo={repo}
-                  activeFile={activeFile}
-                  onSelectFile={onSelectFile}
-                />
-              )}
               <button
                 type="button"
                 className="file-scope-link"
@@ -268,7 +207,6 @@ export const Sidebar = memo(function Sidebar({
               key={`space:${spacePath}:${fileMode}`}
               storageKey={`space:${spacePath}:${fileMode}`}
               entries={spaceEntries}
-              viewed={new Set()}
               threadCounts={spaceThreadCounts}
               activeFile={activeSpaceFile}
               onSelectFile={(path) => onSelectFile(null, path)}
@@ -317,8 +255,7 @@ export const Sidebar = memo(function Sidebar({
                       key={`${r.name}:${fileMode}:${currentSession ?? ""}`}
                       storageKey={`${spacePath}:${r.name}:${fileMode}`}
                       entries={entries}
-                      viewed={viewedByRepo.get(r.name) ?? new Set()}
-                      threadCounts={threadCountsByRepo.get(r.name) ?? new Map()}
+                              threadCounts={threadCountsByRepo.get(r.name) ?? new Map()}
                       activeFile={r.name === repo ? activeFile : null}
                       onSelectFile={(path) => onSelectFile(r.name, path)}
                       onContextMenu={(path, event) => openContextMenu(r.name, path, event)}
@@ -353,72 +290,16 @@ export const Sidebar = memo(function Sidebar({
         </div>
       )}
 
-      {showRecovery && (
-        <ReviewRecovery
-          archivedSessions={archivedSessions}
-          sessionCounts={sessionCounts}
-          legacyCount={legacyCount}
-          showUnscoped={showUnscoped}
-          onSelectSession={onSelectSession}
-          onSelectLegacy={onSelectLegacy}
+      {legacyCount > 0 && (
+        <LegacyComments
+          count={legacyCount}
+          active={showUnscoped}
+          onSelect={onSelectLegacy}
         />
       )}
     </nav>
   );
 });
-
-/**
- * Review progress for the changed files: a clickable bar that jumps to the next
- * unviewed file (wrapping past the active one). It lives beside the file list so
- * the count reads in context, not as a stray number in the header.
- */
-function ReviewProgress({
-  files,
-  viewedByRepo,
-  activeRepo,
-  activeFile,
-  onSelectFile,
-}: {
-  files: ProgressFile[];
-  viewedByRepo: Map<string, Set<string>>;
-  activeRepo: string | null;
-  activeFile: string | null;
-  onSelectFile: (repo: string | null, path: string) => void;
-}) {
-  const total = files.length;
-  const isViewed = (f: ProgressFile) => viewedByRepo.get(f.repo)?.has(f.path) ?? false;
-  const done = files.reduce((n, f) => (isViewed(f) ? n + 1 : n), 0);
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  const allViewed = done >= total;
-
-  const jumpNextUnviewed = () => {
-    const start = activeFile
-      ? files.findIndex((f) => f.repo === activeRepo && f.path === activeFile)
-      : -1;
-    for (let i = 1; i <= total; i++) {
-      const f = files[(start + i + total) % total]!;
-      if (!isViewed(f)) return onSelectFile(f.repo, f.path);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      className="review-progress"
-      onClick={jumpNextUnviewed}
-      disabled={allViewed}
-      title={allViewed ? "All files viewed" : "Jump to the next unviewed file"}
-      aria-label={`${done} of ${total} files viewed${allViewed ? "" : ", jump to next unviewed"}`}
-    >
-      <span className="review-progress-bar" aria-hidden="true">
-        <span className="review-progress-fill" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="review-progress-count">
-        {done}/{total}
-      </span>
-    </button>
-  );
-}
 
 const collapsedKey = (storageKey: string) => `diffect-tree-collapsed:${storageKey}`;
 
@@ -456,7 +337,6 @@ function findDir(nodes: TreeNode[], path: string): TreeNode | null {
 function FileTree({
   storageKey,
   entries,
-  viewed,
   threadCounts,
   activeFile,
   onSelectFile,
@@ -465,7 +345,6 @@ function FileTree({
 }: {
   storageKey: string;
   entries: FileTreeEntry[];
-  viewed: Set<string>;
   threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
@@ -511,7 +390,6 @@ function FileTree({
           depth={baseDepth}
           collapsed={collapsed}
           onToggleDir={toggleDir}
-          viewed={viewed}
           threadCounts={threadCounts}
           activeFile={activeFile}
           onSelectFile={onSelectFile}
@@ -527,7 +405,6 @@ function TreeRow({
   depth,
   collapsed,
   onToggleDir,
-  viewed,
   threadCounts,
   activeFile,
   onSelectFile,
@@ -537,7 +414,6 @@ function TreeRow({
   depth: number;
   collapsed: Set<string>;
   onToggleDir: (path: string, recursive: boolean) => void;
-  viewed: Set<string>;
   threadCounts: Map<string, number>;
   activeFile: string | null;
   onSelectFile: (path: string) => void;
@@ -550,18 +426,16 @@ function TreeRow({
   if (node.type === "file") {
     const unchanged = node.status === "unchanged";
     const ignored = node.file?.ignored ?? false;
-    const isViewed = !unchanged && viewed.has(node.path);
     const glyph = fileGlyph(node.name);
     let title = node.path;
     if (ignored) title = `${node.path} — ignored by git`;
     else if (unchanged) title = `${node.path} — unchanged, open to comment`;
-    else if (isViewed) title = `${node.path} — viewed`;
     return (
       <button
         type="button"
         className={`tree-file${node.path === activeFile ? " active" : ""}${
           unchanged ? " unchanged" : ""
-        }${ignored ? " ignored" : ""}${isViewed ? " viewed" : ""}`}
+        }${ignored ? " ignored" : ""}`}
         style={depthVar}
         title={title}
         onClick={() => onSelectFile(node.path)}
@@ -611,8 +485,7 @@ function TreeRow({
             depth={depth + 1}
             collapsed={collapsed}
             onToggleDir={onToggleDir}
-            viewed={viewed}
-            threadCounts={threadCounts}
+              threadCounts={threadCounts}
             activeFile={activeFile}
             onSelectFile={onSelectFile}
             onContextMenu={onContextMenu}
@@ -719,48 +592,29 @@ function RepoItem({
   );
 }
 
-function ReviewRecovery({
-  archivedSessions,
-  sessionCounts,
-  legacyCount,
-  showUnscoped,
-  onSelectSession,
-  onSelectLegacy,
+function LegacyComments({
+  count,
+  active,
+  onSelect,
 }: {
-  archivedSessions: ReviewSession[];
-  sessionCounts: Map<string, number>;
-  legacyCount: number;
-  showUnscoped: boolean;
-  onSelectSession: (session: ReviewSession) => void;
-  onSelectLegacy: () => void;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
 }) {
-  const total = legacyCount + archivedSessions.length;
   return (
     <details className="review-recovery">
       <summary>
-        <span>Completed reviews</span>
-        <span className="archived-count">{total}</span>
+        <span>Older comments</span>
+        <span className="recovery-count">{count}</span>
       </summary>
       <div className="session-list recovery-list">
-        {legacyCount > 0 && (
-          <SessionItem
-            label="Unscoped"
-            detail="pre-scope comments"
-            count={legacyCount}
-            active={showUnscoped}
-            onClick={onSelectLegacy}
-          />
-        )}
-        {archivedSessions.map((s) => (
-          <SessionItem
-            key={s.id}
-            label={sessionLabel(s.scope)}
-            detail={sessionDetail(s.scope)}
-            count={sessionCounts.get(s.id) ?? 0}
-            active={false}
-            onClick={() => onSelectSession(s)}
-          />
-        ))}
+        <SessionItem
+          label="Unscoped"
+          detail="pre-scope comments"
+          count={count}
+          active={active}
+          onClick={onSelect}
+        />
       </div>
     </details>
   );
