@@ -2274,6 +2274,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .cm-diff-host {
   width: 100%;
   overflow: auto;
+  --cm-comment-range-bg: color-mix(in srgb, var(--range-select) 24%, transparent);
+  --cm-comment-range-edge: var(--range-select);
 }
 .cm-diff-host .cm-editor {
   outline: none;
@@ -2314,52 +2316,93 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--muted);
 }
 .cm-comment-gutter {
-  min-width: 24px;
+  min-width: 36px;
 }
 .cm-comment-marker {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-height: 20px;
+  min-height: 24px;
+  min-width: 32px;
+  margin: 0 -4px;
+  padding: 0 4px;
 }
 .cm-comment-spacer {
   visibility: hidden;
   display: inline-block;
-  width: 16px;
+  width: 22px;
 }
 .cm-diff-add-widget {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 6px;
   background: var(--panel-2);
   color: var(--muted);
-  font-size: 12px;
-  line-height: 14px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 22%);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 20px;
   cursor: pointer;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity var(--motion), transform var(--motion), background var(--motion), color var(--motion);
 }
 .cm-diff-add-widget:hover,
-.cm-diff-add-widget:focus-visible {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
+.cm-diff-add-widget:focus-visible,
+.cm-diff-add-widget.cm-hover-line,
+.cm-diff-add-widget.dragging {
+  opacity: 1;
+  transform: scale(1);
+  background: var(--cm-comment-range-edge);
+  color: var(--bg);
 }
-.cm-range-commented {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+.cm-range-drag-active .cm-diff-add-widget {
+  opacity: 0 !important;
+  transform: scale(0.96);
+}
+.cm-range-drag-active .cm-range-drag-end-new .cm-diff-add-widget[data-side="new"],
+.cm-range-drag-active .cm-range-drag-end-old .cm-diff-add-widget[data-side="old"] {
+  opacity: 1 !important;
+  transform: scale(1);
+  background: var(--cm-comment-range-edge);
+  color: var(--bg);
+}
+.cm-comment-form-open:not(.cm-range-drag-active) .cm-diff-add-widget {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+.cm-diff-host .cm-range-commented,
+.cm-diff-host .cm-range-commented.cm-changedLine,
+.cm-diff-host .cm-range-commented.cm-inlineChangedLine,
+.cm-diff-host .cm-range-commented.cm-insertedLine,
+.cm-diff-host .cm-range-commented.cm-deletedLine,
+.cm-diff-host .cm-range-commented.cm-deletedChunk,
+.cm-diff-host .cm-deletedLine.cm-range-commented-deleted {
+  background-color: var(--cm-comment-range-bg) !important;
+}
+.cm-diff-host .cm-range-commented-gutter {
+  background-color: var(--cm-comment-range-bg) !important;
 }
 .cm-react-widget {
   background: var(--panel);
-  border-top: 1px solid var(--border);
-  padding: 2px 0 4px 66px;
+  padding: 2px 18px 4px 12px;
 }
 .cm-thread-stack .inline-thread {
   max-height: min(280px, 40vh);
   overflow: auto;
+  margin-right: 0;
 }
 .cm-selection-widget {
-  margin-right: 18px;
+  margin-right: 0;
+}
+.cm-selection-widget .comment-form {
+  margin: 0;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 /* Flat file blocks — no card border/shadow; a hairline separates them. */

@@ -7,8 +7,8 @@ import {
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
-import { unifiedMergeView } from "@codemirror/merge";
-import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { getChunks, getOriginalDoc, unifiedMergeView } from "@codemirror/merge";
+import { EditorState, RangeSet, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -16,6 +16,7 @@ import {
   WidgetType,
   crosshairCursor,
   gutter,
+  gutterLineClass,
   keymap,
   lineNumbers,
   rectangularSelection,
@@ -82,6 +83,19 @@ const cmDecorations = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+const setCmGutterLineClasses = StateEffect.define<RangeSet<GutterMarker>>();
+const cmGutterLineClasses = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
+  update(classes, tr) {
+    let next = classes.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(setCmGutterLineClasses)) next = effect.value;
+    }
+    return next;
+  },
+  provide: (field) => gutterLineClass.from(field),
+});
+
 class ReactBlockWidget extends WidgetType {
   private root: Root | null = null;
 
@@ -116,11 +130,39 @@ class CommentGutterSpacer extends GutterMarker {
   }
 }
 
+class SelectedGutterLine extends GutterMarker {
+  override elementClass = "cm-range-commented-gutter";
+
+  override eq(other: GutterMarker) {
+    return other instanceof SelectedGutterLine;
+  }
+}
+
+class DragEndGutterLine extends GutterMarker {
+  override elementClass: string;
+
+  constructor(readonly side: Side) {
+    super();
+    this.elementClass = `cm-range-drag-end cm-range-drag-end-${side}`;
+  }
+
+  override eq(other: GutterMarker) {
+    return other instanceof DragEndGutterLine && other.side === this.side;
+  }
+}
+
+const selectedGutterLine = new SelectedGutterLine();
+const dragEndGutterLine = {
+  old: new DragEndGutterLine("old"),
+  new: new DragEndGutterLine("new"),
+};
+
 class CommentGutterMarker extends GutterMarker {
   constructor(
     private readonly targets: LineTarget[],
     private readonly allTargets: LineTarget[],
-    private readonly onSelect: (selection: SelectionComment) => void,
+    private readonly onPreview: (selection: SelectionComment) => void,
+    private readonly onCommit: (selection: SelectionComment) => void,
   ) {
     super();
   }
@@ -128,56 +170,39 @@ class CommentGutterMarker extends GutterMarker {
   override toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-comment-marker";
+    const primary = this.targets.find((target) => target.side === "new") ?? this.targets[0];
+    if (!primary) return wrap;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "diff-add-widget cm-diff-add-widget";
+    button.tabIndex = -1;
+    button.textContent = "+";
+    button.dataset.docLine = String(primary.docLine);
     for (const target of this.targets) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "diff-add-widget cm-diff-add-widget";
-      button.tabIndex = -1;
-      button.textContent = "+";
-      button.title = `Comment on ${target.side} line ${target.line}`;
-      button.setAttribute("aria-label", `Comment on ${target.side} line ${target.line}`);
-      button.dataset.side = target.side;
-      button.dataset.line = String(target.line);
-      button.addEventListener("pointerdown", (event) => this.startDrag(event, view, target));
-      wrap.append(button);
+      button.dataset[`${target.side}Line`] = String(target.line);
+      button.dataset[`${target.side}DocLine`] = String(target.docLine);
     }
+    setCommentButtonTarget(button, primary.side, primary.line);
+    button.addEventListener("mousedown", (event) => {
+      const side = button.dataset.side === "old" ? "old" : "new";
+      const line = Number(button.dataset.line);
+      const target = this.allTargets.find((candidate) => candidate.side === side && candidate.line === line) ?? primary;
+      startCommentRangeDrag(event, view, target, this.allTargets, this.onPreview, this.onCommit);
+    });
+    wrap.append(button);
     return wrap;
   }
 
   override eq() {
     return false;
   }
+}
 
-  private startDrag(event: PointerEvent, view: EditorView, start: LineTarget) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-
-    let end = start.line;
-    const select = () => {
-      this.onSelect({
-        side: start.side,
-        start: Math.min(start.line, end),
-        end: Math.max(start.line, end),
-      });
-    };
-    const updateEnd = (ev: PointerEvent) => {
-      const line = targetLineFromDom(ev, start.side) ??
-        targetLineAtPoint(view, this.allTargets, start.side, ev.clientX, ev.clientY);
-      if (line !== null) end = line;
-    };
-    const onMove = (ev: PointerEvent) => {
-      updateEnd(ev);
-    };
-    const onUp = (ev: PointerEvent) => {
-      document.removeEventListener("pointermove", onMove);
-      updateEnd(ev);
-      select();
-    };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp, { once: true });
-  }
+function setCommentButtonTarget(button: HTMLButtonElement, side: Side, line: number): void {
+  button.dataset.side = side;
+  button.dataset.line = String(line);
+  button.setAttribute("aria-label", `Comment on ${side} line ${line}`);
 }
 
 export function CodeMirrorDiffBody({
@@ -201,7 +226,8 @@ export function CodeMirrorDiffBody({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
-  const [selectionComment, setSelectionComment] = useState<SelectionComment | null>(null);
+  const [selectedRange, setSelectedRange] = useState<SelectionComment | null>(null);
+  const [commentRange, setCommentRange] = useState<SelectionComment | null>(null);
   const [viewVersion, setViewVersion] = useState(0);
 
   const saveCurrent = useCallback(async () => {
@@ -223,7 +249,8 @@ export function CodeMirrorDiffBody({
   }, [onSave]);
 
   const closeSelectionComment = useCallback(() => {
-    setSelectionComment(null);
+    setSelectedRange(null);
+    setCommentRange(null);
   }, []);
 
   const renderLineWidget = useCallback(
@@ -263,8 +290,10 @@ export function CodeMirrorDiffBody({
 
     setDirty(false);
     setSaveMessage("");
-    setSelectionComment(null);
+    setSelectedRange(null);
+    setCommentRange(null);
     let cancelled = false;
+    let cleanupHover = () => {};
 
     void codeMirrorLanguage(file.path).catch(() => []).then((language) => {
       if (cancelled) return;
@@ -282,16 +311,17 @@ export function CodeMirrorDiffBody({
               autocapitalize: "off",
               "aria-label": `${file.path} diff editor`,
             }),
-            lineNumbers(),
-            cmCommentGutter(anchors, setSelectionComment),
+            editable ? lineNumbers() : cmLineNumbers(anchors, setSelectedRange, setCommentRange),
+            editable ? [] : [cmCommentGutter(anchors, setSelectedRange, setCommentRange), cmHoverCommentHandle()],
             cmDecorations,
+            cmGutterLineClasses,
             rectangularSelection({
               eventFilter: (event) => event.button === 1 || (event.button === 0 && event.altKey),
             }),
             crosshairCursor({ key: "Alt" }),
             language,
             EditorView.updateListener.of((update) => {
-              if (update.docChanged) setDirty(update.state.doc.toString() !== newText);
+              if (update.docChanged) setDirty(true);
             }),
             editable
               ? keymap.of([
@@ -369,12 +399,14 @@ export function CodeMirrorDiffBody({
                   textDecoration: "none",
                 },
                 ".cm-changedLineGutter": {
-                  backgroundColor: "var(--add-ink)",
-                  color: "var(--panel)",
+                  backgroundColor: "transparent",
+                  boxShadow: "inset 3px 0 0 var(--add-ink)",
+                  color: "var(--muted)",
                 },
                 ".cm-deletedLineGutter": {
-                  backgroundColor: "var(--del-ink)",
-                  color: "var(--panel)",
+                  backgroundColor: "transparent",
+                  boxShadow: "inset 3px 0 0 var(--del-ink)",
+                  color: "var(--muted)",
                 },
               },
               { dark: theme === "dark" },
@@ -382,12 +414,23 @@ export function CodeMirrorDiffBody({
           ],
         }),
       });
+      if (!editable) {
+        const onMove = (event: MouseEvent) => updateHoverCommentHandle(view, event);
+        const onLeave = () => clearHoverCommentHandles(view);
+        host.addEventListener("mousemove", onMove);
+        host.addEventListener("mouseleave", onLeave);
+        cleanupHover = () => {
+          host.removeEventListener("mousemove", onMove);
+          host.removeEventListener("mouseleave", onLeave);
+        };
+      }
       viewRef.current = view;
       setViewVersion((version) => version + 1);
     });
 
     return () => {
       cancelled = true;
+      cleanupHover();
       viewRef.current?.destroy();
       viewRef.current = null;
     };
@@ -397,13 +440,21 @@ export function CodeMirrorDiffBody({
     const view = viewRef.current;
     if (!view) return;
     const anchors = buildLineAnchors(file, view.state.doc.lines);
+    const ranges = rangeHighlights(threads, selectedRange, commentRange);
+    const host = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+    host.classList.toggle("cm-comment-form-open", commentRange !== null);
+    host.classList.toggle("cm-diff-editable", editable);
     view.dispatch({
-      effects: setCmDecorations.of(
-        buildCmDecorations(view, anchors, threads, selectionComment, renderLineWidget),
-      ),
+      effects: [
+        setCmDecorations.of(buildCmDecorations(view, anchors, ranges, threads, commentRange, renderLineWidget)),
+        setCmGutterLineClasses.of(
+          buildCmGutterLineClasses(view, anchors, ranges, selectedRange && !commentRange ? selectedRange : null),
+        ),
+      ],
     });
+    syncDeletedRangeHighlights(view, ranges);
     view.requestMeasure();
-  }, [file, renderLineWidget, selectionComment, threads, viewVersion]);
+  }, [commentRange, file, renderLineWidget, selectedRange, threads, viewVersion]);
 
   if (content.old === null || content.new === null) {
     return <div className="cm-diff-unavailable">CodeMirror preview needs readable old/new file content.</div>;
@@ -429,9 +480,28 @@ export function CodeMirrorDiffBody({
   );
 }
 
+function cmLineNumbers(
+  anchors: LineAnchors,
+  onPreview: (selection: SelectionComment) => void,
+  onCommit: (selection: SelectionComment) => void,
+): Extension {
+  return lineNumbers({
+    domEventHandlers: {
+      mousedown(view, line, event) {
+        if (!(event instanceof MouseEvent) || event.button !== 0) return false;
+        const target = primaryTargetForDocLine(anchors, view.state.doc.lineAt(line.from).number);
+        if (!target) return false;
+        startCommentRangeDrag(event, view, target, anchors.targets, onPreview, onCommit);
+        return true;
+      },
+    },
+  });
+}
+
 function cmCommentGutter(
   anchors: LineAnchors,
-  onSelect: (selection: SelectionComment) => void,
+  onPreview: (selection: SelectionComment) => void,
+  onCommit: (selection: SelectionComment) => void,
 ): Extension {
   return gutter({
     class: "cm-comment-gutter",
@@ -439,7 +509,70 @@ function cmCommentGutter(
     lineMarker(view, line) {
       const docLine = view.state.doc.lineAt(line.from).number;
       const targets = anchors.targetsByDocLine.get(docLine);
-      return targets ? new CommentGutterMarker(targets, anchors.targets, onSelect) : null;
+      return targets ? new CommentGutterMarker(targets, anchors.targets, onPreview, onCommit) : null;
+    },
+  });
+}
+
+function clearHoverCommentHandles(view: EditorView): void {
+  view.dom
+    .closest<HTMLElement>(".cm-diff-host")
+    ?.querySelectorAll<HTMLButtonElement>("button.cm-diff-add-widget.cm-hover-line")
+    .forEach((button) => button.classList.remove("cm-hover-line"));
+}
+
+function updateHoverCommentHandle(view: EditorView, event: MouseEvent): void {
+  const host = view.dom.closest<HTMLElement>(".cm-diff-host");
+  if (!host || host.classList.contains("cm-range-drag-active") || host.classList.contains("cm-comment-form-open")) {
+    return;
+  }
+  const target = event.target as HTMLElement | null;
+  const activeButton = host.querySelector<HTMLButtonElement>("button.cm-diff-add-widget.cm-hover-line");
+  const activeGutterElement = activeButton?.closest(".cm-gutterElement");
+  if (activeGutterElement && target?.closest(".cm-gutterElement") === activeGutterElement) return;
+  const button = target?.closest<HTMLButtonElement>("button.cm-diff-add-widget");
+
+  clearHoverCommentHandles(view);
+  if (button) {
+    button.classList.add("cm-hover-line");
+    return;
+  }
+
+  const oldLine = oldDeletedLineAtPoint(view, event.clientX, event.clientY);
+  if (oldLine !== null) {
+    const oldButton = host.querySelector<HTMLButtonElement>(`button.cm-diff-add-widget[data-old-line="${oldLine}"]`);
+    if (oldButton) {
+      setCommentButtonTarget(oldButton, "old", oldLine);
+      oldButton.classList.add("cm-hover-line");
+    }
+    return;
+  }
+
+  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (pos === null) return;
+  const docLine = view.state.doc.lineAt(pos).number;
+  const newButton = host.querySelector<HTMLButtonElement>(
+    `button.cm-diff-add-widget[data-new-doc-line="${docLine}"]`,
+  );
+  if (newButton && newButton.dataset.newLine) {
+    setCommentButtonTarget(newButton, "new", Number(newButton.dataset.newLine));
+    newButton.classList.add("cm-hover-line");
+    return;
+  }
+  host.querySelector<HTMLButtonElement>(`button.cm-diff-add-widget[data-doc-line="${docLine}"]`)?.classList.add(
+    "cm-hover-line",
+  );
+}
+
+function cmHoverCommentHandle(): Extension {
+  return EditorView.domEventHandlers({
+    mousemove(event, view) {
+      updateHoverCommentHandle(view, event);
+      return false;
+    },
+    mouseleave(_event, view) {
+      clearHoverCommentHandles(view);
+      return false;
     },
   });
 }
@@ -447,19 +580,20 @@ function cmCommentGutter(
 function buildCmDecorations(
   view: EditorView,
   anchors: LineAnchors,
+  ranges: SelectionComment[],
   threads: Thread[],
-  selection: SelectionComment | null,
+  commentRange: SelectionComment | null,
   renderLineWidget: (data: CmLineWidgetData) => ReactNode,
 ): DecorationSet {
   const decorations = [];
-  for (const range of rangeHighlights(threads, selection)) {
+  for (const range of ranges) {
     for (const lineNumber of rangeLines(range.start, range.end)) {
       const docLine = docLineFor(anchors, range.side, lineNumber, view.state.doc.lines);
       const line = view.state.doc.line(docLine);
       decorations.push(Decoration.line({ class: "cm-range-commented" }).range(line.from));
     }
   }
-  for (const data of lineWidgetData(threads, selection)) {
+  for (const data of lineWidgetData(threads, commentRange)) {
     const docLine = docLineFor(anchors, data.side, data.line, view.state.doc.lines);
     const line = view.state.doc.line(docLine);
     decorations.push(
@@ -471,6 +605,67 @@ function buildCmDecorations(
     );
   }
   return Decoration.set(decorations, true);
+}
+
+function buildCmGutterLineClasses(
+  view: EditorView,
+  anchors: LineAnchors,
+  ranges: SelectionComment[],
+  dragRange: SelectionComment | null,
+): RangeSet<GutterMarker> {
+  const markers: Range<GutterMarker>[] = [];
+  for (const range of ranges) {
+    for (const lineNumber of rangeLines(range.start, range.end)) {
+      const docLine = docLineFor(anchors, range.side, lineNumber, view.state.doc.lines);
+      const line = view.state.doc.line(docLine);
+      markers.push(selectedGutterLine.range(line.from));
+    }
+  }
+  if (dragRange) {
+    const docLine = docLineFor(anchors, dragRange.side, dragRange.end, view.state.doc.lines);
+    markers.push(dragEndGutterLine[dragRange.side].range(view.state.doc.line(docLine).from));
+  }
+  return markers.length === 0 ? RangeSet.empty : RangeSet.of(markers, true);
+}
+
+function syncDeletedRangeHighlights(view: EditorView, ranges: SelectionComment[]): void {
+  const oldRanges = ranges.filter((range) => range.side === "old");
+  const root = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+  root
+    .querySelectorAll(".cm-deletedLine.cm-range-commented-deleted")
+    .forEach((line) => line.classList.remove("cm-range-commented-deleted"));
+  if (oldRanges.length === 0) return;
+
+  const chunks = (getChunks(view.state)?.chunks ?? []).filter((chunk) => chunk.fromA < chunk.toA);
+  const oldDoc = getOriginalDoc(view.state);
+  const deletedChunks = [...root.querySelectorAll<HTMLElement>(".cm-deletedChunk")];
+  if (deletedChunks.length > 0) {
+    chunks.forEach((chunk, chunkIndex) => {
+      const chunkEl = deletedChunks[chunkIndex];
+      if (!chunkEl) return;
+      const firstLine = oldDoc.lineAt(Math.min(chunk.fromA, oldDoc.length)).number;
+      chunkEl.querySelectorAll<HTMLElement>(".cm-deletedLine").forEach((lineEl, offset) => {
+        const line = firstLine + offset;
+        if (oldRanges.some((range) => line >= range.start && line <= range.end)) {
+          lineEl.classList.add("cm-range-commented-deleted");
+        }
+      });
+    });
+    return;
+  }
+
+  const deletedLines = [...root.querySelectorAll<HTMLElement>(".cm-deletedLine")];
+  let deletedLineIndex = 0;
+  for (const chunk of chunks) {
+    const firstLine = oldDoc.lineAt(Math.min(chunk.fromA, oldDoc.length)).number;
+    for (let offset = 0; offset < chunk.toA - chunk.fromA; offset += 1) {
+      const lineEl = deletedLines[deletedLineIndex++];
+      const line = firstLine + offset;
+      if (lineEl && oldRanges.some((range) => line >= range.start && line <= range.end)) {
+        lineEl.classList.add("cm-range-commented-deleted");
+      }
+    }
+  }
 }
 
 function lineWidgetData(threads: Thread[], selection: SelectionComment | null): CmLineWidgetData[] {
@@ -492,7 +687,11 @@ function lineWidgetData(threads: Thread[], selection: SelectionComment | null): 
   return [...byLine.values()].sort((a, b) => a.line - b.line || a.side.localeCompare(b.side));
 }
 
-function rangeHighlights(threads: Thread[], selection: SelectionComment | null): SelectionComment[] {
+function rangeHighlights(
+  threads: Thread[],
+  selectedRange: SelectionComment | null,
+  commentRange: SelectionComment | null,
+): SelectionComment[] {
   const ranges: SelectionComment[] = [];
   for (const thread of threads) {
     if (thread.line === null || thread.side === null) continue;
@@ -503,7 +702,8 @@ function rangeHighlights(threads: Thread[], selection: SelectionComment | null):
       end: Math.max(thread.line, end),
     });
   }
-  if (selection) ranges.push(selection);
+  if (selectedRange) ranges.push(selectedRange);
+  if (commentRange && commentRange !== selectedRange) ranges.push(commentRange);
   return ranges;
 }
 
@@ -515,12 +715,57 @@ function docLineFor(anchors: LineAnchors, side: Side, line: number, docLines: nu
   return clampDocLine(anchors[side].get(line) ?? line, docLines);
 }
 
-function targetLineFromDom(event: MouseEvent | PointerEvent, side: Side): number | null {
-  const target = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
-  const button = target?.closest<HTMLButtonElement>("button.cm-diff-add-widget");
-  if (button?.dataset.side !== side) return null;
-  const line = Number(button.dataset.line);
-  return Number.isFinite(line) ? line : null;
+function primaryTargetForDocLine(anchors: LineAnchors, docLine: number): LineTarget | null {
+  const targets = anchors.targetsByDocLine.get(docLine);
+  return targets?.find((target) => target.side === "new") ?? targets?.[0] ?? null;
+}
+
+function startCommentRangeDrag(
+  event: MouseEvent,
+  view: EditorView,
+  start: LineTarget,
+  targets: LineTarget[],
+  onPreview: (selection: SelectionComment) => void,
+  onCommit: (selection: SelectionComment) => void,
+): void {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const dragHandle = event.currentTarget as HTMLElement;
+  const root = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+  document.body.style.userSelect = "none";
+  root.classList.add("cm-range-drag-active");
+
+  let end = start.line;
+  const selection = () => ({
+    side: start.side,
+    start: Math.min(start.line, end),
+    end: Math.max(start.line, end),
+  });
+  const preview = () => onPreview(selection());
+  preview();
+  const updateEnd = (ev: MouseEvent) => {
+    const line = targetLineAtPoint(view, targets, start.side, ev.clientX, ev.clientY);
+    if (line !== null) end = line;
+  };
+  const cleanup = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.body.style.userSelect = "";
+    root.classList.remove("cm-range-drag-active");
+  };
+  const onMove = (ev: MouseEvent) => {
+    updateEnd(ev);
+    preview();
+  };
+  const onUp = (ev: MouseEvent) => {
+    cleanup();
+    updateEnd(ev);
+    const range = selection();
+    onPreview(range);
+    onCommit(range);
+  };
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp, { once: true });
 }
 
 function targetLineAtPoint(
@@ -530,6 +775,12 @@ function targetLineAtPoint(
   clientX: number,
   clientY: number,
 ): number | null {
+  const bounds = view.dom.getBoundingClientRect();
+  if (clientY < bounds.top || clientY > bounds.bottom) return null;
+
+  const deletedLine = side === "old" ? oldDeletedLineAtPoint(view, clientX, clientY) : null;
+  if (deletedLine !== null) return deletedLine;
+
   const pos = view.posAtCoords({ x: clientX, y: clientY });
   const docLine = pos === null
     ? view.state.doc.lineAt(view.lineBlockAtHeight((clientY - view.documentTop) / view.scaleY).from).number
@@ -537,7 +788,8 @@ function targetLineAtPoint(
   const sameSide = targets.filter((target) => target.side === side);
   const exact = sameSide.find((target) => target.docLine === docLine);
   if (exact) return exact.line;
-  if (side === "new") return docLine;
+  if (side === "new") return null;
+
   let nearest: LineTarget | null = null;
   for (const target of sameSide) {
     if (!nearest || Math.abs(target.docLine - docLine) < Math.abs(nearest.docLine - docLine)) {
@@ -545,6 +797,37 @@ function targetLineAtPoint(
     }
   }
   return nearest?.line ?? null;
+}
+
+function oldDeletedLineAtPoint(view: EditorView, clientX: number, clientY: number): number | null {
+  const lineEl = (document.elementFromPoint(clientX, clientY) as HTMLElement | null)?.closest<HTMLElement>(
+    ".cm-deletedLine",
+  );
+  if (!lineEl) return null;
+
+  const chunks = (getChunks(view.state)?.chunks ?? []).filter((candidate) => candidate.fromA < candidate.toA);
+  const oldDoc = getOriginalDoc(view.state);
+  const chunkEl = lineEl.closest<HTMLElement>(".cm-deletedChunk");
+  if (chunkEl) {
+      const root = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+    const chunkIndex = [...root.querySelectorAll(".cm-deletedChunk")].indexOf(chunkEl);
+    const chunk = chunks[chunkIndex];
+    if (!chunk) return null;
+
+    const offset = [...chunkEl.querySelectorAll(".cm-deletedLine")].indexOf(lineEl);
+    if (offset < 0) return null;
+    return oldDoc.lineAt(Math.min(chunk.fromA, oldDoc.length)).number + offset;
+  }
+
+  const root = view.dom.closest<HTMLElement>(".cm-diff-host") ?? view.dom;
+  let offset = [...root.querySelectorAll(".cm-deletedLine")].indexOf(lineEl);
+  if (offset < 0) return null;
+  for (const chunk of chunks) {
+    const lines = chunk.toA - chunk.fromA;
+    if (offset < lines) return oldDoc.lineAt(Math.min(chunk.fromA, oldDoc.length)).number + offset;
+    offset -= lines;
+  }
+  return null;
 }
 
 function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
