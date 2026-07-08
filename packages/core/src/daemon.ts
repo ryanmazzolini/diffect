@@ -1141,6 +1141,7 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(json),
+    "cache-control": "no-store",
   });
   res.end(json);
 }
