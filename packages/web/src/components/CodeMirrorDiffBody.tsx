@@ -261,6 +261,12 @@ export function CodeMirrorDiffBody({
   const [commentRange, setCommentRange] = useState<SelectionComment | null>(null);
   const [viewVersion, setViewVersion] = useState(0);
   const lineAnchorKey = useMemo(() => diffLineAnchorKey(file), [file]);
+  const editableUnified = editable && !split;
+  // In edit mode the editor owns the document: a save echoes back through
+  // content.new and the SSE diff refresh changes the anchor key, and rebuilding
+  // the EditorView on either would reset scroll/cursor/undo mid-edit.
+  const newContentDep = editableUnified ? null : content.new;
+  const anchorKeyDep = editableUnified ? null : lineAnchorKey;
 
   const saveCurrent = useCallback(async () => {
     const view = viewRef.current;
@@ -331,7 +337,6 @@ export function CodeMirrorDiffBody({
 
     void codeMirrorLanguage(file.path).catch(() => []).then((language) => {
       if (cancelled) return;
-      const editableUnified = editable && !split;
       const baseExtensions = (side: DiffSide, anchors: LineAnchors, docPath: string): Extension[] => [
         EditorState.readOnly.of(!editableUnified),
         EditorView.editable.of(editableUnified),
@@ -454,7 +459,10 @@ export function CodeMirrorDiffBody({
       mergeViewRef.current = null;
       viewContextsRef.current = [];
     };
-  }, [content.old, content.new, deletedSyntaxHighlightMaxLength, editable, file, file.path, lineAnchorKey, onDirtyChange, saveCurrent, split, theme, wrap]);
+    // Value-based deps on purpose: refreshAllDiffs() recreates every DiffFile
+    // object after any diff.changed event, and rebuilding on `file` identity
+    // would tear down every mounted editor (scroll jump) on each save.
+  }, [content.old, newContentDep, deletedSyntaxHighlightMaxLength, editable, editableUnified, file.path, file.oldPath, anchorKeyDep, onDirtyChange, saveCurrent, split, theme, wrap]);
 
   useEffect(() => {
     const contexts = viewContextsRef.current;

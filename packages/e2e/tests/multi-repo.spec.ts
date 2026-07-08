@@ -113,7 +113,15 @@ test("a comment posted in a module is scoped to that repo", async ({ page }) => 
       }),
     )
     .toBeGreaterThan(0);
-  await beta.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  // Re-scroll until beta's body actually mounts: sibling editors above grow as
+  // they finish mounting, which can push beta back out of the viewport after a
+  // single scrollIntoView.
+  await expect
+    .poll(async () => {
+      await beta.evaluate((el) => el.scrollIntoView({ block: "center" }));
+      return beta.locator(".cm-line").count();
+    })
+    .toBeGreaterThan(0);
   const form = await openCmCommentForm(page, beta);
   await form.locator("textarea").fill("scoped to beta only");
   await form.getByRole("button", { name: "Comment" }).click();
