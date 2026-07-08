@@ -4,6 +4,9 @@ fn main() {
             tauri_build::AppManifest::new().commands(&[
                 "open_website_review",
                 "position_website_review",
+                "set_website_review_visible",
+                "set_website_review_tool",
+                "capture_website_area",
                 "close_website_review",
                 "report_website_pick",
             ]),

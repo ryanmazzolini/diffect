@@ -6,12 +6,13 @@
 //! changes; review state stays in the shared per-user store, where the CLI,
 //! agents, and any manually run daemon see it too.
 
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
@@ -216,6 +217,7 @@ const WEBSITE_PICKER_SCRIPT: &str = r#"
   if (window.__diffectWebsitePicker) return;
   window.__diffectWebsitePicker = true;
 
+  const UI = "__diffect-website-ui";
   const cssEscape = (value) => {
     if (window.CSS && CSS.escape) return CSS.escape(value);
     return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
@@ -234,33 +236,99 @@ const WEBSITE_PICKER_SCRIPT: &str = r#"
     return parts.join(" > ");
   };
   const cleanText = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 500);
+  const isChrome = (target) => target instanceof Element && Boolean(target.closest(`.${UI}`));
 
   const style = document.createElement("style");
-  style.textContent = `.__diffect-picker-hover { outline: 2px solid #7c3aed !important; outline-offset: 2px !important; }`;
+  style.textContent = `
+    .__diffect-picker-hover { outline: 2px solid #7c3aed !important; outline-offset: 2px !important; }
+    :root[data-diffect-website-tool="area"] body { cursor: crosshair !important; }
+    .${UI}, .${UI} * { box-sizing: border-box !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; }
+    .__diffect-website-bubble { all: initial; position: fixed !important; z-index: 2147483647 !important; width: 360px !important; padding: 10px !important; border: 1px solid #34353b !important; border-radius: 10px !important; background: #16171b !important; color: #e7e8ea !important; box-shadow: 0 16px 48px rgba(0,0,0,.55) !important; }
+    .__diffect-website-head { display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 8px !important; margin-bottom: 8px !important; color: #e7e8ea !important; font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; }
+    .__diffect-website-close { border: 0 !important; background: transparent !important; color: #8c8e95 !important; cursor: pointer !important; font-size: 16px !important; line-height: 1 !important; }
+    .__diffect-website-textarea { width: 100% !important; min-height: 92px !important; resize: vertical !important; border: 1px solid #34353b !important; border-radius: 8px !important; background: #0e0f12 !important; color: #e7e8ea !important; padding: 8px !important; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; }
+    .__diffect-website-actions { display: flex !important; align-items: center !important; justify-content: flex-end !important; gap: 8px !important; margin-top: 8px !important; }
+    .__diffect-website-button { border: 1px solid #34353b !important; border-radius: 6px !important; background: #25262c !important; color: #e7e8ea !important; cursor: pointer !important; padding: 5px 10px !important; font-size: 12px !important; }
+    .__diffect-website-button.primary { background: #5e6ad2 !important; border-color: #5e6ad2 !important; color: white !important; }
+    .__diffect-website-marker { all: initial; position: fixed !important; z-index: 2147483646 !important; display: grid !important; place-items: center !important; width: 26px !important; height: 26px !important; transform: translate(-50%, -50%) !important; border: 2px solid white !important; border-radius: 999px !important; background: #5e6ad2 !important; color: white !important; box-shadow: 0 8px 24px rgba(0,0,0,.5) !important; cursor: pointer !important; font: 800 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; }
+    .__diffect-website-area-box { all: initial; position: fixed !important; z-index: 2147483645 !important; border: 2px solid #5e6ad2 !important; background: rgba(94,106,210,.18) !important; pointer-events: none !important; }
+    .__diffect-website-saved { color: #e7e8ea !important; white-space: pre-wrap !important; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; }
+  `;
   document.documentElement.appendChild(style);
 
-  let pickCount = 0;
-  const sendPick = (element) => {
+  let tool = "pick";
+  let hover = null;
+  let bubble = null;
+  let markerCount = 0;
+  let drag = null;
+
+  const clearHover = () => {
+    if (hover) hover.classList.remove("__diffect-picker-hover");
+    hover = null;
+  };
+  const closeBubble = () => {
+    if (bubble) bubble.remove();
+    bubble = null;
+  };
+  const clearDrag = () => {
+    if (drag && drag.box) drag.box.remove();
+    drag = null;
+  };
+  window.__diffectSetWebsiteTool = (next) => {
+    tool = next === "area" ? "area" : "pick";
+    document.documentElement.dataset.diffectWebsiteTool = tool;
+    clearHover();
+    clearDrag();
+    closeBubble();
+  };
+  window.__diffectSetWebsiteTool("pick");
+
+  const boundsFor = (element) => {
     const rect = element.getBoundingClientRect();
-    const payload = {
-      kind: "element",
-      pickId: ++pickCount,
-      url: location.href,
-      title: document.title,
-      selector: selectorFor(element),
-      text: cleanText(element.innerText || element.textContent),
-      bounds: {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height)
-      },
-      viewport: {
-        width: window.innerWidth,
-        height: window.innerHeight,
-        devicePixelRatio: window.devicePixelRatio || 1
-      }
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
     };
+  };
+  const payloadForElement = (element) => ({
+    kind: "element",
+    url: location.href,
+    title: document.title,
+    selector: selectorFor(element),
+    text: cleanText(element.innerText || element.textContent),
+    bounds: boundsFor(element),
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1
+    }
+  });
+  const payloadForArea = (bounds) => ({
+    kind: "area",
+    url: location.href,
+    title: document.title,
+    selector: "Area selection",
+    text: "",
+    bounds,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1
+    }
+  });
+  const bubblePosition = (bounds) => {
+    const width = 360;
+    const height = 190;
+    const right = bounds.x + bounds.width + 12;
+    const left = right + width > window.innerWidth - 12 ? bounds.x - width - 12 : right;
+    return {
+      left: Math.min(Math.max(12, left), Math.max(12, window.innerWidth - width - 12)),
+      top: Math.min(Math.max(12, bounds.y), Math.max(12, window.innerHeight - height - 12))
+    };
+  };
+  const send = (payload) => {
     const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
     if (invoke) {
       invoke("report_website_pick", { payload }).catch(() => {
@@ -270,23 +338,149 @@ const WEBSITE_PICKER_SCRIPT: &str = r#"
       document.title = `__DIFFECT_PICK__${encodeURIComponent(JSON.stringify(payload))}`;
     }
   };
+  const withScreenshot = async (payload) => {
+    if (payload.kind !== "area") return payload;
+    const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+    if (!invoke) return payload;
+    try {
+      const bytes = await invoke("capture_website_area", {
+        x: payload.bounds.x,
+        y: payload.bounds.y,
+        width: payload.bounds.width,
+        height: payload.bounds.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
+      });
+      return { ...payload, screenshot: { name: "website-area.png", mime: "image/png", bytes } };
+    } catch (error) {
+      return { ...payload, screenshotError: String(error) };
+    }
+  };
+  const showSavedBubble = (payload, body) => {
+    closeBubble();
+    const pos = bubblePosition(payload.bounds);
+    bubble = document.createElement("div");
+    bubble.className = `${UI} __diffect-website-bubble`;
+    bubble.style.left = `${pos.left}px`;
+    bubble.style.top = `${pos.top}px`;
+    bubble.innerHTML = `
+      <div class="__diffect-website-head"><span>Saved comment</span><button class="${UI} __diffect-website-close" type="button" aria-label="Close">×</button></div>
+      <div class="__diffect-website-saved"></div>
+    `;
+    bubble.querySelector(".__diffect-website-saved").textContent = body;
+    bubble.querySelector(".__diffect-website-close").addEventListener("click", closeBubble);
+    document.documentElement.appendChild(bubble);
+  };
+  const addMarker = (payload, body) => {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = `${UI} __diffect-website-marker`;
+    marker.textContent = String(++markerCount);
+    marker.style.left = `${payload.bounds.x + Math.min(payload.bounds.width, 16)}px`;
+    marker.style.top = `${payload.bounds.y + Math.min(payload.bounds.height, 16)}px`;
+    marker.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showSavedBubble(payload, body);
+    });
+    document.documentElement.appendChild(marker);
+  };
+  const openComposer = (payload) => {
+    closeBubble();
+    const pos = bubblePosition(payload.bounds);
+    bubble = document.createElement("div");
+    bubble.className = `${UI} __diffect-website-bubble`;
+    bubble.style.left = `${pos.left}px`;
+    bubble.style.top = `${pos.top}px`;
+    bubble.innerHTML = `
+      <div class="__diffect-website-head"><span>${payload.kind === "area" ? "Comment on area" : "Comment on selection"}</span><button class="${UI} __diffect-website-close" type="button" aria-label="Close">×</button></div>
+      <textarea class="${UI} __diffect-website-textarea" placeholder="Leave feedback…"></textarea>
+      <div class="__diffect-website-actions">
+        <button class="${UI} __diffect-website-button" type="button" data-cancel>Cancel</button>
+        <button class="${UI} __diffect-website-button primary" type="button" data-submit>Comment</button>
+      </div>
+    `;
+    const textarea = bubble.querySelector("textarea");
+    bubble.querySelector(".__diffect-website-close").addEventListener("click", closeBubble);
+    bubble.querySelector("[data-cancel]").addEventListener("click", closeBubble);
+    bubble.querySelector("[data-submit]").addEventListener("click", async () => {
+      const body = textarea.value.trim();
+      if (!body) return;
+      const button = bubble.querySelector("[data-submit]");
+      button.textContent = "Saving…";
+      button.disabled = true;
+      const comment = await withScreenshot({ ...payload, body });
+      send(comment);
+      addMarker(payload, body);
+      closeBubble();
+    });
+    document.documentElement.appendChild(bubble);
+    setTimeout(() => textarea.focus(), 0);
+  };
+  const updateDrag = (event) => {
+    if (!drag) return;
+    const x = Math.min(drag.startX, event.clientX);
+    const y = Math.min(drag.startY, event.clientY);
+    const width = Math.abs(event.clientX - drag.startX);
+    const height = Math.abs(event.clientY - drag.startY);
+    drag.bounds = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
+    Object.assign(drag.box.style, {
+      left: `${x}px`,
+      top: `${y}px`,
+      width: `${width}px`,
+      height: `${height}px`
+    });
+  };
+  const startArea = (event) => {
+    closeBubble();
+    clearHover();
+    const box = document.createElement("div");
+    box.className = `${UI} __diffect-website-area-box`;
+    document.documentElement.appendChild(box);
+    drag = { startX: event.clientX, startY: event.clientY, box, bounds: { x: event.clientX, y: event.clientY, width: 0, height: 0 } };
+    updateDrag(event);
+  };
+  const finishArea = (event) => {
+    if (!drag) return;
+    updateDrag(event);
+    const bounds = drag.bounds;
+    clearDrag();
+    if (bounds.width < 8 || bounds.height < 8) return;
+    openComposer(payloadForArea(bounds));
+  };
 
-  let hover = null;
   document.addEventListener("pointerover", (event) => {
-    if (!(event.target instanceof Element)) return;
+    if (tool !== "pick" || isChrome(event.target) || !(event.target instanceof Element)) return;
     if (hover) hover.classList.remove("__diffect-picker-hover");
     hover = event.target;
     hover.classList.add("__diffect-picker-hover");
   }, true);
 
   document.addEventListener("pointerdown", (event) => {
+    if (isChrome(event.target)) return;
     if (!(event.target instanceof Element) || event.button !== 0) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    sendPick(event.target);
+    if (tool === "area") startArea(event);
+    else openComposer(payloadForElement(event.target));
+  }, true);
+
+  document.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    updateDrag(event);
+  }, true);
+
+  document.addEventListener("pointerup", (event) => {
+    if (!drag) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    finishArea(event);
   }, true);
 
   document.addEventListener("click", (event) => {
+    if (isChrome(event.target)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
@@ -453,6 +647,90 @@ fn position_website_review(
 }
 
 #[tauri::command]
+fn set_website_review_visible(handle: AppHandle, visible: bool) -> Result<(), String> {
+    let webview = handle
+        .get_webview(WEBSITE_REVIEW_LABEL)
+        .ok_or("Website Review is not open")?;
+    if visible { webview.show() } else { webview.hide() }.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_website_review_tool(handle: AppHandle, tool: String) -> Result<(), String> {
+    if !matches!(tool.as_str(), "pick" | "area") {
+        return Err("unknown Website Review tool".into());
+    }
+    let webview = handle
+        .get_webview(WEBSITE_REVIEW_LABEL)
+        .ok_or("Website Review is not open")?;
+    let tool = serde_json::to_string(&tool).map_err(|e| e.to_string())?;
+    webview
+        .eval(format!("window.__diffectSetWebsiteTool?.({tool});"))
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn capture_website_area(
+    handle: AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    viewport_width: f64,
+    viewport_height: f64,
+) -> Result<Vec<u8>, String> {
+    if width < 2.0 || height < 2.0 || viewport_width <= 0.0 || viewport_height <= 0.0 {
+        return Err("capture area is too small".into());
+    }
+    let webview = handle
+        .get_webview(WEBSITE_REVIEW_LABEL)
+        .ok_or("Website Review is not open")?;
+    let window = handle
+        .get_window("main")
+        .ok_or("main window is not available")?;
+    let window_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let webview_pos = webview.position().map_err(|e| e.to_string())?;
+    let webview_size = webview.size().map_err(|e| e.to_string())?;
+    let scale_x = webview_size.width as f64 / viewport_width;
+    let scale_y = webview_size.height as f64 / viewport_height;
+    let sx = window_pos.x + webview_pos.x + (x * scale_x).round() as i32;
+    let sy = window_pos.y + webview_pos.y + (y * scale_y).round() as i32;
+    let sw = (width * scale_x).round().max(2.0) as i32;
+    let sh = (height * scale_y).round().max(2.0) as i32;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("diffect-website-area-{stamp}.png"));
+    let status = Command::new("screencapture")
+        .args(["-x", "-R", &format!("{sx},{sy},{sw},{sh}")])
+        .arg(&path)
+        .status()
+        .map_err(|e| format!("could not run screencapture: {e}"))?;
+    if !status.success() {
+        let _ = fs::remove_file(&path);
+        return Err("screencapture failed".into());
+    }
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(&path);
+    Ok(bytes)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn capture_website_area(
+    _handle: AppHandle,
+    _x: f64,
+    _y: f64,
+    _width: f64,
+    _height: f64,
+    _viewport_width: f64,
+    _viewport_height: f64,
+) -> Result<Vec<u8>, String> {
+    Err("area screenshot capture is only implemented on macOS in this tracer".into())
+}
+
+#[tauri::command]
 fn close_website_review(handle: AppHandle) -> Result<(), String> {
     if let Some(webview) = handle.get_webview(WEBSITE_REVIEW_LABEL) {
         webview.close().map_err(|e| e.to_string())?;
@@ -492,6 +770,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             open_website_review,
             position_website_review,
+            set_website_review_visible,
+            set_website_review_tool,
+            capture_website_area,
             close_website_review,
             report_website_pick
         ])
