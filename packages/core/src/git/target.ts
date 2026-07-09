@@ -36,10 +36,11 @@ export function normalizeTarget(spec: string | null | undefined): ReviewTarget {
 export async function computeTargetDiff(
   repoRoot: string,
   target: ReviewTarget,
+  options: { includeIgnored?: boolean } = {},
 ): Promise<RepoDiff> {
   switch (target.kind) {
     case "work":
-      return computeWorkDiff(repoRoot);
+      return computeWorkDiff(repoRoot, options);
 
     case "staged":
       return { target: target.spec, files: await gitDiff(repoRoot, ["--cached"]) };
@@ -47,7 +48,7 @@ export async function computeTargetDiff(
     case "unstaged": {
       // Tracked worktree-vs-index changes, plus untracked files.
       const tracked = await gitDiff(repoRoot, []);
-      const untracked = await syntheticUntrackedDiffs(repoRoot);
+      const untracked = await syntheticUntrackedDiffs(repoRoot, options);
       return { target: target.spec, files: [...tracked, ...untracked] };
     }
 
@@ -57,7 +58,7 @@ export async function computeTargetDiff(
       // user-supplied ref starting with "-" from being parsed as a git flag
       // (argument injection, e.g. `--output=…`).
       const tracked = await gitDiff(repoRoot, ["--end-of-options", target.from!]);
-      const untracked = await syntheticUntrackedDiffs(repoRoot);
+      const untracked = await syntheticUntrackedDiffs(repoRoot, options);
       return { target: target.spec, files: [...tracked, ...untracked] };
     }
 

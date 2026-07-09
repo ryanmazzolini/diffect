@@ -100,6 +100,24 @@ describe("computeWorkDiff (work target)", () => {
     expect(paths.some((p) => p.startsWith(".reviews"))).toBe(false);
   });
 
+  it("can include git-ignored untracked files on request", async () => {
+    await init(dir);
+    await writeFile(join(dir, "a.txt"), "x\n");
+    await git(dir, ["add", "."]);
+    await git(dir, ["commit", "-m", "base"]);
+    await writeFile(join(dir, ".git", "info", "exclude"), "local/\n");
+    await mkdir(join(dir, "local"), { recursive: true });
+    await writeFile(join(dir, "local", "note.md"), "ship it\n");
+
+    expect((await computeWorkDiff(dir)).files.map((f) => f.path)).not.toContain("local/note.md");
+
+    const byPath = Object.fromEntries(
+      (await computeWorkDiff(dir, { includeIgnored: true })).files.map((f) => [f.path, f]),
+    );
+    expect(byPath["local/note.md"]).toBeDefined();
+    expect(byPath["local/note.md"]!.ignored).toBe(true);
+  });
+
   it("marks tracked files that match gitignore rules", async () => {
     await init(dir);
     await writeFile(join(dir, ".gitignore"), "ignored.txt\n");

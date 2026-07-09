@@ -266,8 +266,10 @@ export interface AttachmentResponse {
 }
 
 export interface RepoFileList {
-  /** Repo-relative paths of every tracked file (for the cross-file picker). */
+  /** Repo-relative paths of every visible file (for the cross-file picker). */
   files: string[];
+  /** Paths included only when the caller requests git-ignored files. */
+  ignoredFiles?: string[];
 }
 
 export interface FsEntry {

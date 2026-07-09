@@ -369,8 +369,12 @@ export function App() {
   const [allFilesByRepo, setAllFilesByRepo] = useState<Map<string, string[]>>(
     () => new Map(),
   );
+  const [ignoredFilesByRepo, setIgnoredFilesByRepo] = useState<Map<string, string[]>>(
+    () => new Map(),
+  );
   const [spaceFiles, setSpaceFiles] = useState<string[]>([]);
   const [sidebarFileMode, setSidebarFileMode] = useState<"diff" | "all">("diff");
+  const [showIgnoredFiles, setShowIgnoredFiles] = useState(false);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
@@ -782,8 +786,8 @@ export function App() {
     }, 350);
   }, []);
   const selectWorkspace = useCallback(
-    (path: string) => {
-      const entry = entries.find((ws) => ws.path === path);
+    (path: string, sourceEntries = entries) => {
+      const entry = sourceEntries.find((ws) => ws.path === path);
       const allowed = new Set(entry?.repos.map((r) => r.name) ?? []);
       const place = workspacePlaces[path] ?? readWorkspacePlace(path);
       const recentSelections = entry ? recentSelectionsFor(entry, reviewRecency) : {};
@@ -984,11 +988,15 @@ export function App() {
         const next = await api.diff(forRepo, {
           worktree: sel.worktree,
           target: sel.target,
+          includeIgnored: showIgnoredFiles,
         });
         if (seq === diffSeqs.current.get(forRepo)) {
           setDiffs((prev) => new Map(prev).set(forRepo, next));
           setError(null);
-          loadedSelRef.current.set(forRepo, selSig(sel.worktree, sel.target));
+          loadedSelRef.current.set(
+            forRepo,
+            `${selSig(sel.worktree, sel.target)}::ignored=${showIgnoredFiles ? "1" : "0"}`,
+          );
           setPendingFor(forRepo, null);
         }
       } catch (e) {
@@ -1002,7 +1010,7 @@ export function App() {
         }
       }
     },
-    [setPendingFor],
+    [setPendingFor, showIgnoredFiles],
   );
   // Refresh every repo's diff against its current selection — the SSE diff.changed
   // fan-out (events carry no repo, so any module may have changed). Reads the
@@ -1139,9 +1147,10 @@ export function App() {
       visibleRepos.map(async (r) => {
         const wt = selections.get(r.name)?.worktree ?? null;
         try {
-          return [r.name, (await api.repoFiles(r.name, wt)).files] as const;
+          const result = await api.repoFiles(r.name, wt, showIgnoredFiles);
+          return [r.name, result.files, result.ignoredFiles ?? []] as const;
         } catch {
-          return [r.name, [] as string[]] as const;
+          return [r.name, [] as string[], [] as string[]] as const;
         }
       }),
     ).then((rows) => {
@@ -1151,11 +1160,16 @@ export function App() {
         for (const [name, files] of rows) next.set(name, files);
         return next;
       });
+      setIgnoredFilesByRepo((prev) => {
+        const next = new Map(prev);
+        for (const [name, , ignoredFiles] of rows) next.set(name, ignoredFiles);
+        return next;
+      });
     });
     return () => {
       live = false;
     };
-  }, [workspace, visibleRepos, selections, sidebarFileMode]);
+  }, [workspace, visibleRepos, selections, sidebarFileMode, showIgnoredFiles]);
 
   useEffect(() => {
     if (!activeSpacePath || sidebarFileMode !== "all") return;
@@ -1181,7 +1195,9 @@ export function App() {
         worktree: null,
         target: DEFAULT_TARGET,
       };
-      const loaded = loadedSelRef.current.get(r.name) === selSig(sel.worktree, sel.target);
+      const loaded =
+        loadedSelRef.current.get(r.name) ===
+        `${selSig(sel.worktree, sel.target)}::ignored=${showIgnoredFiles ? "1" : "0"}`;
       const isFocused = r.name === repo;
       return !loaded || (isFocused && forced);
     });
@@ -1198,7 +1214,7 @@ export function App() {
     if (rest.length === 0) return;
     const timer = window.setTimeout(() => rest.forEach(refresh), 150);
     return () => window.clearTimeout(timer);
-  }, [workspace, visibleRepos, repo, selections, reselectTick, refreshDiffFor]);
+  }, [workspace, visibleRepos, repo, selections, reselectTick, refreshDiffFor, showIgnoredFiles]);
 
   const sidebarFiles = useMemo(() => diff?.files ?? EMPTY_FILES, [diff]);
   // Render the diff in the same order the sidebar tree shows, so the active-file
@@ -1518,6 +1534,24 @@ export function App() {
     [paneThreads],
   );
   const openAdd = useCallback(() => setAddOpen(true), []);
+  const workspaceAdded = useCallback(
+    (nextEntries: WorkspaceEntry[], requestedPath: string) => {
+      const previousPaths = new Set(entries.map((entry) => entry.path));
+      const normalizedRequest = requestedPath.replace(/\\/g, "/").replace(/\/+$/, "");
+      const requested = nextEntries.find((entry) => {
+        const normalizedEntry = entry.path.replace(/\\/g, "/").replace(/\/+$/, "");
+        return (
+          normalizedEntry === normalizedRequest ||
+          (!!normalizedRequest && normalizedEntry.endsWith(`/${normalizedRequest}`))
+        );
+      });
+      const added = nextEntries.find((entry) => !previousPaths.has(entry.path));
+      const nextWorkspace = requested ?? added;
+      setEntries(nextEntries);
+      if (nextWorkspace) selectWorkspace(nextWorkspace.path, nextEntries);
+    },
+    [entries, selectWorkspace],
+  );
   const openRepoComment = useCallback(
     (repoName: string) => {
       if (!visibleWorkspace) return;
@@ -1700,7 +1734,7 @@ export function App() {
       {toast}
       {liveRegion}
       {addOpen && (
-        <AddWorkspaceDialog onClose={() => setAddOpen(false)} onAdded={setEntries} />
+        <AddWorkspaceDialog onClose={() => setAddOpen(false)} onAdded={workspaceAdded} />
       )}
       <Topbar
         workspace={visibleWorkspace}
@@ -1767,6 +1801,9 @@ export function App() {
               spaceFiles={spaceFiles}
               filesByRepo={diffFilesByRepo}
               allFilesByRepo={allFilesByRepo}
+              ignoredFilesByRepo={ignoredFilesByRepo}
+              showIgnoredFiles={showIgnoredFiles}
+              onShowIgnoredFilesChange={setShowIgnoredFiles}
               threadCountsByRepo={threadCountsByRepo}
               spaceThreadCounts={spaceFileThreadCounts}
               activeFile={activeFile}

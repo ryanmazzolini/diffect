@@ -79,9 +79,12 @@ export const api = {
   recommendations: () =>
     fetch("/recommendations").then((r) => json<RecommendedWorkspace[]>(r)),
 
-  repoFiles: (repo: string, worktree?: string | null) => {
-    const qs = worktree ? `?worktree=${encodeURIComponent(worktree)}` : "";
-    return fetch(`/repos/${encodeURIComponent(repo)}/files${qs}`).then((r) =>
+  repoFiles: (repo: string, worktree?: string | null, includeIgnored = false) => {
+    const q = new URLSearchParams();
+    if (worktree) q.set("worktree", worktree);
+    if (includeIgnored) q.set("includeIgnored", "1");
+    const qs = q.toString();
+    return fetch(`/repos/${encodeURIComponent(repo)}/files${qs ? `?${qs}` : ""}`).then((r) =>
       json<RepoFileList>(r),
     );
   },
@@ -112,10 +115,11 @@ export const api = {
       body: file,
     }).then((r) => json<AttachmentResponse>(r)),
 
-  diff: (repo: string, opts: { worktree?: string | null; target?: string } = {}) => {
+  diff: (repo: string, opts: { worktree?: string | null; target?: string; includeIgnored?: boolean } = {}) => {
     const q = new URLSearchParams();
     if (opts.worktree) q.set("worktree", opts.worktree);
     if (opts.target) q.set("target", opts.target);
+    if (opts.includeIgnored) q.set("includeIgnored", "1");
     const qs = q.toString();
     return fetch(
       `/repos/${encodeURIComponent(repo)}/diff${qs ? `?${qs}` : ""}`,

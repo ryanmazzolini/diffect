@@ -1182,19 +1182,33 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   gap: 4px;
   min-width: 0;
 }
-.file-scope-link {
+.file-scope-link,
+.file-head-icon {
   border: 0;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   border-radius: var(--r);
+}
+.file-scope-link {
   padding: 2px 4px;
   font-size: 11px;
   letter-spacing: 0;
   text-transform: none;
 }
+.file-head-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+}
 .file-scope-link:hover,
-.file-scope-link:focus-visible {
+.file-scope-link:focus-visible,
+.file-head-icon:hover,
+.file-head-icon:focus-visible,
+.file-head-icon.active {
   color: var(--text);
   background: var(--bg);
 }
