@@ -3,6 +3,7 @@ import type { Thread } from "@diffect/shared";
 import { api } from "../api.js";
 import { useCurrentSnapshot } from "../currentSnapshot.js";
 import { relativeTime } from "../relativeTime.js";
+import { getStored, removeStored, setStored } from "../storage.js";
 import { useDraft } from "../useDraft.js";
 import { Markdown } from "./Markdown.js";
 import { MarkdownEditor } from "./MarkdownEditor.js";
@@ -21,8 +22,16 @@ export function ThreadConversation({
   onChanged: () => void;
   onNavigate?: () => void;
 }) {
-  const [replying, setReplying] = useState(false);
+  const replyOpenKey = `draft-reply-open:${thread.id}`;
   const [reply, setReply, clearReply] = useDraft(`draft-reply:${thread.id}`);
+  const [replying, setReplyingState] = useState(
+    () => reply.trim().length > 0 || getStored(replyOpenKey) === "1",
+  );
+  const setReplying = (open: boolean) => {
+    if (open) setStored(replyOpenKey, "1");
+    else removeStored(replyOpenKey);
+    setReplyingState(open);
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bodyOpen, setBodyOpen] = useState(true);

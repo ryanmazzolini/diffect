@@ -21,6 +21,38 @@ test("an in-progress comment draft survives a reload", async ({ page }) => {
   );
 });
 
+test("keeps an in-progress reply open through a thread refresh", async ({ page }) => {
+  await page.goto("/");
+
+  const commentForm = await openCmCommentForm(page);
+  await commentForm.locator("textarea").fill("thread with a draft reply");
+  await commentForm.getByRole("button", { name: "Comment" }).click();
+
+  const thread = page.locator(".inline-thread", { hasText: "thread with a draft reply" }).first();
+  await expect(thread).toBeVisible();
+  await thread.getByRole("button", { name: "Reply" }).click();
+
+  await page.reload();
+
+  const reopened = page.locator(".inline-thread", { hasText: "thread with a draft reply" }).first();
+  await expect(reopened.locator(".reply-form textarea")).toBeVisible();
+  await reopened.locator(".reply-form textarea").fill("reply that should survive");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Object.entries(localStorage).some(
+          ([key, value]) => key.startsWith("draft-reply:") && value === "reply that should survive",
+        ),
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+
+  const restored = page.locator(".inline-thread", { hasText: "thread with a draft reply" }).first();
+  await expect(restored.locator(".reply-form textarea")).toHaveValue("reply that should survive");
+});
+
 test("restores the active file after reload", async ({ page }) => {
   await startClean(page);
 
