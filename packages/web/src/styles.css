@@ -2142,34 +2142,30 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   opacity: 0.7;
 }
 .website-review-device {
+  position: relative;
+}
+.website-review-device summary {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--text);
-  padding: 0 8px;
+  padding: 6px 10px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 70%, transparent);
   border: 1px solid var(--border);
+  cursor: pointer;
+  list-style: none;
 }
-.website-review-device:hover,
-.website-review-device:focus-within {
+.website-review-device summary::-webkit-details-marker {
+  display: none;
+}
+.website-review-device summary:hover,
+.website-review-device[open] summary {
   background: var(--panel);
   border-color: var(--border-strong);
 }
-.website-review-device select {
-  color: var(--text);
-  padding: 6px 14px 6px 0;
-  background: transparent;
-  border: 0;
-}
-.website-review-device select:hover,
-.website-review-device select:focus {
-  background: transparent;
-  border-color: transparent;
-}
-.website-review-device-chevron {
-  margin-left: -16px;
-  pointer-events: none;
+.website-review-device-popover {
+  min-width: 150px;
 }
 .website-review-tool-group {
   display: inline-flex;
@@ -2220,7 +2216,25 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   flex: 1;
   min-height: 0;
   width: 100%;
-  background: white;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, transparent 0 68%, rgba(255, 255, 255, 0.58) 68% 100%),
+    linear-gradient(#f8fafc 0 46px, transparent 46px),
+    repeating-linear-gradient(#eef2f7 0 14px, transparent 14px 34px),
+    #f6f8fb;
+}
+.website-review-viewport::before {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.22) 0 28%, transparent 28% 100%) 18px 18px / 42% 12px no-repeat,
+    linear-gradient(90deg, rgba(148, 163, 184, 0.16) 0 100%, transparent 0) 18px 46px / 74% 10px no-repeat,
+    linear-gradient(90deg, rgba(148, 163, 184, 0.12) 0 100%, transparent 0) 18px 70px / 58% 10px no-repeat,
+    rgba(255, 255, 255, 0.72);
+  pointer-events: none;
 }
 .website-review-viewport-tablet,
 .website-review-viewport-mobile {
