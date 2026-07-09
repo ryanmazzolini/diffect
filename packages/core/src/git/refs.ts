@@ -1,4 +1,5 @@
 import type { RefList, RefSearchOption, RefSearchResults, RepoFileList } from "@diffect/shared";
+import { ignoredUntrackedFiles } from "./diff.js";
 import { gitTry } from "./exec.js";
 
 const lines = (s: string | null): string[] =>
@@ -191,6 +192,11 @@ function clampLimit(limit: number): number {
  * Every tracked file in the working tree, for the cross-file comment picker.
  * gitTry keeps a bare repo from erroring into a 500 — it just yields no files.
  */
-export async function listTrackedFiles(repoRoot: string): Promise<RepoFileList> {
-  return { files: lines(await gitTry(repoRoot, ["ls-files"])) };
+export async function listTrackedFiles(
+  repoRoot: string,
+  includeIgnored = false,
+): Promise<RepoFileList> {
+  const files = lines(await gitTry(repoRoot, ["ls-files"]));
+  if (!includeIgnored) return { files };
+  return { files, ignoredFiles: await ignoredUntrackedFiles(repoRoot) };
 }

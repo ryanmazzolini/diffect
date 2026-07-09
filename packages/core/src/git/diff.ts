@@ -69,7 +69,14 @@ export async function resolveDefaultBranch(
  * against the base ref (which captures committed and unstaged changes in one
  * pass) and then append untracked files as synthetic all-added diffs.
  */
-export async function computeWorkDiff(repoRoot: string): Promise<RepoDiff> {
+export interface WorktreeDiffOptions {
+  includeIgnored?: boolean;
+}
+
+export async function computeWorkDiff(
+  repoRoot: string,
+  options: WorktreeDiffOptions = {},
+): Promise<RepoDiff> {
   const base = await resolveWorkBase(repoRoot);
 
   const tracked = base
@@ -77,22 +84,23 @@ export async function computeWorkDiff(repoRoot: string): Promise<RepoDiff> {
     : // No commits yet: nothing is tracked, so all content shows as untracked.
       [];
 
-  const untrackedDiffs = await syntheticUntrackedDiffs(repoRoot);
+  const untrackedDiffs = await syntheticUntrackedDiffs(repoRoot, options);
 
   // `repo`/`worktree` are stamped by the caller (daemon/CLI) that knows the
   // workspace identity; the git layer only produces target + files.
   return { target: "work", files: [...tracked, ...untrackedDiffs] };
 }
 
-/** Build synthetic all-added diffs for every untracked, non-ignored file. */
+/** Build synthetic all-added diffs for every visible untracked file. */
 export async function syntheticUntrackedDiffs(
   repoRoot: string,
+  options: WorktreeDiffOptions = {},
 ): Promise<DiffFile[]> {
-  const untracked = await untrackedFiles(repoRoot);
+  const untracked = await untrackedFiles(repoRoot, options);
   const diffs = await Promise.all(
     untracked.map((path) => syntheticAddedFile(repoRoot, path)),
   );
-  return diffs.filter((f): f is DiffFile => !!f);
+  return markIgnored(repoRoot, diffs.filter((f): f is DiffFile => !!f));
 }
 
 /**
@@ -150,17 +158,33 @@ function diffAgainst(repoRoot: string, base: string): Promise<DiffFile[]> {
   return gitDiff(repoRoot, [base]);
 }
 
-async function untrackedFiles(repoRoot: string): Promise<string[]> {
-  const { stdout } = await git(repoRoot, [
+async function untrackedFiles(
+  repoRoot: string,
+  options: WorktreeDiffOptions,
+): Promise<string[]> {
+  const visible = await git(repoRoot, [
     "ls-files",
     "--others",
     "--exclude-standard",
   ]);
-  return stdout
-    .split("\n")
-    .map((l) => l.trim())
+  const ignored = options.includeIgnored ? await ignoredUntrackedFiles(repoRoot) : [];
+  return [...new Set([...lines(visible.stdout), ...ignored])]
     .filter(Boolean)
     .filter((p) => !isReviewStorePath(p));
+}
+
+export async function ignoredUntrackedFiles(repoRoot: string): Promise<string[]> {
+  const { stdout } = await git(repoRoot, [
+    "ls-files",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+  ]);
+  return lines(stdout).filter(isReviewableIgnoredPath).slice(0, 500);
+}
+
+function lines(stdout: string): string[] {
+  return stdout.split("\n").map((l) => l.trim()).filter(Boolean);
 }
 
 /**
@@ -169,6 +193,14 @@ async function untrackedFiles(repoRoot: string): Promise<string[]> {
  */
 function isReviewStorePath(path: string): boolean {
   return path === ".reviews" || path.startsWith(".reviews/");
+}
+
+function isReviewableIgnoredPath(path: string): boolean {
+  if (isReviewStorePath(path)) return false;
+  const parts = path.split("/");
+  return !parts.some((part) =>
+    [".git", "node_modules", ".next", "dist", "build", "coverage", "target"].includes(part),
+  );
 }
 
 async function syntheticAddedFile(

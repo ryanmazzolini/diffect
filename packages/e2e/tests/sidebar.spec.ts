@@ -21,6 +21,15 @@ test("sidebar shows the file tree, toggles and persists", async ({ page }) => {
   await expect(page.locator(".tree-file", { hasText: "README.md" })).toBeVisible();
   await expect(page.locator('.tree-file:has-text("README.md") .ft-glyph')).toBeVisible();
 
+  // Ignored files remain hidden until the compact visibility control is enabled.
+  const ignored = page.locator(".tree-file", { hasText: "plan.md" });
+  await expect(ignored).toHaveCount(0);
+  await page.getByRole("button", { name: "Show ignored files" }).click();
+  await expect(ignored).toBeVisible();
+  await expect(ignored.locator(".ft-ignored")).toHaveText("ignored");
+  await page.getByRole("button", { name: "Hide ignored files" }).click();
+  await expect(ignored).toHaveCount(0);
+
   // Hamburger opens the hidden workspace rail, not the file sidebar.
   await page.getByRole("button", { name: "Toggle workspaces" }).click();
   await expect(page.locator(".workspace-rail")).toBeVisible();
@@ -40,6 +49,12 @@ test("folders collapse/expand and the state persists per repo", async ({ page })
   await page.goto("/");
   const folder = page.locator(".tree-dir", { hasText: "src/util" });
   const nested = page.locator(".tree-file", { hasText: "math.js" });
+  await expect(nested).toBeVisible();
+
+  // Compact controls collapse and expand the complete visible space tree.
+  await page.getByRole("button", { name: "Collapse all" }).click();
+  await expect(nested).toHaveCount(0);
+  await page.getByRole("button", { name: "Expand all" }).click();
   await expect(nested).toBeVisible();
 
   // Collapse hides the nested file; the choice survives a reload.

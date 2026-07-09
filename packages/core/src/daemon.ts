@@ -615,7 +615,8 @@ async function repoRoutes(
     const treeRoot = resolveRepoTreeOr404(ctx, res, repoName, worktree);
     if (!treeRoot) return true;
     const target = normalizeTarget(url.searchParams.get("target"));
-    const diff = await computeTargetDiff(treeRoot, target);
+    const includeIgnored = url.searchParams.get("includeIgnored") === "1";
+    const diff = await computeTargetDiff(treeRoot, target, { includeIgnored });
     // Stamp the resolved scope/session so the client can bind and filter threads
     // to the current review without resolving git refs itself.
     const scope = await resolveScope(treeRoot, target, worktree);
@@ -674,7 +675,8 @@ async function repoRoutes(
       worktree,
     );
     if (!treeRoot) return true;
-    sendJson(res, 200, await listTrackedFiles(treeRoot));
+    const includeIgnored = url.searchParams.get("includeIgnored") === "1";
+    sendJson(res, 200, await listTrackedFiles(treeRoot, includeIgnored));
     return true;
   }
   return false;

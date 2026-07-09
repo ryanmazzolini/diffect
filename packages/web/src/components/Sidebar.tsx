@@ -35,6 +35,9 @@ interface Props {
   spaceFiles: string[];
   filesByRepo: Map<string, DiffFile[]>;
   allFilesByRepo: Map<string, string[]>;
+  ignoredFilesByRepo: Map<string, string[]>;
+  showIgnoredFiles: boolean;
+  onShowIgnoredFilesChange: (show: boolean) => void;
   /** Open-thread count per repo/file path, plus space files. */
   threadCountsByRepo: Map<string, Map<string, number>>;
   spaceThreadCounts: Map<string, number>;
@@ -49,15 +52,39 @@ interface Props {
   onOpenSpaceFile: (path: string) => void;
 }
 
-function diffFileEntries(files: DiffFile[]): FileTreeEntry[] {
-  return files.map((file) => ({ path: file.path, status: file.status, file }));
+function hiddenIgnoredFile(file: DiffFile): boolean {
+  return file.status === "untracked" && file.ignored === true;
 }
 
-function allFileEntries(paths: string[], changed: DiffFile[]): FileTreeEntry[] {
+function diffFileEntries(files: DiffFile[], showIgnored: boolean): FileTreeEntry[] {
+  return files
+    .filter((file) => showIgnored || !hiddenIgnoredFile(file))
+    .map((file) => ({ path: file.path, status: file.status, file }));
+}
+
+function ignoredEntry(path: string): FileTreeEntry {
+  return {
+    path,
+    status: "unchanged",
+    file: { path, status: "untracked", ignored: true, additions: 0, deletions: 0, hunks: [] },
+  };
+}
+
+function allFileEntries(
+  paths: string[],
+  ignoredPaths: string[],
+  changed: DiffFile[],
+  showIgnored: boolean,
+): FileTreeEntry[] {
   const byPath = new Map<string, FileTreeEntry>();
   for (const path of paths) byPath.set(path, { path, status: "unchanged" });
+  if (showIgnored) {
+    for (const path of ignoredPaths) byPath.set(path, ignoredEntry(path));
+  }
   for (const file of changed) {
-    byPath.set(file.path, { path: file.path, status: file.status, file });
+    if (showIgnored || !hiddenIgnoredFile(file)) {
+      byPath.set(file.path, { path: file.path, status: file.status, file });
+    }
   }
   return [...byPath.values()];
 }
@@ -90,6 +117,9 @@ export const Sidebar = memo(function Sidebar({
   spaceFiles,
   filesByRepo,
   allFilesByRepo,
+  ignoredFilesByRepo,
+  showIgnoredFiles,
+  onShowIgnoredFilesChange,
   threadCountsByRepo,
   spaceThreadCounts,
   activeFile,
@@ -104,6 +134,7 @@ export const Sidebar = memo(function Sidebar({
 }: Props) {
   const [fileMode, setFileMode] = useState<"diff" | "all">("diff");
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() => loadCollapsedRepos(spacePath));
+  const [treeAction, setTreeAction] = useState<{ kind: "collapse" | "expand"; seq: number } | null>(null);
   const [menu, setMenu] = useState<{ repo: string | null; path: string; x: number; y: number } | null>(null);
 
   useEffect(() => setCollapsedRepos(loadCollapsedRepos(spacePath)), [spacePath]);
@@ -117,11 +148,16 @@ export const Sidebar = memo(function Sidebar({
           repo: r,
           entries:
             fileMode === "all"
-              ? allFileEntries(allFilesByRepo.get(r.name) ?? [], changed)
-              : diffFileEntries(changed),
+              ? allFileEntries(
+                  allFilesByRepo.get(r.name) ?? [],
+                  ignoredFilesByRepo.get(r.name) ?? [],
+                  changed,
+                  showIgnoredFiles,
+                )
+              : diffFileEntries(changed, showIgnoredFiles),
         };
       }),
-    [allFilesByRepo, fileMode, filesByRepo, repos],
+    [allFilesByRepo, fileMode, filesByRepo, ignoredFilesByRepo, repos, showIgnoredFiles],
   );
   const spaceEntries = useMemo<FileTreeEntry[]>(
     () =>
@@ -166,6 +202,14 @@ export const Sidebar = memo(function Sidebar({
       return storeCollapsedRepos(next);
     });
   };
+  const collapseAll = () => {
+    setCollapsedRepos(storeCollapsedRepos(new Set(repos.map((r) => r.name))));
+    setTreeAction((prev) => ({ kind: "collapse", seq: (prev?.seq ?? 0) + 1 }));
+  };
+  const expandAll = () => {
+    setCollapsedRepos(storeCollapsedRepos(new Set()));
+    setTreeAction((prev) => ({ kind: "expand", seq: (prev?.seq ?? 0) + 1 }));
+  };
   return (
     <nav className="sidebar">
       <div className="sidebar-panel-head">
@@ -186,6 +230,34 @@ export const Sidebar = memo(function Sidebar({
           <div className="sidebar-head files-head">
             <span>{fileMode === "all" ? "Space tree" : "Diff tree"}</span>
             <span className="files-head-actions">
+              <button
+                type="button"
+                className={`file-head-icon${showIgnoredFiles ? " active" : ""}`}
+                onClick={() => onShowIgnoredFilesChange(!showIgnoredFiles)}
+                title={showIgnoredFiles ? "Hide ignored files" : "Show ignored files"}
+                aria-label={showIgnoredFiles ? "Hide ignored files" : "Show ignored files"}
+                aria-pressed={showIgnoredFiles}
+              >
+                <Icon name={showIgnoredFiles ? "eye" : "eye-closed"} size={13} />
+              </button>
+              <button
+                type="button"
+                className="file-head-icon"
+                onClick={collapseAll}
+                title="Collapse all"
+                aria-label="Collapse all"
+              >
+                <Icon name="chevron-right" size={13} />
+              </button>
+              <button
+                type="button"
+                className="file-head-icon"
+                onClick={expandAll}
+                title="Expand all"
+                aria-label="Expand all"
+              >
+                <Icon name="chevron-down" size={13} />
+              </button>
               <button
                 type="button"
                 className="file-scope-link"
@@ -211,6 +283,7 @@ export const Sidebar = memo(function Sidebar({
               activeFile={activeSpaceFile}
               onSelectFile={(path) => onSelectFile(null, path)}
               onContextMenu={(path, event) => openContextMenu(null, path, event)}
+              treeAction={treeAction}
             />
           )}
 
@@ -255,11 +328,12 @@ export const Sidebar = memo(function Sidebar({
                       key={`${r.name}:${fileMode}:${currentSession ?? ""}`}
                       storageKey={`${spacePath}:${r.name}:${fileMode}`}
                       entries={entries}
-                              threadCounts={threadCountsByRepo.get(r.name) ?? new Map()}
+                      threadCounts={threadCountsByRepo.get(r.name) ?? new Map()}
                       activeFile={r.name === repo ? activeFile : null}
                       onSelectFile={(path) => onSelectFile(r.name, path)}
                       onContextMenu={(path, event) => openContextMenu(r.name, path, event)}
                       baseDepth={1}
+                      treeAction={treeAction}
                     />
                   )}
                 </div>
@@ -342,6 +416,7 @@ function FileTree({
   onSelectFile,
   onContextMenu,
   baseDepth = 0,
+  treeAction,
 }: {
   storageKey: string;
   entries: FileTreeEntry[];
@@ -350,6 +425,7 @@ function FileTree({
   onSelectFile: (path: string) => void;
   onContextMenu: (path: string, event: MouseEvent) => void;
   baseDepth?: number;
+  treeAction: { kind: "collapse" | "expand"; seq: number } | null;
 }) {
   const tree = useMemo(() => buildPathTree(entries), [entries]);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(storageKey));
@@ -361,6 +437,11 @@ function FileTree({
   };
 
   useEffect(() => setCollapsed(loadCollapsed(storageKey)), [storageKey]);
+  useEffect(() => {
+    if (!treeAction) return;
+    const next = treeAction.kind === "collapse" ? new Set(dirPaths(tree)) : new Set<string>();
+    setCollapsed(storeCollapsed(next));
+  }, [treeAction?.seq]);
 
   // Keep the scroll-spy-highlighted file visible without yanking the whole list:
   // `nearest` only scrolls the sidebar the minimum needed.

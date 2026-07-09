@@ -71,6 +71,9 @@ Line two.
   await git(repoDir, ["add", "."]);
   await git(repoDir, ["commit", "-m", "base"]);
 
+  writeFileSync(join(repoDir, ".git", "info", "exclude"), ".plans/\n");
+  mkdirSync(join(repoDir, ".plans"), { recursive: true });
+  writeFileSync(join(repoDir, ".plans", "plan.md"), "# Local plan\n");
   writeFileSync(join(repoDir, "calc.js"), calc(" // TODO: overflow?"));
   writeFileSync(join(repoDir, "src", "util", "math.js"), math(" // TODO"));
   writeFileSync(join(repoDir, "schema.graphql"), `type Query {

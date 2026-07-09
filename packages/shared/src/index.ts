@@ -268,6 +268,8 @@ export interface AttachmentResponse {
 export interface RepoFileList {
   /** Repo-relative paths of every tracked file (for the cross-file picker). */
   files: string[];
+  /** Ignored untracked paths included only when the caller requests them. */
+  ignoredFiles?: string[];
 }
 
 export interface FsEntry {
