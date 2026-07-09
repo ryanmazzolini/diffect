@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 test("renders diff rows with the CodeMirror renderer", async ({ page }) => {
   const errors: string[] = [];

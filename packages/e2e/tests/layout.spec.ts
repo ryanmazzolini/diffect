@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 /** The thread pane collapses (persisted) and can be resized by dragging. */
 test("collapses the thread pane and persists the choice", async ({ page }) => {

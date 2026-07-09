@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 test("edits, autosaves, persists, and copies PR Draft", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);

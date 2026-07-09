@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { openCmCommentForm } from "./helpers.js";
 
 test("Preview mode renders the markdown", async ({ page }) => {

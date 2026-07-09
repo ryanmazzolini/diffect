@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 import { openCmCommentForm } from "./helpers.js";
 
 /**
@@ -31,6 +31,9 @@ test("creates an inline comment and it appears in the inbox", async ({ page }) =
 });
 
 test("desktop follow mode jumps to the changed file", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__TAURI_INTERNALS__ = { invoke: async () => undefined };
+  });
   await page.goto("/?shell=desktop");
   await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute("aria-pressed", "true");
   await page.locator(".tree-file", { hasText: "math.js" }).click();

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 test("workspace picker closes when clicking outside", async ({ page }) => {
   await page.goto("/");

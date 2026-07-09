@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 test("sidebar shows the file tree, toggles and persists", async ({ page }) => {
   await page.goto("/");

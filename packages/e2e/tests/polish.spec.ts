@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 test("j/k move the active file", async ({ page }) => {
   await page.goto("/");

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 test("shows an overall diffstat summary and per-file counts", async ({ page }) => {
   await page.goto("/");

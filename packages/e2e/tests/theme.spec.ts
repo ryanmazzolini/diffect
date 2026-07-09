@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 /** With no stored choice, the first load follows the OS color-scheme preference. */
 test("defaults to the OS color scheme on first load", async ({ page }) => {

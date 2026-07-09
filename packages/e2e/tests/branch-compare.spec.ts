@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.js";
 
 /** The target picker has visible state, local modes, searchable refs, and commits. */
 test("target picker applies local modes, compare refs, and commit search", async ({ page }) => {
