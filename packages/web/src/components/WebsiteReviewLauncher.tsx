@@ -248,10 +248,12 @@ export function WebsiteReviewLauncher({
       .then((state) => {
         const website = state.websiteReview;
         if (!website) return;
-        const domains = saveWebsiteAllowedDomains(website.allowedDomains ?? []);
+        const domains = website.allowedDomains === undefined
+          ? readWebsiteAllowedDomains()
+          : saveWebsiteAllowedDomains(website.allowedDomains);
         setAllowedDomains(domains);
-        setHistory(website.history ?? []);
-        setBookmarks(website.bookmarks ?? []);
+        setHistory(website.history ?? readWebsiteHistory(domains));
+        setBookmarks(website.bookmarks ?? readWebsiteBookmarks(domains));
         setUrlsBySpace(website.urlsBySpace ?? {});
         setUrl(website.urlsBySpace?.[spaceStateKey(spacePath)] ?? getStored(urlKey(spacePath)) ?? "");
       })
@@ -261,17 +263,23 @@ export function WebsiteReviewLauncher({
 
   useEffect(() => {
     if (!websiteStateLoaded) return;
-    void api
-      .updateUiState({
-        websiteReview: {
-          bookmarks,
-          history,
-          allowedDomains,
-          urlsBySpace,
-        },
-      })
-      .catch(() => {});
-  }, [allowedDomains, bookmarks, history, urlsBySpace, websiteStateLoaded]);
+    void api.updateUiState({ websiteReview: { bookmarks } }).catch(() => {});
+  }, [bookmarks, websiteStateLoaded]);
+
+  useEffect(() => {
+    if (!websiteStateLoaded) return;
+    void api.updateUiState({ websiteReview: { history } }).catch(() => {});
+  }, [history, websiteStateLoaded]);
+
+  useEffect(() => {
+    if (!websiteStateLoaded) return;
+    void api.updateUiState({ websiteReview: { allowedDomains } }).catch(() => {});
+  }, [allowedDomains, websiteStateLoaded]);
+
+  useEffect(() => {
+    if (!websiteStateLoaded) return;
+    void api.updateUiState({ websiteReview: { urlsBySpace } }).catch(() => {});
+  }, [urlsBySpace, websiteStateLoaded]);
 
   useEffect(() => {
     setUrl(urlsBySpace[spaceStateKey(spacePath)] ?? getStored(urlKey(spacePath)) ?? "");

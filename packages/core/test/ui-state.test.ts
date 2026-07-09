@@ -62,6 +62,61 @@ it("reads legacy workspace places as review recency", async () => {
   });
 });
 
+it("persists global website history and bookmarks across per-space URL updates", async () => {
+  await Promise.all([
+    updateUiState({
+      websiteReview: {
+        bookmarks: [{ url: "http://localhost:3000", title: "App", addedAt: 1 }],
+      },
+    }),
+    updateUiState({
+      websiteReview: {
+        history: [{ url: "http://localhost:3000", title: "App", lastVisitedAt: 2, visitCount: 1 }],
+      },
+    }),
+    updateUiState({ websiteReview: { allowedDomains: [] } }),
+    updateUiState({ websiteReview: { urlsBySpace: { "/space-a": "http://localhost:3000" } } }),
+  ]);
+  await updateUiState({
+    websiteReview: {
+      urlsBySpace: { "/space-b": "http://localhost:4000" },
+    },
+  });
+
+  expect(await readUiState()).toEqual({
+    workspaceRecency: {},
+    reviewRecency: {},
+    websiteReview: {
+      bookmarks: [{ url: "http://localhost:3000", title: "App", addedAt: 1 }],
+      history: [{ url: "http://localhost:3000", title: "App", lastVisitedAt: 2, visitCount: 1 }],
+      allowedDomains: [],
+      urlsBySpace: {
+        "/space-a": "http://localhost:3000",
+        "/space-b": "http://localhost:4000",
+      },
+    },
+  });
+});
+
+it("clears global website lists without replacing unrelated website state", async () => {
+  await updateUiState({
+    websiteReview: {
+      bookmarks: [{ url: "http://localhost:3000", title: "App", addedAt: 1 }],
+      history: [{ url: "http://localhost:3000", title: "App", lastVisitedAt: 2, visitCount: 1 }],
+      allowedDomains: ["example.com"],
+      urlsBySpace: { "/space-a": "http://localhost:3000" },
+    },
+  });
+  await updateUiState({ websiteReview: { bookmarks: [], history: [] } });
+
+  expect((await readUiState()).websiteReview).toEqual({
+    bookmarks: [],
+    history: [],
+    allowedDomains: ["example.com"],
+    urlsBySpace: { "/space-a": "http://localhost:3000" },
+  });
+});
+
 it("serializes concurrent updates", async () => {
   await Promise.all([
     updateUiState({ workspaceRecency: { "/a": 1 } }),

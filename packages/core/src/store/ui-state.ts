@@ -19,9 +19,7 @@ export async function readUiState(): Promise<UiState> {
 export function updateUiState(patch: UiStateUpdate): Promise<UiState> {
   const run = async () => {
     const current = await readUiState();
-    const websiteReview = patch.websiteReview === undefined
-      ? current.websiteReview
-      : cleanWebsiteReview(patch.websiteReview);
+    const websiteReview = mergeWebsiteReview(current.websiteReview, patch.websiteReview);
     const next: UiState = {
       workspaceRecency: { ...current.workspaceRecency, ...cleanRecency(patch.workspaceRecency) },
       reviewRecency: mergeReviewRecency(current.reviewRecency, patch.reviewRecency),
@@ -70,42 +68,61 @@ function cleanRecency(value: unknown): Record<string, number> {
 function cleanWebsiteReview(value: unknown): WebsiteReviewUiState | undefined {
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Partial<WebsiteReviewUiState>;
-  const bookmarks = Array.isArray(raw.bookmarks)
-    ? raw.bookmarks.flatMap((entry) => {
-        if (!entry || typeof entry !== "object") return [];
-        const item = entry as Record<string, unknown>;
-        if (typeof item.url !== "string" || typeof item.title !== "string") return [];
-        return [{
-          url: item.url,
-          title: item.title,
-          addedAt: typeof item.addedAt === "number" && Number.isFinite(item.addedAt) ? item.addedAt : 0,
-        }];
-      })
-    : undefined;
-  const history = Array.isArray(raw.history)
-    ? raw.history.flatMap((entry) => {
-        if (!entry || typeof entry !== "object") return [];
-        const item = entry as Record<string, unknown>;
-        if (typeof item.url !== "string" || typeof item.title !== "string") return [];
-        return [{
-          url: item.url,
-          title: item.title,
-          lastVisitedAt: typeof item.lastVisitedAt === "number" && Number.isFinite(item.lastVisitedAt) ? item.lastVisitedAt : 0,
-          visitCount: typeof item.visitCount === "number" && Number.isFinite(item.visitCount) ? item.visitCount : 1,
-        }];
-      })
-    : undefined;
-  const allowedDomains = Array.isArray(raw.allowedDomains)
-    ? raw.allowedDomains.filter((domain): domain is string => typeof domain === "string")
-    : undefined;
-  const urlsBySpace = raw.urlsBySpace && typeof raw.urlsBySpace === "object"
-    ? Object.fromEntries(
-        Object.entries(raw.urlsBySpace).filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string",
-        ),
-      )
-    : undefined;
-  return { bookmarks, history, allowedDomains, urlsBySpace };
+  const clean: WebsiteReviewUiState = {};
+  if (Array.isArray(raw.bookmarks)) {
+    clean.bookmarks = raw.bookmarks.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const item = entry as Record<string, unknown>;
+      if (typeof item.url !== "string" || typeof item.title !== "string") return [];
+      return [{
+        url: item.url,
+        title: item.title,
+        addedAt: typeof item.addedAt === "number" && Number.isFinite(item.addedAt) ? item.addedAt : 0,
+      }];
+    });
+  }
+  if (Array.isArray(raw.history)) {
+    clean.history = raw.history.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const item = entry as Record<string, unknown>;
+      if (typeof item.url !== "string" || typeof item.title !== "string") return [];
+      return [{
+        url: item.url,
+        title: item.title,
+        lastVisitedAt: typeof item.lastVisitedAt === "number" && Number.isFinite(item.lastVisitedAt) ? item.lastVisitedAt : 0,
+        visitCount: typeof item.visitCount === "number" && Number.isFinite(item.visitCount) ? item.visitCount : 1,
+      }];
+    });
+  }
+  if (Array.isArray(raw.allowedDomains)) {
+    clean.allowedDomains = raw.allowedDomains.filter(
+      (domain): domain is string => typeof domain === "string",
+    );
+  }
+  if (raw.urlsBySpace && typeof raw.urlsBySpace === "object") {
+    clean.urlsBySpace = Object.fromEntries(
+      Object.entries(raw.urlsBySpace).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  }
+  return Object.keys(clean).length > 0 ? clean : undefined;
+}
+
+function mergeWebsiteReview(
+  current: WebsiteReviewUiState | undefined,
+  patch: unknown,
+): WebsiteReviewUiState | undefined {
+  if (patch === undefined) return current;
+  const clean = cleanWebsiteReview(patch);
+  if (!clean) return current;
+  return {
+    ...current,
+    ...clean,
+    ...(clean.urlsBySpace === undefined
+      ? {}
+      : { urlsBySpace: { ...(current?.urlsBySpace ?? {}), ...clean.urlsBySpace } }),
+  };
 }
 
 function cleanReview(value: unknown): UiReviewSelection | null {
