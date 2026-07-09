@@ -2142,6 +2142,9 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   opacity: 0.7;
 }
 .website-review-device {
+  position: relative;
+}
+.website-review-device summary {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2150,6 +2153,18 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 70%, transparent);
   border: 1px solid var(--border);
+  cursor: pointer;
+  list-style: none;
+}
+.website-review-device summary::-webkit-details-marker {
+  display: none;
+}
+.website-review-device summary:hover {
+  background: var(--panel);
+  border-color: var(--border-strong);
+}
+.website-review-device-popover {
+  min-width: 150px;
 }
 .website-review-tool-group {
   display: inline-flex;
@@ -2197,7 +2212,20 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   position: relative;
   flex: 1;
   min-height: 0;
+  width: 100%;
   background: white;
+}
+.website-review-viewport-tablet,
+.website-review-viewport-mobile {
+  align-self: center;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.website-review-viewport-tablet {
+  width: min(100%, 768px);
+}
+.website-review-viewport-mobile {
+  width: min(100%, 390px);
 }
 .website-review-empty {
   flex: 1;

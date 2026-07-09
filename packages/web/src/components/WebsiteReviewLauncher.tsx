@@ -35,6 +35,7 @@ import { Modal } from "./Modal.js";
 const URL_KEY = "diffect-website-review-url";
 
 type ReviewTool = "browse" | "pick" | "area";
+type ViewportPreset = "desktop" | "tablet" | "mobile";
 type Bounds = { x: number; y: number; width: number; height: number };
 type Screenshot = { name: string; mime: string; bytes: number[] };
 type Pick = {
@@ -53,6 +54,12 @@ type BrowserBookmarkSource = {
 };
 
 type BookmarkManagerMode = "bookmarks" | "domains";
+
+const VIEWPORT_PRESETS: Record<ViewportPreset, { label: string; icon: "device-desktop" | "device-tablet" | "device-mobile" }> = {
+  desktop: { label: "Desktop", icon: "device-desktop" },
+  tablet: { label: "Tablet", icon: "device-tablet" },
+  mobile: { label: "Mobile", icon: "device-mobile" },
+};
 
 interface Props {
   visible: boolean;
@@ -197,6 +204,7 @@ export function WebsiteReviewLauncher({
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [reviewReady, setReviewReady] = useState(false);
   const [reviewTool, setReviewTool] = useState<ReviewTool>("browse");
+  const [viewportPreset, setViewportPreset] = useState<ViewportPreset>("desktop");
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [allowedDomains, setAllowedDomains] = useState(readWebsiteAllowedDomains);
@@ -215,9 +223,11 @@ export function WebsiteReviewLauncher({
   const [managerMode, setManagerMode] = useState<BookmarkManagerMode | null>(null);
   const [bookmarkSort, setBookmarkSort] = useState<WebsiteBookmarkSort>("lastUsed");
   const [bookmarkMenuOpen, setBookmarkMenuOpen] = useState(false);
+  const [viewportMenuOpen, setViewportMenuOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const bookmarkDetailsRef = useRef<HTMLDetailsElement>(null);
+  const viewportDetailsRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     return () => {
@@ -276,11 +286,24 @@ export function WebsiteReviewLauncher({
     if (bookmarkDetailsRef.current) bookmarkDetailsRef.current.open = false;
   };
 
+  const closeViewportMenu = () => {
+    if (viewportDetailsRef.current) viewportDetailsRef.current.open = false;
+  };
+
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const details = bookmarkDetailsRef.current;
-      if (!details || !details.open) return;
-      if (event.target instanceof Node && !details.contains(event.target)) details.open = false;
+      if (details?.open && event.target instanceof Node && !details.contains(event.target)) {
+        details.open = false;
+      }
+      const viewportDetails = viewportDetailsRef.current;
+      if (
+        viewportDetails?.open &&
+        event.target instanceof Node &&
+        !viewportDetails.contains(event.target)
+      ) {
+        viewportDetails.open = false;
+      }
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
@@ -317,7 +340,7 @@ export function WebsiteReviewLauncher({
     (visible: boolean) => invokeDesktop<void>("set_website_review_visible", { visible }),
     [],
   );
-  const nativeVisible = visible && !modalOpen && !suggestionsVisible && !bookmarkMenuOpen;
+  const nativeVisible = visible && !modalOpen && !suggestionsVisible && !bookmarkMenuOpen && !viewportMenuOpen;
 
   const changeTool = useCallback(
     (tool: ReviewTool) => {
@@ -724,11 +747,38 @@ export function WebsiteReviewLauncher({
           onChange={(event) => void importBookmarks(event)}
         />
         <span className="website-review-toolbar-divider" aria-hidden="true" />
-        <div className="website-review-device" aria-label="Preview size">
-          <span aria-hidden="true">▣</span>
-          Desktop
-          <span aria-hidden="true">⌄</span>
-        </div>
+        <details
+          className="website-review-device"
+          ref={viewportDetailsRef}
+          onToggle={(event) => setViewportMenuOpen(event.currentTarget.open)}
+        >
+          <summary aria-label="Preview size" title="Preview size">
+            <Icon name={VIEWPORT_PRESETS[viewportPreset].icon} size={15} />
+            <span>{VIEWPORT_PRESETS[viewportPreset].label}</span>
+            <Icon name="chevron-down" size={12} />
+          </summary>
+          <div className="open-in-popover website-review-device-popover">
+            <div className="open-in-label">Preview size</div>
+            {(Object.keys(VIEWPORT_PRESETS) as ViewportPreset[]).map((preset) => {
+              const option = VIEWPORT_PRESETS[preset];
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`open-in-item ${preset === viewportPreset ? "active" : ""}`}
+                  onClick={() => {
+                    setViewportPreset(preset);
+                    closeViewportMenu();
+                  }}
+                >
+                  <Icon name={option.icon} size={16} />
+                  <span>{option.label}</span>
+                  {preset === viewportPreset && <Icon name="check" size={13} className="open-in-check" />}
+                </button>
+              );
+            })}
+          </div>
+        </details>
         <div className="website-review-tool-group" aria-label="Preview tools">
           <button
             type="button"
@@ -810,7 +860,10 @@ export function WebsiteReviewLauncher({
         />
       )}
       {activeUrl ? (
-        <div ref={viewportRef} className="website-review-viewport" />
+        <div
+          ref={viewportRef}
+          className={`website-review-viewport website-review-viewport-${viewportPreset}`}
+        />
       ) : (
         <div className="website-review-empty">
           Enter a localhost URL to load a web preview.
