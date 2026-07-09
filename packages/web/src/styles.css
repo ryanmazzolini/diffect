@@ -1827,6 +1827,15 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   overflow: auto;
   padding: 16px;
 }
+.review-main-web {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.review-main-web[hidden] {
+  display: none;
+}
 .thread-pane {
   border-left: 1px solid var(--border);
   overflow: auto;
@@ -1890,6 +1899,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .thread-pane-actions .ghost {
   flex: 1;
 }
+
 .pr-draft-panel,
 .pr-draft-editor,
 .pr-draft-list {
@@ -1933,8 +1943,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   font-size: 12px;
   color: var(--muted);
 }
-.pr-field input,
-.pr-field select {
+.pr-field input {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1943,8 +1952,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   font: inherit;
   font-size: 13px;
 }
-.pr-field input:focus,
-.pr-field select:focus {
+.pr-field input:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -1960,66 +1968,360 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   margin-right: auto;
   color: var(--success);
 }
-.website-review-launcher {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin: 0 0 10px;
-  padding: 8px;
-  background: var(--panel-2);
-}
-.website-review-launcher label {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-.website-review-row {
-  display: flex;
-  gap: 6px;
-}
-.website-review-row input {
-  min-width: 0;
+
+.website-review-shell {
   flex: 1;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
-  color: var(--text);
-  padding: 7px 8px;
-}
-.website-review-panel {
-  position: fixed;
-  z-index: 30;
-  inset: 78px 18px 18px;
-  display: grid;
-  grid-template-rows: auto 1fr;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--panel);
-  box-shadow: 0 18px 60px rgb(0 0 0 / 36%);
 }
-.website-review-toolbar {
+.website-review-addressbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 10px 12px;
+  min-height: 48px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
 }
-.website-review-toolbar span {
+.website-review-address-field {
+  position: relative;
+  min-width: 180px;
   flex: 1;
+}
+.website-review-addressbar input {
+  width: 100%;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px 12px;
+  font: inherit;
+}
+.website-review-addressbar input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.website-review-bookmark-menu .website-review-bookmark {
+  width: 32px;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+.website-review-bookmark-menu .website-review-bookmark:hover:not(:disabled),
+.website-review-bookmark-menu .website-review-bookmark.active {
+  color: #f6c762;
+  background: rgba(246, 199, 98, 0.14);
+}
+.website-review-bookmark-popover {
+  width: 340px;
+  max-height: min(520px, calc(100vh - 160px));
+  overflow: auto;
+}
+.website-review-bookmark-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.website-review-bookmark-popover-head .open-in-label {
+  padding-right: 0;
+}
+.website-review-bookmark-popover-head select {
+  max-width: 120px;
+  font-size: 11.5px;
+}
+.website-review-bookmark-empty {
+  padding: 8px;
   color: var(--muted);
   font-size: 12px;
 }
+.website-review-bookmark-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 2px;
+}
+.website-review-bookmark-row .open-in-item {
+  grid-template-columns: minmax(0, 1fr);
+}
+.website-review-bookmark-title,
+.website-review-bookmark-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.website-review-bookmark-title {
+  font-weight: 600;
+}
+.website-review-bookmark-url {
+  color: var(--muted);
+  font: 11.5px var(--mono);
+}
+.website-review-bookmark-remove {
+  width: 26px;
+  height: 26px;
+  color: var(--muted);
+}
+.website-review-import-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+.website-review-import-message span {
+  flex: 1;
+}
+.website-review-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(360px, calc(100vh - 180px));
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-overlay);
+}
+.website-review-suggestions button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.website-review-suggestions button:hover,
+.website-review-suggestions button.active {
+  background: var(--panel-2);
+}
+.website-review-suggestion-title,
+.website-review-suggestion-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.website-review-suggestion-title {
+  font-weight: 600;
+}
+.website-review-suggestion-url {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font: 11.5px var(--mono);
+}
+.website-review-suggestion-source {
+  color: var(--muted);
+  font-size: 11px;
+}
+.website-review-toolbar-divider {
+  width: 1px;
+  height: 26px;
+  background: var(--border-strong);
+  opacity: 0.7;
+}
+.website-review-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  border: 1px solid var(--border);
+}
+.website-review-tool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-left: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+}
+.website-review-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 7px 10px;
+  font: inherit;
+}
+.website-review-tool:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel);
+}
+.website-review-tool.active {
+  color: #ff9d6b;
+  background: rgba(255, 125, 75, 0.14);
+  border-color: rgba(255, 125, 75, 0.2);
+}
+.website-review-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.website-review-surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: white;
+}
 .website-review-viewport {
+  position: relative;
+  flex: 1;
   min-height: 0;
   background: white;
 }
+.website-review-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 13px;
+}
+.website-review-import-dialog,
+.website-review-manage-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(720px, calc(100vw - 96px));
+  max-height: min(720px, calc(100vh - 130px));
+}
+.website-review-import-intro,
+.website-review-domain-settings p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.website-review-import-actions,
+.website-review-import-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.website-review-import-actions span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.website-review-import-list,
+.website-review-manage-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+.website-review-import-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.website-review-import-source,
+.website-review-manage-bookmark {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.website-review-import-source-head,
+.website-review-import-bookmark {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+.website-review-import-source-head {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.website-review-import-source-head > span,
+.website-review-import-bookmark > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.website-review-import-source-head span span,
+.website-review-import-source-head em,
+.website-review-import-bookmark code {
+  color: var(--muted);
+  font-style: normal;
+  font: 11.5px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.website-review-import-bookmarks {
+  max-height: 260px;
+  overflow: auto;
+}
+.website-review-import-bookmark + .website-review-import-bookmark {
+  border-top: 1px solid var(--border);
+}
+.website-review-import-footer {
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+.website-review-manage-tabs {
+  border-bottom: 1px solid var(--border);
+}
+.website-review-manage-bookmark {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.6fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+}
+.website-review-manage-bookmark label,
+.website-review-domain-settings {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.website-review-manage-bookmark input,
+.website-review-domain-settings textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px 8px;
+  font: inherit;
+}
+.website-review-domain-settings textarea {
+  resize: vertical;
+  font-family: var(--mono);
 }
 
 /* ============ Modules view (N≥2): stacked per-repo diff sections ============ */
@@ -3325,13 +3627,6 @@ body.pane-resizing {
   gap: 8px;
   margin-top: 8px;
 }
-.comment-form select {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 6px;
-}
 .general-comment-form {
   margin-bottom: 12px;
 }
@@ -3342,6 +3637,27 @@ body.pane-resizing {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+select {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 20px 5px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+select:hover:not(:disabled),
+select:focus:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  outline: none;
+}
+select:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 button.primary,
 button.ghost {

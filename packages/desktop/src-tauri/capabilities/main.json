@@ -11,7 +11,11 @@
     "core:window:allow-start-dragging",
     "allow-open-website-review",
     "allow-position-website-review",
+    "allow-set-website-review-visible",
+    "allow-set-website-review-tool",
+    "allow-capture-website-area",
     "allow-close-website-review",
-    "allow-report-website-pick"
+    "allow-report-website-pick",
+    "allow-import-browser-bookmarks"
   ]
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-capture-website-area"
+description = "Enables the capture_website_area command without any pre-configured scope."
+commands.allow = ["capture_website_area"]
+
+[[permission]]
+identifier = "deny-capture-website-area"
+description = "Denies the capture_website_area command without any pre-configured scope."
+commands.deny = ["capture_website_area"]

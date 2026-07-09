@@ -10,7 +10,7 @@ import { Modal } from "./Modal.js";
 
 interface Props {
   onClose: () => void;
-  onAdded: (entries: WorkspaceEntry[]) => void;
+  onAdded: (entries: WorkspaceEntry[], addedPath: string) => void;
 }
 
 /** Replaces the native prompt: a path field, an in-app folder browser, and a list
@@ -31,7 +31,8 @@ export function AddWorkspaceDialog({ onClose, onAdded }: Props) {
     setBusy(true);
     setError(null);
     try {
-      onAdded(await api.addWorkspace(p.trim()));
+      const addedPath = p.trim();
+      onAdded(await api.addWorkspace(addedPath), addedPath);
       onClose();
     } catch (e) {
       setError(String(e));

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { UiReviewSelection, UiState, UiStateUpdate } from "@diffect/shared";
+import type { UiReviewSelection, UiState, UiStateUpdate, WebsiteReviewUiState } from "@diffect/shared";
 import { uiStatePath } from "./paths.js";
 
 const EMPTY_UI_STATE: UiState = { workspaceRecency: {}, reviewRecency: {} };
@@ -19,9 +19,13 @@ export async function readUiState(): Promise<UiState> {
 export function updateUiState(patch: UiStateUpdate): Promise<UiState> {
   const run = async () => {
     const current = await readUiState();
+    const websiteReview = patch.websiteReview === undefined
+      ? current.websiteReview
+      : cleanWebsiteReview(patch.websiteReview);
     const next: UiState = {
       workspaceRecency: { ...current.workspaceRecency, ...cleanRecency(patch.workspaceRecency) },
       reviewRecency: mergeReviewRecency(current.reviewRecency, patch.reviewRecency),
+      ...(websiteReview ? { websiteReview } : {}),
     };
     await writeUiState(next);
     return next;
@@ -43,12 +47,14 @@ function parseUiState(value: unknown): UiState {
   if (!value || typeof value !== "object") return EMPTY_UI_STATE;
   const raw = value as Partial<UiState>;
   const workspaceRecency = cleanRecency(raw.workspaceRecency);
+  const websiteReview = cleanWebsiteReview(raw.websiteReview);
   return {
     workspaceRecency,
     reviewRecency: mergeReviewRecency(
       legacyReviewRecency((raw as { workspacePlaces?: unknown }).workspacePlaces, workspaceRecency),
       raw.reviewRecency,
     ),
+    ...(websiteReview ? { websiteReview } : {}),
   };
 }
 
@@ -59,6 +65,47 @@ function cleanRecency(value: unknown): Record<string, number> {
     if (typeof ts === "number" && Number.isFinite(ts)) out[path] = ts;
   }
   return out;
+}
+
+function cleanWebsiteReview(value: unknown): WebsiteReviewUiState | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<WebsiteReviewUiState>;
+  const bookmarks = Array.isArray(raw.bookmarks)
+    ? raw.bookmarks.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const item = entry as Record<string, unknown>;
+        if (typeof item.url !== "string" || typeof item.title !== "string") return [];
+        return [{
+          url: item.url,
+          title: item.title,
+          addedAt: typeof item.addedAt === "number" && Number.isFinite(item.addedAt) ? item.addedAt : 0,
+        }];
+      })
+    : undefined;
+  const history = Array.isArray(raw.history)
+    ? raw.history.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const item = entry as Record<string, unknown>;
+        if (typeof item.url !== "string" || typeof item.title !== "string") return [];
+        return [{
+          url: item.url,
+          title: item.title,
+          lastVisitedAt: typeof item.lastVisitedAt === "number" && Number.isFinite(item.lastVisitedAt) ? item.lastVisitedAt : 0,
+          visitCount: typeof item.visitCount === "number" && Number.isFinite(item.visitCount) ? item.visitCount : 1,
+        }];
+      })
+    : undefined;
+  const allowedDomains = Array.isArray(raw.allowedDomains)
+    ? raw.allowedDomains.filter((domain): domain is string => typeof domain === "string")
+    : undefined;
+  const urlsBySpace = raw.urlsBySpace && typeof raw.urlsBySpace === "object"
+    ? Object.fromEntries(
+        Object.entries(raw.urlsBySpace).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      )
+    : undefined;
+  return { bookmarks, history, allowedDomains, urlsBySpace };
 }
 
 function cleanReview(value: unknown): UiReviewSelection | null {

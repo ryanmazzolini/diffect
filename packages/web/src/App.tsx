@@ -43,9 +43,10 @@ import { GeneralCommentForm } from "./components/GeneralCommentForm.js";
 import { PrDraftPanel } from "./components/PrDraftPanel.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { WebsiteReviewLauncher } from "./components/WebsiteReviewLauncher.js";
+import { isDesktopShell } from "./tauri.js";
 
 type StatusFilter = ThreadStatus | "all";
-type MainPaneTab = "diff" | "pr-draft";
+type MainPaneTab = "diff" | "web" | "pr-draft";
 type GeneralCommentTarget = {
   targetLevel: "space" | "repo";
   repo: string | null;
@@ -53,8 +54,6 @@ type GeneralCommentTarget = {
   worktree: string | null;
   target: string;
   label: string;
-  initialBody?: string;
-  draftKey?: string;
 };
 const STATUS_FILTERS: StatusFilter[] = ["open", "closed", "all"];
 // Stable empty references so memoized children don't re-render on the null paths.
@@ -223,32 +222,6 @@ function cssEscape(s: string): string {
 function basename(p: string): string {
   const parts = p.split(/[/\\]/).filter(Boolean);
   return parts.at(-1) ?? p;
-}
-function fieldString(value: unknown, key: string): string | null {
-  if (!value || typeof value !== "object") return null;
-  const field = (value as Record<string, unknown>)[key];
-  return typeof field === "string" && field.trim() ? field.trim() : null;
-}
-function formatInlineCode(value: string): string {
-  return `\`${value.replaceAll("`", "\\`")}\``;
-}
-function formatWebsitePickComment(detail: unknown): string {
-  const url = fieldString(detail, "url") ?? "unknown URL";
-  const selector = fieldString(detail, "selector");
-  const text = fieldString(detail, "text");
-  const bounds = detail && typeof detail === "object"
-    ? (detail as Record<string, unknown>).bounds
-    : null;
-  const rect = bounds && typeof bounds === "object" ? bounds as Record<string, number> : null;
-  const hasRect = rect && ["x", "y", "width", "height"].every((key) => typeof rect[key] === "number");
-  const size = hasRect ? `${rect.x},${rect.y} ${rect.width}×${rect.height}` : null;
-
-  return [
-    `Website review: ${url}`,
-    selector ? `Selector: ${formatInlineCode(selector)}` : null,
-    size ? `Bounds: ${formatInlineCode(size)}` : null,
-    text ? `Text: ${text}` : null,
-  ].filter((line): line is string => Boolean(line)).join("\n");
 }
 function selectedWorktreeSummary(
   repo: RepoSummary,
@@ -1579,26 +1552,6 @@ export function App() {
     void refreshThreads();
   }, [refreshThreads]);
 
-  useEffect(() => {
-    const onPick = (event: Event) => {
-      if (!visibleWorkspace || !repo) return;
-      const detail = (event as CustomEvent<unknown>).detail;
-      const url = fieldString(detail, "url") ?? "";
-      const selector = fieldString(detail, "selector") ?? "";
-      setGeneralComment({
-        targetLevel: "repo",
-        repo,
-        spacePath: visibleWorkspace.root,
-        worktree,
-        target,
-        label: `Website: ${url || repo}`,
-        initialBody: formatWebsitePickComment(detail),
-        draftKey: `website:${url}:${selector}`,
-      });
-    };
-    window.addEventListener("diffect:website-pick", onPick);
-    return () => window.removeEventListener("diffect:website-pick", onPick);
-  }, [repo, target, visibleWorkspace, worktree]);
   // One stable closure for "back to diff" so it doesn't defeat memo() on the
   // heavy DiffView/Sidebar panels — a fresh arrow each render made them
   // re-run on every scroll-spy active-file tick, resize commit, and filter click.
@@ -1745,12 +1698,32 @@ export function App() {
     );
   }
 
+  const desktopShell = isDesktopShell();
+
   return (
     <div className="app">
       {toast}
       {liveRegion}
       {addOpen && (
-        <AddWorkspaceDialog onClose={() => setAddOpen(false)} onAdded={setEntries} />
+        <AddWorkspaceDialog
+          onClose={() => setAddOpen(false)}
+          onAdded={(nextEntries, addedPath) => {
+            const previousPaths = new Set(entries.map((entry) => entry.path));
+            setEntries(nextEntries);
+            const added =
+              nextEntries.find((entry) => entry.path === addedPath) ??
+              nextEntries.find((entry) => !previousPaths.has(entry.path));
+            const nextPath = added?.path ?? addedPath;
+            setActiveWorkspacePath(nextPath);
+            const nextRepo = added?.repos[0]?.name ?? null;
+            if (nextRepo) selectRepo(nextRepo);
+            else setRepo(null);
+            setActiveFile(null);
+            setSpacePreviewFile(null);
+            setPreviewFile(null);
+            setWorkspaceRailOpen(false);
+          }}
+        />
       )}
       <Topbar
         workspace={visibleWorkspace}
@@ -1851,6 +1824,17 @@ export function App() {
               >
                 Diff
               </button>
+              {desktopShell && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mainTab === "web"}
+                  className={`pane-tab${mainTab === "web" ? " active" : ""}`}
+                  onClick={() => setMainTab("web")}
+                >
+                  Web
+                </button>
+              )}
               <button
                 type="button"
                 role="tab"
@@ -1878,6 +1862,19 @@ export function App() {
                 reloadKey={prDraftReloadKey}
               />
             </div>
+            {desktopShell && (
+              <div className="review-main-web" role="tabpanel" hidden={mainTab !== "web"}>
+                <WebsiteReviewLauncher
+                  visible={mainTab === "web"}
+                  repo={repo}
+                  spacePath={activeEntry?.path ?? visibleWorkspace.root}
+                  worktree={worktree}
+                  target={target}
+                  onError={setError}
+                  onThreadCreated={refreshThreads}
+                />
+              </div>
+            )}
             {mainTab === "diff" && (
               <div className="review-main-content" role="tabpanel">
                 {/* N≥2: one module per repo, stacked inside a shared scroll container that
@@ -2014,20 +2011,15 @@ export function App() {
                       Comment on repo
                     </button>
                   </div>
-                  <WebsiteReviewLauncher onError={setError} />
                   {generalComment && (
                     <GeneralCommentForm
-                      key={
-                        generalComment.draftKey ??
-                        `${generalComment.targetLevel}:${generalComment.spacePath}:${generalComment.repo ?? ""}:${generalComment.worktree ?? ""}:${generalComment.target}`
-                      }
+                      key={`${generalComment.targetLevel}:${generalComment.spacePath}:${generalComment.repo ?? ""}:${generalComment.worktree ?? ""}:${generalComment.target}`}
                       repo={generalComment.repo}
                       spacePath={generalComment.spacePath}
                       worktree={generalComment.worktree}
                       target={generalComment.target}
                       targetLevel={generalComment.targetLevel}
                       label={generalComment.label}
-                      initialBody={generalComment.initialBody}
                       onCancel={closeGeneralComment}
                       onCreated={generalCommentCreated}
                     />

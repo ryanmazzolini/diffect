@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-website-review-tool"
+description = "Enables the set_website_review_tool command without any pre-configured scope."
+commands.allow = ["set_website_review_tool"]
+
+[[permission]]
+identifier = "deny-set-website-review-tool"
+description = "Denies the set_website_review_tool command without any pre-configured scope."
+commands.deny = ["set_website_review_tool"]

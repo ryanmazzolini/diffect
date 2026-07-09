@@ -333,15 +333,24 @@ export interface UiReviewSelection {
   openedAt: number;
 }
 
+export interface WebsiteReviewUiState {
+  bookmarks?: { url: string; title: string; addedAt: number }[];
+  history?: { url: string; title: string; lastVisitedAt: number; visitCount: number }[];
+  allowedDomains?: string[];
+  urlsBySpace?: Record<string, string>;
+}
+
 export interface UiState {
   workspaceRecency: Record<string, number>;
   /** Last explicitly opened review per workspace path, then repo name. */
   reviewRecency: Record<string, Record<string, UiReviewSelection>>;
+  websiteReview?: WebsiteReviewUiState;
 }
 
 export interface UiStateUpdate {
   workspaceRecency?: Record<string, number>;
   reviewRecency?: Record<string, Record<string, UiReviewSelection>>;
+  websiteReview?: WebsiteReviewUiState;
 }
 
 /** Body for POST/DELETE /workspaces. */
