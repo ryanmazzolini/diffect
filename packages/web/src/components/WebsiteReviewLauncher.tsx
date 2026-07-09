@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { api } from "../api.js";
-import { Icon } from "../icons.js";
+import { Icon, type IconName } from "../icons.js";
 import { getStored, setStored } from "../storage.js";
 import { invokeDesktop, isDesktopShell } from "../tauri.js";
 import {
@@ -55,11 +55,18 @@ type BrowserBookmarkSource = {
 
 type BookmarkManagerMode = "bookmarks" | "domains";
 
-const VIEWPORT_PRESETS: Record<ViewportPreset, { label: string; icon: "device-desktop" | "device-tablet" | "device-mobile" }> = {
+const VIEWPORT_PRESETS: Record<ViewportPreset, { label: string; icon: IconName }> = {
   desktop: { label: "Desktop", icon: "device-desktop" },
   tablet: { label: "Tablet", icon: "device-tablet" },
   mobile: { label: "Mobile", icon: "device-mobile" },
 };
+
+const REVIEW_TOOLS: Record<ReviewTool, { label: string; title: string; icon: IconName }> = {
+  browse: { label: "Pointer", title: "Interact with the page", icon: "cursor" },
+  area: { label: "Area", title: "Drag an area to comment", icon: "square" },
+  pick: { label: "Pick", title: "Pick an element to comment", icon: "pencil" },
+};
+const REVIEW_TOOL_ORDER: ReviewTool[] = ["browse", "area", "pick"];
 
 interface Props {
   visible: boolean;
@@ -780,39 +787,24 @@ export function WebsiteReviewLauncher({
           </div>
         </details>
         <div className="website-review-tool-group" aria-label="Preview tools">
-          <button
-            type="button"
-            className={`website-review-tool${reviewTool === "browse" ? " active" : ""}`}
-            aria-pressed={reviewTool === "browse"}
-            disabled={!reviewReady}
-            onClick={() => changeTool("browse")}
-            title="Interact with the page"
-          >
-            <span aria-hidden="true">↖</span>
-            Pointer
-          </button>
-          <button
-            type="button"
-            className={`website-review-tool${reviewTool === "area" ? " active" : ""}`}
-            aria-pressed={reviewTool === "area"}
-            disabled={!reviewReady}
-            onClick={() => changeTool("area")}
-            title="Drag an area"
-          >
-            <span aria-hidden="true">▢</span>
-            Area
-          </button>
-          <button
-            type="button"
-            className={`website-review-tool${reviewTool === "pick" ? " active" : ""}`}
-            aria-pressed={reviewTool === "pick"}
-            disabled={!reviewReady}
-            onClick={() => changeTool("pick")}
-            title="Pick an element"
-          >
-            <span aria-hidden="true">✎</span>
-            Pick
-          </button>
+          {REVIEW_TOOL_ORDER.map((tool) => {
+            const option = REVIEW_TOOLS[tool];
+            return (
+              <button
+                key={tool}
+                type="button"
+                className={`website-review-tool${reviewTool === tool ? " active" : ""}`}
+                aria-label={option.label}
+                aria-pressed={reviewTool === tool}
+                disabled={!reviewReady}
+                onClick={() => changeTool(tool)}
+                title={option.title}
+              >
+                <Icon name={option.icon} size={15} />
+                <span className="sr-only">{option.label}</span>
+              </button>
+            );
+          })}
         </div>
       </form>
       {importNotice && (

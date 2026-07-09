@@ -2169,26 +2169,28 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .website-review-tool-group {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   padding: 0 8px;
   border-left: 1px solid var(--border-strong);
   border-right: 1px solid var(--border-strong);
 }
 .website-review-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  padding: 7px 10px;
+  padding: 0;
   font: inherit;
 }
 .website-review-tool:hover:not(:disabled) {
   color: var(--text);
   background: var(--panel);
+  border-color: var(--border);
 }
 .website-review-tool.active {
   color: #ff9d6b;
