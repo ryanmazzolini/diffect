@@ -1041,15 +1041,32 @@ fn capture_website_area(
     let window = handle
         .get_window("main")
         .ok_or("main window is not available")?;
-    let window_pos = window.outer_position().map_err(|e| e.to_string())?;
+    // macOS `screencapture -R` takes screen coordinates in logical points, while
+    // Tauri reports window and child-webview bounds in physical pixels. Convert
+    // the native bounds back to points before adding the CSS-pixel selection from
+    // the page. Use the window's inner origin because child webview positions are
+    // relative to the content area, not the outer window frame/titlebar.
+    let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
+    let window_pos = window.inner_position().map_err(|e| e.to_string())?;
     let webview_pos = webview.position().map_err(|e| e.to_string())?;
     let webview_size = webview.size().map_err(|e| e.to_string())?;
-    let scale_x = webview_size.width as f64 / viewport_width;
-    let scale_y = webview_size.height as f64 / viewport_height;
-    let sx = window_pos.x + webview_pos.x + (x * scale_x).round() as i32;
-    let sy = window_pos.y + webview_pos.y + (y * scale_y).round() as i32;
-    let sw = (width * scale_x).round().max(2.0) as i32;
-    let sh = (height * scale_y).round().max(2.0) as i32;
+    let webview_width = webview_size.width as f64 / scale_factor;
+    let webview_height = webview_size.height as f64 / scale_factor;
+    let scale_x = webview_width / viewport_width;
+    let scale_y = webview_height / viewport_height;
+    let left = (x * scale_x).clamp(0.0, webview_width);
+    let top = (y * scale_y).clamp(0.0, webview_height);
+    let right = ((x + width) * scale_x).clamp(left, webview_width);
+    let bottom = ((y + height) * scale_y).clamp(top, webview_height);
+    if right - left < 2.0 || bottom - top < 2.0 {
+        return Err("capture area is outside the Website Review viewport".into());
+    }
+    let sx = (window_pos.x as f64 / scale_factor + webview_pos.x as f64 / scale_factor + left)
+        .round() as i32;
+    let sy = (window_pos.y as f64 / scale_factor + webview_pos.y as f64 / scale_factor + top)
+        .round() as i32;
+    let sw = (right - left).round().max(2.0) as i32;
+    let sh = (bottom - top).round().max(2.0) as i32;
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
