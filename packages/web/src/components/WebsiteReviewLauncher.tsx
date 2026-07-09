@@ -230,11 +230,9 @@ export function WebsiteReviewLauncher({
   const [managerMode, setManagerMode] = useState<BookmarkManagerMode | null>(null);
   const [bookmarkSort, setBookmarkSort] = useState<WebsiteBookmarkSort>("lastUsed");
   const [bookmarkMenuOpen, setBookmarkMenuOpen] = useState(false);
-  const [viewportMenuOpen, setViewportMenuOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const bookmarkDetailsRef = useRef<HTMLDetailsElement>(null);
-  const viewportDetailsRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     return () => {
@@ -293,23 +291,11 @@ export function WebsiteReviewLauncher({
     if (bookmarkDetailsRef.current) bookmarkDetailsRef.current.open = false;
   };
 
-  const closeViewportMenu = () => {
-    if (viewportDetailsRef.current) viewportDetailsRef.current.open = false;
-  };
-
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const details = bookmarkDetailsRef.current;
       if (details?.open && event.target instanceof Node && !details.contains(event.target)) {
         details.open = false;
-      }
-      const viewportDetails = viewportDetailsRef.current;
-      if (
-        viewportDetails?.open &&
-        event.target instanceof Node &&
-        !viewportDetails.contains(event.target)
-      ) {
-        viewportDetails.open = false;
       }
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -347,7 +333,7 @@ export function WebsiteReviewLauncher({
     (visible: boolean) => invokeDesktop<void>("set_website_review_visible", { visible }),
     [],
   );
-  const nativeVisible = visible && !modalOpen && !suggestionsVisible && !bookmarkMenuOpen && !viewportMenuOpen;
+  const nativeVisible = visible && !modalOpen && !suggestionsVisible && !bookmarkMenuOpen;
 
   const changeTool = useCallback(
     (tool: ReviewTool) => {
@@ -754,38 +740,21 @@ export function WebsiteReviewLauncher({
           onChange={(event) => void importBookmarks(event)}
         />
         <span className="website-review-toolbar-divider" aria-hidden="true" />
-        <details
-          className="website-review-device"
-          ref={viewportDetailsRef}
-          onToggle={(event) => setViewportMenuOpen(event.currentTarget.open)}
-        >
-          <summary aria-label="Preview size" title="Preview size">
-            <Icon name={VIEWPORT_PRESETS[viewportPreset].icon} size={15} />
-            <span>{VIEWPORT_PRESETS[viewportPreset].label}</span>
-            <Icon name="chevron-down" size={12} />
-          </summary>
-          <div className="open-in-popover website-review-device-popover">
-            <div className="open-in-label">Preview size</div>
-            {(Object.keys(VIEWPORT_PRESETS) as ViewportPreset[]).map((preset) => {
-              const option = VIEWPORT_PRESETS[preset];
-              return (
-                <button
-                  key={preset}
-                  type="button"
-                  className={`open-in-item ${preset === viewportPreset ? "active" : ""}`}
-                  onClick={() => {
-                    setViewportPreset(preset);
-                    closeViewportMenu();
-                  }}
-                >
-                  <Icon name={option.icon} size={16} />
-                  <span>{option.label}</span>
-                  {preset === viewportPreset && <Icon name="check" size={13} className="open-in-check" />}
-                </button>
-              );
-            })}
-          </div>
-        </details>
+        <label className="website-review-device" title="Preview size">
+          <Icon name={VIEWPORT_PRESETS[viewportPreset].icon} size={15} />
+          <select
+            value={viewportPreset}
+            aria-label="Preview size"
+            onChange={(event) => setViewportPreset(event.target.value as ViewportPreset)}
+          >
+            {(Object.keys(VIEWPORT_PRESETS) as ViewportPreset[]).map((preset) => (
+              <option key={preset} value={preset}>
+                {VIEWPORT_PRESETS[preset].label}
+              </option>
+            ))}
+          </select>
+          <Icon name="chevron-down" size={12} className="website-review-device-chevron" />
+        </label>
         <div className="website-review-tool-group" aria-label="Preview tools">
           {REVIEW_TOOL_ORDER.map((tool) => {
             const option = REVIEW_TOOLS[tool];

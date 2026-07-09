@@ -2142,29 +2142,34 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   opacity: 0.7;
 }
 .website-review-device {
-  position: relative;
-}
-.website-review-device summary {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--text);
-  padding: 6px 10px;
+  padding: 0 8px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 70%, transparent);
   border: 1px solid var(--border);
-  cursor: pointer;
-  list-style: none;
 }
-.website-review-device summary::-webkit-details-marker {
-  display: none;
-}
-.website-review-device summary:hover {
+.website-review-device:hover,
+.website-review-device:focus-within {
   background: var(--panel);
   border-color: var(--border-strong);
 }
-.website-review-device-popover {
-  min-width: 150px;
+.website-review-device select {
+  color: var(--text);
+  padding: 6px 14px 6px 0;
+  background: transparent;
+  border: 0;
+}
+.website-review-device select:hover,
+.website-review-device select:focus {
+  background: transparent;
+  border-color: transparent;
+}
+.website-review-device-chevron {
+  margin-left: -16px;
+  pointer-events: none;
 }
 .website-review-tool-group {
   display: inline-flex;
