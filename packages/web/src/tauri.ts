@@ -15,6 +15,6 @@ export function isDesktopShell(): boolean {
 
 export function invokeDesktop<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const invoke = window.__TAURI_INTERNALS__?.invoke;
-  if (!invoke) throw new Error("Desktop shell is not available");
+  if (!invoke) return Promise.reject(new Error("Desktop shell is not available"));
   return invoke<T>(command, args);
 }

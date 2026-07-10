@@ -238,7 +238,7 @@ export function WebsiteReviewLauncher({
 
   useEffect(() => {
     return () => {
-      if (isDesktopShell()) void invokeDesktop<void>("close_website_review");
+      if (isDesktopShell()) void invokeDesktop<void>("close_website_review").catch(() => {});
     };
   }, []);
 
