@@ -1301,9 +1301,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--text);
   border-color: var(--border-strong);
 }
-.statusbar-pill.muted {
-  color: var(--faint);
-}
 .statusbar-follow.active {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));

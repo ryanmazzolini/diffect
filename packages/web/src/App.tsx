@@ -78,6 +78,15 @@ interface StoredSelection {
   worktree: string | null;
   target: string;
 }
+type PendingFollow = DiffChangedPayload & {
+  repo: string;
+  path: string;
+  minRefreshSeq: number;
+};
+interface ReadyFollow {
+  request: PendingFollow;
+  diff: RepoDiff;
+}
 interface DeepLinkSelection extends StoredSelection {
   workspacePath: string | null;
   repo: string | null;
@@ -227,10 +236,44 @@ const LEGACY_KEY = "__legacy__";
 // whose selection is already loaded.
 const selSig = (worktree: string | null, target: string) =>
   `${worktree ?? ""}::${target}`;
+const FIRST_DIFF_CHANGE_SELECTOR = [
+  ".cm-insertedLine",
+  ".cm-changedLine",
+  ".cm-inlineChangedLine",
+  ".cm-deletedChunk",
+  ".cm-deletedLine",
+].join(", ");
 // CSS.escape guard for the rare attribute selector (a repo name with a quote or
 // backslash); falls back to the raw string where CSS.escape is unavailable.
 function cssEscape(s: string): string {
   return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s;
+}
+function scrollFileIntoView(
+  repo: string,
+  path: string,
+  focusFirstChange = false,
+  stillCurrent: () => boolean = () => true,
+): void {
+  if (!stillCurrent()) return;
+  const file = document.getElementById(fileElementId(repo, path));
+  file?.scrollIntoView({ block: "start" });
+  if (!focusFirstChange) return;
+
+  let attempts = 0;
+  const focusChange = () => {
+    if (!stillCurrent()) return;
+    const currentFile = document.getElementById(fileElementId(repo, path));
+    const firstChange = currentFile?.querySelector<HTMLElement>(FIRST_DIFF_CHANGE_SELECTOR);
+    if (firstChange) {
+      firstChange.scrollIntoView({ block: "center" });
+      return;
+    }
+    // Follow can select a file before scroll-windowing, file content fetch, and
+    // lazy CodeMirror mount have all settled. Retry briefly so the landing point
+    // is the first hunk, not only the file header.
+    if (attempts++ < 12) window.setTimeout(focusChange, 75);
+  };
+  window.requestAnimationFrame(focusChange);
 }
 function basename(p: string): string {
   const parts = p.split(/[/\\]/).filter(Boolean);
@@ -455,13 +498,18 @@ export function App() {
   );
   const diffPaneRef = useRef<HTMLElement>(null);
   const workbenchRef = useRef<HTMLDivElement>(null);
+  // Invalidates delayed first-hunk scroll attempts when a newer follow event or
+  // manual file selection wins. Without this token, an older retry can yank the
+  // viewport back to the previous file after the user has moved on.
+  const fileScrollGenerationRef = useRef(0);
   const programmaticRepoRef = useRef<string | null>(null);
   const programmaticRepoTimerRef = useRef<number | null>(null);
   const programmaticFileRef = useRef<string | null>(null);
   const programmaticFileTimerRef = useRef<number | null>(null);
   const followModeRef = useRef(followMode);
   followModeRef.current = followMode;
-  const pendingFollowRef = useRef<DiffChangedPayload | null>(null);
+  const pendingFollowRef = useRef<PendingFollow | null>(null);
+  const [readyFollow, setReadyFollow] = useState<ReadyFollow | null>(null);
 
   // Active-repo projection of the per-repo maps. Every reader below (memos,
   // effects, render, child props) uses these scalars exactly as before the lift,
@@ -493,6 +541,9 @@ export function App() {
     [activeWorkspacePath, entries, repo],
   );
   const visibleRepos = activeEntry?.repos ?? (activeWorkspacePath ? [] : workspace?.repos ?? []);
+  const followAvailable = visibleRepos.some((visibleRepo) =>
+    isFollowableTarget(selections.get(visibleRepo.name)?.target ?? DEFAULT_TARGET),
+  );
   const visibleWorkspace = useMemo<WorkspaceInfo | null>(
     () =>
       workspace
@@ -650,6 +701,7 @@ export function App() {
 
   const selectFile = useCallback(
     (path: string) => {
+      fileScrollGenerationRef.current += 1;
       const match = diff?.files.find((f) => f.path === path || f.oldPath === path);
       const scrollPath = match?.path ?? path;
       lockProgrammaticFile(scrollPath);
@@ -658,9 +710,7 @@ export function App() {
       if (match && repo) {
         setPreviewFile(null);
         setSpacePreviewFile(null);
-        document
-          .getElementById(fileElementId(repo, scrollPath))
-          ?.scrollIntoView({ block: "start" });
+        scrollFileIntoView(repo, scrollPath);
       } else {
         setSpacePreviewFile(null);
         setPreviewFile(path);
@@ -671,7 +721,8 @@ export function App() {
   );
 
   const selectTreeFile = useCallback(
-    (fileRepo: string | null, path: string) => {
+    (fileRepo: string | null, path: string, options: { focusFirstChange?: boolean } = {}) => {
+      const scrollGeneration = ++fileScrollGenerationRef.current;
       if (fileRepo === null) {
         setSpacePreviewFile(path);
         setPreviewFile(null);
@@ -692,11 +743,14 @@ export function App() {
       setSpacePreviewFile(null);
       if (match) {
         setPreviewFile(null);
-        requestAnimationFrame(() => {
-          document
-            .getElementById(fileElementId(fileRepo, scrollPath))
-            ?.scrollIntoView({ block: "start" });
-        });
+        requestAnimationFrame(() =>
+          scrollFileIntoView(
+            fileRepo,
+            scrollPath,
+            options.focusFirstChange,
+            () => fileScrollGenerationRef.current === scrollGeneration,
+          ),
+        );
       } else {
         setPreviewFile(path);
         diffPaneRef.current?.scrollTo({ top: 0 });
@@ -706,28 +760,20 @@ export function App() {
   );
 
   useEffect(() => {
-    const pending = pendingFollowRef.current;
-    if (!pending?.repo || !pending.path) return;
-    if (!visibleRepos.some((r) => r.name === pending.repo)) {
-      pendingFollowRef.current = null;
-      return;
-    }
-    const sel = selections.get(pending.repo) ?? { worktree: null, target: DEFAULT_TARGET };
-    if ((pending.worktree ?? null) !== sel.worktree || !isFollowableTarget(sel.target)) {
-      pendingFollowRef.current = null;
-      return;
-    }
-    const changedDiff = diffs.get(pending.repo);
-    if (!changedDiff) return;
-    const match = changedDiff.files.find(
-      (f) => f.path === pending.path || f.oldPath === pending.path,
+    if (!readyFollow) return;
+    setReadyFollow(null);
+    const { request, diff: refreshedDiff } = readyFollow;
+    if (!followModeRef.current || !visibleRepos.some((r) => r.name === request.repo)) return;
+    const sel = selections.get(request.repo) ?? { worktree: null, target: DEFAULT_TARGET };
+    if ((request.worktree ?? null) !== sel.worktree || !isFollowableTarget(sel.target)) return;
+    const match = refreshedDiff.files.find(
+      (f) => f.path === request.path || f.oldPath === request.path,
     );
-    pendingFollowRef.current = null;
     if (!match) return;
     setMainTab("diff");
-    selectTreeFile(pending.repo, match.path);
+    selectTreeFile(request.repo, match.path, { focusFirstChange: true });
     setLive(`Following ${match.path}`);
-  }, [diffs, selections, selectTreeFile, visibleRepos]);
+  }, [readyFollow, selections, selectTreeFile, visibleRepos]);
 
   const scrollThreadIntoView = useCallback((threadId: string) => {
     let attempts = 0;
@@ -1013,6 +1059,14 @@ export function App() {
               : new Map(prev).set(forRepo, reconciled);
           });
           setError(null);
+          const pendingFollow = pendingFollowRef.current;
+          if (
+            pendingFollow?.repo === forRepo &&
+            seq >= pendingFollow.minRefreshSeq
+          ) {
+            pendingFollowRef.current = null;
+            setReadyFollow({ request: pendingFollow, diff: next });
+          }
           loadedSelRef.current.set(
             forRepo,
             `${selSig(sel.worktree, sel.target)}::ignored=${showIgnoredFiles ? "1" : "0"}`,
@@ -1026,6 +1080,10 @@ export function App() {
           // Retire the optimistic highlight so it can't pin the sidebar/filter to a
           // session whose diff never loads; leave loadedSelRef unset so a re-click
           // (reselectTick) retries instead of being skipped as already-loaded.
+          const pendingFollow = pendingFollowRef.current;
+          if (pendingFollow?.repo === forRepo && seq >= pendingFollow.minRefreshSeq) {
+            pendingFollowRef.current = null;
+          }
           setPendingFor(forRepo, null);
         }
       }
@@ -1033,7 +1091,8 @@ export function App() {
     [setPendingFor, showIgnoredFiles],
   );
   // Refresh only the repo/worktree invalidated by a filesystem event. Older or
-  // deliberately unscoped events still fall back to all visible repos.
+  // deliberately unscoped events still fall back to all visible repos. Follow
+  // uses the same payload as a navigation hint after this source-of-truth reload.
   const refreshDiffsForEvent = useCallback((payload: DiffChangedPayload) => {
     const repos = workspaceRef.current?.repos ?? [];
     const affected = payload.repo
@@ -1209,9 +1268,11 @@ export function App() {
 
   // Load the focused repo's diff first, then hydrate sibling modules shortly
   // after. Workspace switching should show the selected repo promptly instead of
-  // waiting behind every repo in a multi-repo space.
+  // waiting behind every repo in a multi-repo space. Wait for persisted UI state
+  // before the first load so a restored compare target does not briefly flash
+  // the default work diff.
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace || !uiStateLoaded) return;
     const forced = lastReselectRef.current !== reselectTick;
     lastReselectRef.current = reselectTick;
     const pending = visibleRepos.filter((r) => {
@@ -1238,7 +1299,16 @@ export function App() {
     if (rest.length === 0) return;
     const timer = window.setTimeout(() => rest.forEach(refresh), 150);
     return () => window.clearTimeout(timer);
-  }, [workspace, visibleRepos, repo, selections, reselectTick, refreshDiffFor, showIgnoredFiles]);
+  }, [
+    workspace,
+    uiStateLoaded,
+    visibleRepos,
+    repo,
+    selections,
+    reselectTick,
+    refreshDiffFor,
+    showIgnoredFiles,
+  ]);
 
   const sidebarFiles = useMemo(() => diff?.files ?? EMPTY_FILES, [diff]);
   const diffFilePathsKey = useMemo(
@@ -1436,7 +1506,12 @@ export function App() {
             target: DEFAULT_TARGET,
           };
           if ((payload.worktree ?? null) === sel.worktree && isFollowableTarget(sel.target)) {
-            pendingFollowRef.current = payload;
+            pendingFollowRef.current = {
+              ...payload,
+              repo: payload.repo,
+              path: payload.path,
+              minRefreshSeq: (diffSeqs.current.get(payload.repo) ?? 0) + 1,
+            };
           }
         }
         refreshDiffSoon(payload);
@@ -2133,6 +2208,7 @@ export function App() {
         filePath={spacePreviewFile ?? activeFile}
         mode={spacePreviewFile ? "space" : "diff"}
         follow={followMode}
+        followAvailable={followAvailable}
         onToggleFollow={toggleFollowMode}
       />
     </div>

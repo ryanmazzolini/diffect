@@ -121,6 +121,37 @@ test("selecting a repo in the sidebar focuses its module", async ({ page }) => {
   await expect(page.locator(".module.focused")).toHaveCount(1);
 });
 
+test("desktop follow mode focuses the changed repo and hunk", async ({ page }) => {
+  await page.goto("/?shell=desktop");
+  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".tree-repo", { hasText: "alpha" }).click();
+  await expect(page.locator('.module[data-repo="alpha"]')).toHaveClass(/focused/);
+
+  await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((r) => r.json());
+    const repo = workspace.repos.find((r: { name: string }) => r.name === "beta")?.name;
+    if (!repo) throw new Error("beta repo missing");
+    const path = "beta.js";
+    const q = new URLSearchParams({ path, target: "work" });
+    const content = await fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`).then((r) =>
+      r.json(),
+    );
+    const next = content.new.replace("TODO beta", "TODO followed beta");
+    const res = await fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: next }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  });
+
+  await expect(page.locator('.module[data-repo="beta"]')).toHaveClass(/focused/);
+  await expect(page.locator(".tree-file.active")).toContainText("beta.js");
+  await expect(
+    page.locator('.file[data-path="beta.js"] .cm-insertedLine, .file[data-path="beta.js"] .cm-changedLine').first(),
+  ).toBeInViewport();
+});
+
 test("a comment posted in a module is scoped to that repo", async ({ page }) => {
   await page.goto("/");
   const beta = page.locator('.module[data-repo="beta"]');

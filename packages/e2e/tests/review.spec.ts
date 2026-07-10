@@ -57,6 +57,30 @@ test("desktop follow mode jumps to the changed file", async ({ page }) => {
   });
 
   await expect(page.locator(".tree-file.active")).toContainText("calc.js");
+  await expect(
+    page.locator('.file[data-path="calc.js"] .cm-insertedLine, .file[data-path="calc.js"] .cm-changedLine').first(),
+  ).toBeInViewport();
+
+  // Follow consumes the refreshed event even when the diff is semantically
+  // unchanged and the live-refresh reconciler preserves the existing object.
+  await page.locator(".tree-file", { hasText: "math.js" }).click();
+  await expect(page.locator(".tree-file.active")).toContainText("math.js");
+  await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((r) => r.json());
+    const repo = workspace.repos[0].name;
+    const path = "calc.js";
+    const q = new URLSearchParams({ path, target: "work" });
+    const content = await fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`).then((r) =>
+      r.json(),
+    );
+    const res = await fetch(`/repos/${encodeURIComponent(repo)}/file/content?${q}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: content.new }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  });
+  await expect(page.locator(".tree-file.active")).toContainText("calc.js");
 });
 
 test("thread pane comments jump to their inline thread", async ({ page }) => {

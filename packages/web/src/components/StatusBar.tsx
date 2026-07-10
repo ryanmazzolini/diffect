@@ -5,6 +5,7 @@ interface Props {
   filePath: string | null;
   mode: "diff" | "space";
   follow: boolean;
+  followAvailable: boolean;
   onToggleFollow: () => void;
 }
 
@@ -13,9 +14,16 @@ function pathParts(path: string): { dir: string | null; file: string } {
   return { dir: parts.slice(0, -1).join("/") || null, file: parts.at(-1) ?? path };
 }
 
-export function StatusBar({ repoLabel, filePath, mode, follow, onToggleFollow }: Props) {
+export function StatusBar({ repoLabel, filePath, mode, follow, followAvailable, onToggleFollow }: Props) {
   const parts = filePath ? pathParts(filePath) : null;
   const crumb = filePath ? [repoLabel, filePath].filter(Boolean).join(" / ") : repoLabel;
+  const followActive = follow && followAvailable;
+  const followLabel = follow && !followAvailable ? "Follow paused" : "Follow changes";
+  const followTitle = followAvailable
+    ? follow
+      ? "Stop following changed files"
+      : "Follow changed files"
+    : "Follow works only with working tree or unstaged targets";
   return (
     <footer className="statusbar" aria-label="Review status">
       <div className="statusbar-left">
@@ -40,17 +48,14 @@ export function StatusBar({ repoLabel, filePath, mode, follow, onToggleFollow }:
       <div className="statusbar-right">
         <button
           type="button"
-          className={`statusbar-pill statusbar-follow${follow ? " active" : ""}`}
+          className={`statusbar-pill statusbar-follow${followActive ? " active" : ""}`}
           aria-pressed={follow}
-          title={follow ? "Stop following changed files" : "Follow changed files"}
+          title={followTitle}
           onClick={onToggleFollow}
         >
-          <Icon name={follow ? "eye" : "eye-closed"} size={12} className="statusbar-follow-icon" />
-          Follow changes
+          <Icon name={followActive ? "eye" : "eye-closed"} size={12} className="statusbar-follow-icon" />
+          {followLabel}
         </button>
-        <span className="statusbar-pill muted" title="Terminal drawer planned for herdr integration">
-          Terminal ⌥`
-        </span>
       </div>
     </footer>
   );
