@@ -245,9 +245,7 @@ async function workspaceRoutes(
 ): Promise<boolean> {
   if (method === "GET" && path === "/workspace") {
     const requested = url.searchParams.get("workspace");
-    const workspace = requested
-      ? ctx.workspaces.find((candidate) => resolve(candidate.root) === resolve(requested))
-      : ctx.ws;
+    const workspace = requested ? workspaceView(ctx, requested) : ctx.ws;
     if (!workspace) {
       sendJson(res, 404, { error: `unknown workspace: ${requested}` });
       return true;
@@ -265,6 +263,18 @@ async function workspaceRoutes(
     return mutateWorkspaceRoute(ctx, req, res, method, url.searchParams);
   }
   return false;
+}
+
+function workspaceView(ctx: RouteContext, requested: string): Workspace | null {
+  const root = resolve(requested);
+  const source = ctx.workspaces.find((candidate) => resolve(candidate.root) === root);
+  if (!source) return null;
+  // Repo API paths always resolve against the aggregate workspace (`ctx.ws`),
+  // where colliding repo basenames are globally deduped. Return those same names
+  // for a scoped workspace summary so the browser does not request `/repos/api`
+  // when the reachable route is `/repos/team-b-api`.
+  const repos = ctx.ws.repos.filter((repo) => repo.workspacePath && resolve(repo.workspacePath) === root);
+  return { root: source.root, repos };
 }
 
 async function mutateWorkspaceRoute(

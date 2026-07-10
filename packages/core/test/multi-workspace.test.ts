@@ -135,8 +135,17 @@ describe("multi-workspace daemon", () => {
       expect(names).toHaveLength(2);
       expect(new Set(names).size).toBe(2); // globally unique
 
-      // File a thread in the second (renamed) repo and filter by its current name.
+      // A scoped workspace summary must still use the aggregate repo name because
+      // `/repos/:repo/*` routes resolve against the globally deduped aggregate.
+      const scoped = await (
+        await fetch(`${base}/workspace?workspace=${encodeURIComponent(apiB)}`)
+      ).json();
       const second = names.find((n) => n !== "api") ?? names[1];
+      expect(scoped.root).toBe(apiB);
+      expect(scoped.repos.map((r: { name: string }) => r.name)).toEqual([second]);
+      expect((await fetch(`${base}/repos/${encodeURIComponent(second)}/diff?target=work`)).status).toBe(200);
+
+      // File a thread in the second (renamed) repo and filter by its current name.
       const post = await fetch(`${base}/threads`, {
         method: "POST",
         headers: { "content-type": "application/json" },
