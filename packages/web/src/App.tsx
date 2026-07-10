@@ -61,6 +61,19 @@ const EMPTY_FILES: DiffFile[] = [];
 // A repo's default review selection on first visit: its primary checkout, work target.
 const DEFAULT_TARGET = "work";
 const FOLLOW_MODE_KEY = "diffect-follow-mode";
+
+function reconcileRepoDiff(previous: RepoDiff | undefined, next: RepoDiff): RepoDiff {
+  if (!previous) return next;
+  if (JSON.stringify(previous) === JSON.stringify(next)) return previous;
+
+  const previousFiles = new Map(previous.files.map((file) => [file.path, file]));
+  const files = next.files.map((file) => {
+    const existing = previousFiles.get(file.path);
+    return existing && JSON.stringify(existing) === JSON.stringify(file) ? existing : file;
+  });
+  return { ...next, files };
+}
+
 interface StoredSelection {
   worktree: string | null;
   target: string;
@@ -993,7 +1006,12 @@ export function App() {
           includeIgnored: showIgnoredFiles,
         });
         if (seq === diffSeqs.current.get(forRepo)) {
-          setDiffs((prev) => new Map(prev).set(forRepo, next));
+          setDiffs((prev) => {
+            const reconciled = reconcileRepoDiff(prev.get(forRepo), next);
+            return reconciled === prev.get(forRepo)
+              ? prev
+              : new Map(prev).set(forRepo, reconciled);
+          });
           setError(null);
           loadedSelRef.current.set(
             forRepo,
@@ -1014,16 +1032,20 @@ export function App() {
     },
     [setPendingFor, showIgnoredFiles],
   );
-  // Refresh every repo's diff against its current selection — the SSE diff.changed
-  // fan-out (events carry no repo, so any module may have changed). Reads the
-  // latest workspace/selections from refs so it stays stable across selections.
-  const refreshAllDiffs = useCallback(() => {
-    for (const r of workspaceRef.current?.repos ?? []) {
-      const sel = selectionsRef.current.get(r.name) ?? {
+  // Refresh only the repo/worktree invalidated by a filesystem event. Older or
+  // deliberately unscoped events still fall back to all visible repos.
+  const refreshDiffsForEvent = useCallback((payload: DiffChangedPayload) => {
+    const repos = workspaceRef.current?.repos ?? [];
+    const affected = payload.repo
+      ? repos.filter((candidate) => candidate.name === payload.repo)
+      : repos;
+    for (const candidate of affected) {
+      const sel = selectionsRef.current.get(candidate.name) ?? {
         worktree: null,
         target: DEFAULT_TARGET,
       };
-      void refreshDiffFor(r.name, sel);
+      if ("worktree" in payload && (payload.worktree ?? null) !== sel.worktree) continue;
+      void refreshDiffFor(candidate.name, sel);
     }
   }, [refreshDiffFor]);
 
@@ -1219,6 +1241,10 @@ export function App() {
   }, [workspace, visibleRepos, repo, selections, reselectTick, refreshDiffFor, showIgnoredFiles]);
 
   const sidebarFiles = useMemo(() => diff?.files ?? EMPTY_FILES, [diff]);
+  const diffFilePathsKey = useMemo(
+    () => sidebarFiles.map((file) => file.path).join("\0"),
+    [sidebarFiles],
+  );
   // Render the diff in the same order the sidebar tree shows, so the active-file
   // highlight walks the tree top-to-bottom as you scroll instead of jumping.
   const orderedFiles = useMemo(() => orderedDiffFiles(sidebarFiles), [sidebarFiles]);
@@ -1287,7 +1313,7 @@ export function App() {
     );
     headers.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [diff, repo, previewFile]);
+  }, [diffFilePathsKey, repo, previewFile]);
 
   // Module scroll-spy (stacked layout only): as the shared container scrolls,
   // promote the topmost visible module to the active repo so the sidebar highlight,
@@ -1354,25 +1380,47 @@ export function App() {
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
   // selector changed would tear the EventSource down and drop events that fire
   // during the reconnect gap.
-  const refreshers = useRef({ refreshThreads, refreshAllDiffs, refreshWorkspace, loadWorkspaces });
-  refreshers.current = { refreshThreads, refreshAllDiffs, refreshWorkspace, loadWorkspaces };
-  // A branch checkout writes the working tree (→ diff.changed) without a
-  // workspace.changed, so the sidebar's session labels go stale unless we
-  // re-derive them. But re-deriving re-shells git over *every* repo + worktree,
-  // and diff.changed is debounced only 120ms server-side with no client debounce —
-  // a burst of edits would spawn a git storm. So coalesce the workspace refresh
-  // to a trailing debounce; the diff itself still refreshes immediately below.
-  const workspaceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const refreshWorkspaceSoon = useCallback(() => {
-    if (workspaceTimer.current) clearTimeout(workspaceTimer.current);
-    workspaceTimer.current = setTimeout(() => {
-      workspaceTimer.current = null;
-      refreshers.current.refreshWorkspace();
-      refreshers.current.loadWorkspaces();
-    }, 750);
+  const refreshers = useRef({ refreshThreads, refreshDiffsForEvent, refreshWorkspace, loadWorkspaces });
+  refreshers.current = { refreshThreads, refreshDiffsForEvent, refreshWorkspace, loadWorkspaces };
+  // Filesystem events are already debounced by the daemon; coalesce once more
+  // in the browser so repeated external saves produce one render per settled
+  // repo/worktree rather than repainting on every intermediate write.
+  const diffRefreshTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const queuedDiffPayloads = useRef<Map<string, DiffChangedPayload>>(new Map());
+  const refreshDiffSoon = useCallback((payload: DiffChangedPayload) => {
+    const timers = diffRefreshTimers.current;
+    const queued = queuedDiffPayloads.current;
+    const key = payload.repo ?? "*";
+
+    if (!payload.repo) {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      queued.clear();
+      queued.set(key, payload);
+    } else {
+      if (queued.has("*")) return;
+      const previous = queued.get(key);
+      const sameWorktree =
+        previous &&
+        "worktree" in previous &&
+        "worktree" in payload &&
+        (previous.worktree ?? null) === (payload.worktree ?? null);
+      queued.set(key, !previous || sameWorktree ? payload : { repo: payload.repo });
+    }
+
+    const existing = timers.get(key);
+    if (existing) clearTimeout(existing);
+    timers.set(key, setTimeout(() => {
+      timers.delete(key);
+      const next = queued.get(key);
+      queued.delete(key);
+      if (next) refreshers.current.refreshDiffsForEvent(next);
+    }, 250));
   }, []);
   useEffect(() => () => {
-    if (workspaceTimer.current) clearTimeout(workspaceTimer.current);
+    for (const timer of diffRefreshTimers.current.values()) clearTimeout(timer);
+    diffRefreshTimers.current.clear();
+    queuedDiffPayloads.current.clear();
   }, []);
   useEffect(() => {
     return api.subscribe((type, payload) => {
@@ -1391,8 +1439,7 @@ export function App() {
             pendingFollowRef.current = payload;
           }
         }
-        r.refreshAllDiffs();
-        refreshWorkspaceSoon();
+        refreshDiffSoon(payload);
         setLive("Diff updated");
       } else if (type === DAEMON_EVENTS.workspaceChanged) {
         // Git HEAD/ref changes affect branch labels, PR links, and picker refs.
@@ -1403,7 +1450,7 @@ export function App() {
         setLive("Workspaces updated");
       }
     });
-  }, [refreshWorkspaceSoon]);
+  }, [refreshDiffSoon]);
 
   // Derived view state, memoized so the heavy panels (diff/sidebar/threads) only
   // re-render when their own inputs change — not on every scroll-spy active-file

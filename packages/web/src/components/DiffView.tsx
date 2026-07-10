@@ -264,6 +264,10 @@ const FileDiff = memo(function FileDiff({
   );
   const skipsDeletedSyntaxHighlight =
     canUseCodeMirror && hasDeletedBlockOver(file, deletedSyntaxHighlightMaxLength);
+  const fileRevision = useMemo(
+    () => JSON.stringify([file.status, file.oldPath, file.hunks]),
+    [file],
+  );
 
   const saveCodeMirrorContent = useCallback(
     async (nextContent: string) => {
@@ -291,16 +295,16 @@ const FileDiff = memo(function FileDiff({
   const bodyRef = useRef<HTMLDivElement>(null);
   const measuredHeight = useRef<number | null>(null);
   const [near, setNear] = useState(false);
-  // Reset cached content + measured height when the diff identity changes (new
-  // target/file/worktree). FileDiff is keyed by path, so a target switch reuses
-  // the instance — without this, the next diff would briefly show the previous
-  // file's body or reserve its (wrong) placeholder height. Keyed on scalars so
-  // an unrelated new-but-equal `file` reference can't trigger a needless refetch.
+  // Reset cached content only when the file identity changes. A target switch
+  // keeps the previous document mounted until the new target's content arrives,
+  // avoiding a blank editor and layout jump between equivalent local targets.
   useEffect(() => {
     setContent(null);
+    measuredHeight.current = null;
+  }, [repo, worktree, file.path, file.oldPath]);
+  useEffect(() => {
     setCodeMirrorModeState("review");
     setCodeMirrorDirty(false);
-    measuredHeight.current = null;
   }, [repo, worktree, target, file.path, file.oldPath]);
   useEffect(() => {
     const el = fileRef.current;
@@ -316,21 +320,23 @@ const FileDiff = memo(function FileDiff({
     io.observe(el);
     return () => io.disconnect();
   }, []);
-  // Prefetch content as soon as the file is near the viewport — even while it's
-  // still collapsed — so expanding a file is instant instead of a blank-then-pop.
-  // Fetches once per identity (content reset clears it).
+  // Fetch content when the file first nears the viewport and whenever its diff
+  // revision changes. Keep the previous document mounted while revalidating so
+  // external saves do not blank the editor between filesystem events and reads.
   const mounted = !collapsed && near;
   useEffect(() => {
-    if (!near || content !== null) return;
+    if (!near) return;
     let live = true;
     api
       .fileContent(repo, { path: file.path, oldPath: file.oldPath, target, worktree })
       .then((c) => live && setContent(c))
-      .catch(() => live && setContent("error"));
+      .catch(() => {
+        if (live) setContent((current) => current ?? "error");
+      });
     return () => {
       live = false;
     };
-  }, [near, content, repo, worktree, target, file.path, file.oldPath]);
+  }, [near, repo, worktree, target, file.path, file.oldPath, fileRevision]);
 
   // The body only renders once content has arrived and the selected renderer is ready.
   const showBody = mounted && content !== null && canUseCodeMirror;

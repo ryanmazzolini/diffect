@@ -18,8 +18,8 @@ export type { DaemonEventType };
 export class EventHub {
   private clients = new Set<ServerResponse>();
   private watchers: FSWatcher[] = [];
-  private timers = new Map<DaemonEventType, NodeJS.Timeout>();
-  private payloads = new Map<DaemonEventType, DaemonEventPayload>();
+  private timers = new Map<string, NodeJS.Timeout>();
+  private payloads = new Map<string, DaemonEventPayload>();
   private started = false;
 
   constructor(private ws: Workspace) {}
@@ -70,8 +70,8 @@ export class EventHub {
     for (const repo of this.ws.repos) {
       this.addWatch(repo.commonDir, (filename) => {
         if (!isGitStatePath(filename)) return;
-        this.emit(DAEMON_EVENTS.diffChanged);
-        this.emit(DAEMON_EVENTS.workspaceChanged);
+        this.emit(DAEMON_EVENTS.diffChanged, { repo: repo.name });
+        this.emit(DAEMON_EVENTS.workspaceChanged, { repo: repo.name });
       });
       for (const wt of repo.worktrees) {
         this.addWatch(wt.root, (filename) => {
@@ -128,18 +128,19 @@ export class EventHub {
     this.emit(type, payload);
   }
 
-  /** Debounced fan-out: collapse a burst of fs events into one notification. */
+  /** Debounced fan-out: collapse filesystem bursts per affected repo/worktree. */
   private emit(type: DaemonEventType, payload: DaemonEventPayload = {}): void {
-    const existing = this.timers.get(type);
+    const key = eventDebounceKey(type, payload);
+    const existing = this.timers.get(key);
     if (existing) clearTimeout(existing);
-    const previous = this.payloads.get(type);
-    this.payloads.set(type, payload.path || !previous?.path ? payload : previous);
+    const previous = this.payloads.get(key);
+    this.payloads.set(key, payload.path || !previous?.path ? payload : previous);
     this.timers.set(
-      type,
+      key,
       setTimeout(() => {
-        this.timers.delete(type);
-        const data = this.payloads.get(type) ?? {};
-        this.payloads.delete(type);
+        this.timers.delete(key);
+        const data = this.payloads.get(key) ?? {};
+        this.payloads.delete(key);
         this.broadcast(type, data);
       }, 120),
     );
@@ -162,6 +163,12 @@ export class EventHub {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
   }
+}
+
+function eventDebounceKey(type: DaemonEventType, payload: DaemonEventPayload): string {
+  if (type !== DAEMON_EVENTS.diffChanged || !payload.repo) return type;
+  const worktree = "worktree" in payload ? (payload.worktree ?? "") : "*";
+  return `${type}\0${payload.repo}\0${worktree}`;
 }
 
 /** Paths under the shared git dir that affect labels, refs, or PR links. */

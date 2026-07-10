@@ -1,5 +1,29 @@
-import { test, expect } from "./fixtures.js";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { test, expect, type Page } from "./fixtures.js";
 import { openCmCommentForm } from "./helpers.js";
+
+async function installScrollSpyCounter(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const state = window as typeof window & { __diffectScrollSpyObservers: number };
+    const NativeIntersectionObserver = window.IntersectionObserver;
+    state.__diffectScrollSpyObservers = 0;
+    window.IntersectionObserver = class extends NativeIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super(callback, options);
+        if (options?.rootMargin === "0px 0px -70% 0px") {
+          state.__diffectScrollSpyObservers += 1;
+        }
+      }
+    };
+  });
+}
+
+async function scrollSpyCount(page: Page): Promise<number> {
+  return page.evaluate(() =>
+    (window as typeof window & { __diffectScrollSpyObservers: number }).__diffectScrollSpyObservers
+  );
+}
 
 /**
  * The multi-repo "modules view". This project runs against a daemon seeded by
@@ -158,6 +182,128 @@ test("multi-repo topbar sheds per-repo controls", async ({ page }) => {
   await expect(page.locator(".rheader .target-picker")).toHaveCount(0);
   await expect(page.locator(".rheader .metaitem")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Options" })).toBeVisible();
+});
+
+test("a disk update refreshes only the affected repo", async ({ page }) => {
+  await installScrollSpyCounter(page);
+  await page.goto("/");
+  await expect(page.locator('.module[data-repo="alpha"] .file-path', { hasText: "alpha.js" })).toBeVisible();
+  await expect(page.locator('.module[data-repo="beta"] .file-path', { hasText: "beta.js" })).toBeVisible();
+  const alphaEditor = page.locator('.module[data-repo="alpha"] .file[data-path="alpha.js"] .cm-content');
+  await expect(alphaEditor).toContainText("TODO alpha");
+  await alphaEditor.evaluate((element) => {
+    element.setAttribute("data-refresh-sentinel", "stable");
+  });
+  const scrollSpyBaseline = await scrollSpyCount(page);
+
+  const workspace = await page.request.get("/workspace").then((response) => response.json()) as {
+    repos: Array<{ name: string; root: string }>;
+  };
+  const alpha = workspace.repos.find((repo) => repo.name === "alpha");
+  if (!alpha) throw new Error("alpha fixture repo missing");
+
+  const refreshedRepos: string[] = [];
+  const metadataRequests: string[] = [];
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname;
+    const match = pathname.match(/^\/repos\/([^/]+)\/diff$/);
+    if (match?.[1]) refreshedRepos.push(decodeURIComponent(match[1]));
+    if (pathname === "/workspace" || pathname === "/workspaces") metadataRequests.push(pathname);
+  });
+
+  const file = join(alpha.root, "alpha.js");
+  const original = await readFile(file, "utf8");
+  for (const replacement of ["TODO first", "TODO second", "TODO final"]) {
+    await writeFile(file, original.replace("TODO alpha", replacement));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  await expect.poll(() => refreshedRepos.filter((repo) => repo === "alpha").length).toBeGreaterThan(0);
+  await page.waitForTimeout(1_000);
+  expect(refreshedRepos.filter((repo) => repo === "alpha")).toHaveLength(1);
+  expect(refreshedRepos.filter((repo) => repo === "beta")).toHaveLength(0);
+  expect(metadataRequests).toHaveLength(0);
+  await expect(alphaEditor).toContainText("TODO final");
+  await expect(alphaEditor).toHaveAttribute("data-refresh-sentinel", "stable");
+  await expect.poll(() => scrollSpyCount(page)).toBe(scrollSpyBaseline);
+
+  await page.getByRole("button", { name: "Options" }).click();
+  await page.getByRole("button", { name: "Split" }).click();
+  const splitEditor = page.getByRole("textbox", { name: "alpha.js new diff editor" });
+  await expect(splitEditor).toContainText("TODO final");
+  await splitEditor.evaluate((element) => {
+    element.setAttribute("data-refresh-sentinel", "stable");
+  });
+  await writeFile(file, original.replace("TODO alpha", "TODO split"));
+  await expect(splitEditor).toContainText("TODO split");
+  await expect(splitEditor).toHaveAttribute("data-refresh-sentinel", "stable");
+});
+
+test("a semantic no-op disk event leaves the active diff mounted", async ({ page }) => {
+  await installScrollSpyCounter(page);
+  await page.goto("/");
+  await expect(page.locator('.module[data-repo="alpha"] .file-path', { hasText: "alpha.js" })).toBeVisible();
+  await page.locator(".tree-repo", { hasText: "alpha" }).click();
+
+  const workspace = await page.request.get("/workspace").then((response) => response.json()) as {
+    repos: Array<{ name: string; root: string }>;
+  };
+  const alpha = workspace.repos.find((repo) => repo.name === "alpha");
+  if (!alpha) throw new Error("alpha fixture repo missing");
+  const baseline = await scrollSpyCount(page);
+
+  let refreshes = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/repos/alpha/diff") refreshes += 1;
+  });
+  const file = join(alpha.root, "alpha.js");
+  const content = await readFile(file, "utf8");
+  await writeFile(file, content);
+
+  await expect.poll(() => refreshes).toBeGreaterThan(0);
+  await page.waitForTimeout(300);
+  await expect.poll(() => scrollSpyCount(page)).toBe(baseline);
+});
+
+test("disk updates in one repo do not delay another repo", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('.module[data-repo="alpha"] .file-path', { hasText: "alpha.js" })).toBeVisible();
+  await expect(page.locator('.module[data-repo="beta"] .file-path', { hasText: "beta.js" })).toBeVisible();
+
+  const workspace = await page.request.get("/workspace").then((response) => response.json()) as {
+    repos: Array<{ name: string; root: string }>;
+  };
+  const alpha = workspace.repos.find((repo) => repo.name === "alpha");
+  const beta = workspace.repos.find((repo) => repo.name === "beta");
+  if (!alpha || !beta) throw new Error("multi-repo fixture missing");
+
+  const refreshedRepos: string[] = [];
+  page.on("request", (request) => {
+    const match = new URL(request.url()).pathname.match(/^\/repos\/([^/]+)\/diff$/);
+    if (match?.[1]) refreshedRepos.push(decodeURIComponent(match[1]));
+  });
+
+  const alphaFile = join(alpha.root, "alpha.js");
+  const betaFile = join(beta.root, "beta.js");
+  const [alphaContent, betaContent] = await Promise.all([
+    readFile(alphaFile, "utf8"),
+    readFile(betaFile, "utf8"),
+  ]);
+  await writeFile(betaFile, betaContent.replace("TODO beta", "TODO simultaneous"));
+  const alphaBurst = (async () => {
+    for (const replacement of ["TODO one", "TODO two", "TODO three", "TODO final"]) {
+      await writeFile(alphaFile, alphaContent.replace("TODO alpha", replacement));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  })();
+
+  // Alpha's continuing writes must not postpone beta's settled refresh.
+  await page.waitForTimeout(600);
+  expect(refreshedRepos.filter((repo) => repo === "beta")).toHaveLength(1);
+  await alphaBurst;
+  await expect.poll(() => new Set(refreshedRepos).size).toBe(2);
+  expect(refreshedRepos.filter((repo) => repo === "alpha")).toHaveLength(1);
+  expect(refreshedRepos.filter((repo) => repo === "beta")).toHaveLength(1);
 });
 
 test("a module's ref picker popover escapes the module scroll clip", async ({ page }) => {

@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -9,12 +8,21 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
-import { getChunks, getOriginalDoc, MergeView, unifiedMergeView } from "@codemirror/merge";
 import {
+  getChunks,
+  getOriginalDoc,
+  MergeView,
+  originalDocChangeEffect,
+  unifiedMergeView,
+} from "@codemirror/merge";
+import {
+  ChangeSet,
+  Compartment,
   EditorState,
   RangeSet,
   StateEffect,
   StateField,
+  type ChangeSpec,
   type Extension,
   type Range,
   type TransactionSpec,
@@ -253,6 +261,13 @@ export function CodeMirrorDiffBody({
   const viewRef = useRef<EditorView | null>(null);
   const mergeViewRef = useRef<MergeView | null>(null);
   const viewContextsRef = useRef<ViewContext[]>([]);
+  const anchorCompartmentsRef = useRef<Map<DiffSide, Compartment>>(new Map());
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  const splitRef = useRef(split);
+  splitRef.current = split;
   const savingRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -260,24 +275,26 @@ export function CodeMirrorDiffBody({
   const [selectedRange, setSelectedRange] = useState<SelectionComment | null>(null);
   const [commentRange, setCommentRange] = useState<SelectionComment | null>(null);
   const [viewVersion, setViewVersion] = useState(0);
-  const lineAnchorKey = useMemo(() => diffLineAnchorKey(file), [file]);
   const editableUnified = editable && !split;
-  // In edit mode the editor owns the document: a save echoes back through
-  // content.new and the SSE diff refresh changes the anchor key, and rebuilding
-  // the EditorView on either would reset scroll/cursor/undo mid-edit.
-  const newContentDep = editableUnified ? null : content.new;
-  const anchorKeyDep = editableUnified ? null : lineAnchorKey;
+  const anchorCompartment = useCallback((side: DiffSide) => {
+    let compartment = anchorCompartmentsRef.current.get(side);
+    if (!compartment) {
+      compartment = new Compartment();
+      anchorCompartmentsRef.current.set(side, compartment);
+    }
+    return compartment;
+  }, []);
 
   const saveCurrent = useCallback(async () => {
     const view = viewRef.current;
-    if (!view || split || savingRef.current) return;
+    if (!view || splitRef.current || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     setSaveMessage("");
     try {
-      await onSave(view.state.doc.toString());
+      await onSaveRef.current(view.state.doc.toString());
       setDirty(false);
-      onDirtyChange?.(false);
+      onDirtyChangeRef.current?.(false);
       setSaveMessage("Saved");
     } catch (e) {
       setSaveMessage(e instanceof Error ? e.message : "Save failed");
@@ -285,7 +302,7 @@ export function CodeMirrorDiffBody({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onDirtyChange, onSave]);
+  }, []);
 
   const closeSelectionComment = useCallback(() => {
     setSelectedRange(null);
@@ -328,7 +345,7 @@ export function CodeMirrorDiffBody({
     if (!host || oldText === null || newText === null) return;
 
     setDirty(false);
-    onDirtyChange?.(false);
+    onDirtyChangeRef.current?.(false);
     setSaveMessage("");
     setSelectedRange(null);
     setCommentRange(null);
@@ -346,8 +363,15 @@ export function CodeMirrorDiffBody({
           autocapitalize: "off",
           "aria-label": `${docPath} ${side === "old" ? "old" : "new"} diff editor`,
         }),
-        editableUnified ? lineNumbers() : cmLineNumbers(anchors, setSelectedRange, setCommentRange),
-        editableUnified ? [] : [cmCommentGutter(anchors, setSelectedRange, setCommentRange), cmHoverCommentHandle()],
+        anchorCompartment(side).of(
+          editableUnified
+            ? lineNumbers()
+            : [
+                cmLineNumbers(anchors, setSelectedRange, setCommentRange),
+                cmCommentGutter(anchors, setSelectedRange, setCommentRange),
+                cmHoverCommentHandle(),
+              ],
+        ),
         cmDecorations,
         cmGutterLineClasses,
         editableUnified ? [drawSelection(), singleSelectionOnly()] : [],
@@ -363,7 +387,7 @@ export function CodeMirrorDiffBody({
         EditorView.updateListener.of((update) => {
           if (editableUnified && update.docChanged) {
             setDirty(true);
-            onDirtyChange?.(true);
+            onDirtyChangeRef.current?.(true);
           }
         }),
         editableUnified ? history() : [],
@@ -459,10 +483,46 @@ export function CodeMirrorDiffBody({
       mergeViewRef.current = null;
       viewContextsRef.current = [];
     };
-    // Value-based deps on purpose: refreshAllDiffs() recreates every DiffFile
-    // object after any diff.changed event, and rebuilding on `file` identity
-    // would tear down every mounted editor (scroll jump) on each save.
-  }, [content.old, newContentDep, deletedSyntaxHighlightMaxLength, editable, editableUnified, file.path, file.oldPath, anchorKeyDep, onDirtyChange, saveCurrent, split, theme, wrap]);
+    // Content and hunk updates are synchronized into the existing views below.
+    // Rebuild only when editor configuration or file identity changes.
+  }, [anchorCompartment, deletedSyntaxHighlightMaxLength, editable, editableUnified, file.path, file.oldPath, saveCurrent, split, theme, wrap]);
+
+  useEffect(() => {
+    if (editableUnified || content.old === null || content.new === null) return;
+    const contexts = viewContextsRef.current;
+    if (contexts.length === 0) return;
+
+    for (const { side, view } of contexts) {
+      const nextText = side === "old" ? content.old : content.new;
+      const currentText = view.state.doc.toString();
+      const changes = minimalTextChange(currentText, nextText);
+      const anchors = side === "unified"
+        ? buildLineAnchors(file, countDocLines(nextText))
+        : buildSideLineAnchors(side, countDocLines(nextText), file);
+      const effects = [
+        anchorCompartment(side).reconfigure([
+          cmLineNumbers(anchors, setSelectedRange, setCommentRange),
+          cmCommentGutter(anchors, setSelectedRange, setCommentRange),
+          cmHoverCommentHandle(),
+        ]),
+      ];
+
+      if (side === "unified") {
+        const currentOriginal = getOriginalDoc(view.state).toString();
+        const originalChange = minimalTextChange(currentOriginal, content.old);
+        if (originalChange) {
+          effects.push(
+            originalDocChangeEffect(
+              view.state,
+              ChangeSet.of(originalChange, currentOriginal.length),
+            ),
+          );
+        }
+      }
+
+      view.dispatch({ changes: changes ?? undefined, effects });
+    }
+  }, [anchorCompartment, content.new, content.old, editableUnified, file, viewVersion]);
 
   useEffect(() => {
     const contexts = viewContextsRef.current;
@@ -490,7 +550,7 @@ export function CodeMirrorDiffBody({
       if (side === "unified") syncDeletedRangeHighlights(view, ranges);
       view.requestMeasure();
     }
-  }, [commentRange, editable, file, renderLineWidget, selectedRange, split, threads, viewVersion]);
+  }, [commentRange, content.new, content.old, editable, file, renderLineWidget, selectedRange, split, threads, viewVersion]);
 
   if (content.old === null || content.new === null) {
     return <div className="cm-diff-unavailable">CodeMirror preview needs readable old/new file content.</div>;
@@ -962,12 +1022,26 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
   return { old, new: next, targets, targetsByDocLine };
 }
 
-function diffLineAnchorKey(file: DiffFile): string {
-  return file.hunks
-    .map((hunk) =>
-      hunk.lines.map((line) => `${line.old ?? ""}/${line.new ?? ""}`).join(","),
-    )
-    .join("|");
+function minimalTextChange(current: string, next: string): ChangeSpec | null {
+  if (current === next) return null;
+  let prefix = 0;
+  const prefixLimit = Math.min(current.length, next.length);
+  while (prefix < prefixLimit && current[prefix] === next[prefix]) prefix += 1;
+
+  let suffix = 0;
+  const suffixLimit = Math.min(current.length - prefix, next.length - prefix);
+  while (
+    suffix < suffixLimit &&
+    current[current.length - suffix - 1] === next[next.length - suffix - 1]
+  ) {
+    suffix += 1;
+  }
+
+  return {
+    from: prefix,
+    to: current.length - suffix,
+    insert: next.slice(prefix, next.length - suffix),
+  };
 }
 
 function countDocLines(text: string): number {
