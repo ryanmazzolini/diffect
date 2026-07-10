@@ -1184,6 +1184,8 @@ async function codeMirrorLanguage(path: string): Promise<Extension> {
       return import("@codemirror/lang-python").then((m) => m.python());
     case "rs":
       return import("@codemirror/lang-rust").then((m) => m.rust());
+    case "gd":
+      return import("@gdquest/codemirror-gdscript").then((m) => m.gdscript());
     case "rb":
       return import("@codemirror/legacy-modes/mode/ruby").then((m) => StreamLanguage.define(m.ruby));
     case "gql":

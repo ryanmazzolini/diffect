@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { test, expect, type Locator, type Page } from "./fixtures.js";
@@ -52,6 +52,27 @@ async function withDeletedMathFile(page: Page, run: (file: Locator) => Promise<v
   }
 }
 
+async function withGdscriptFile(page: Page, run: () => Promise<void>): Promise<void> {
+  const repo = await fixtureRepo(page);
+  const path = join(repo.root, "player.gd");
+  await writeFile(
+    path,
+    `extends Node2D
+
+@export var speed: float = 42.0
+
+func _physics_process(delta: float) -> void:
+    position.x += speed * delta
+    await get_tree().process_frame
+`,
+  );
+  try {
+    await run();
+  } finally {
+    await rm(path, { force: true });
+  }
+}
+
 test("renders the default CodeMirror diff renderer", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".file-header").first()).toBeVisible();
@@ -79,6 +100,20 @@ test("loads GraphQL language support in the CodeMirror diff renderer", async ({ 
   await expect(file.locator(".cm-diff-host .cm-editor")).toBeVisible();
   await expect(file.locator(".cm-line", { hasText: "viewer" })).toBeVisible();
   await expect(file.locator(".cm-line span").first()).toBeVisible();
+});
+
+test("loads GDScript language support in the CodeMirror diff renderer", async ({ page }) => {
+  await withGdscriptFile(page, async () => {
+    await page.goto("/");
+    await page.locator(".tree-file", { hasText: "player.gd" }).click();
+
+    const file = page.locator('.file[data-path="player.gd"]');
+    const functionLine = file.locator(".cm-line", { hasText: "func _physics_process" });
+    const awaitLine = file.locator(".cm-line", { hasText: "await get_tree" });
+    await expect(file.locator(".cm-diff-host .cm-editor")).toBeVisible();
+    await expect(functionLine.locator("span").first()).toHaveText("func");
+    await expect(awaitLine.locator("span").first()).toHaveText("await");
+  });
 });
 
 test("explains when CodeMirror skips deleted syntax highlighting", async ({ page }) => {
