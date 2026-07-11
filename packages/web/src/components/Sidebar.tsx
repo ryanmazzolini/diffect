@@ -316,10 +316,14 @@ export const Sidebar = memo(function Sidebar({
                     <span className="tree-repo-copy">
                       <span className="tree-repo-name">{label}</span>
                       {primaryBranch && (
-                        <span className="tree-repo-branch" title={`On branch ${primaryBranch}`}>
-                          <Icon name="git-branch" size={11} className="repo-branch-icon" />
-                          {primaryBranch}
-                        </span>
+                        <>
+                          <span className="tree-repo-separator" aria-hidden="true">
+                            ·
+                          </span>
+                          <span className="tree-repo-branch" title={`On branch ${primaryBranch}`}>
+                            {primaryBranch}
+                          </span>
+                        </>
                       )}
                     </span>
                   </button>

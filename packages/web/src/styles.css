@@ -1622,10 +1622,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   transition: background-color var(--motion);
 }
 .tree-repo {
-  align-items: flex-start;
-  min-height: 38px;
-  padding-top: 5px;
-  padding-bottom: 5px;
+  align-items: center;
 }
 .tree-repo.active {
   background-color: var(--active);
@@ -1633,25 +1630,30 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .tree-repo-copy {
   display: flex;
+  align-items: baseline;
   min-width: 0;
   flex: 1;
-  flex-direction: column;
-  gap: 1px;
+  gap: 4px;
 }
 .tree-repo-name,
 .tree-repo-branch {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .tree-repo-name {
+  flex: 0 1 auto;
   color: var(--text);
   font-weight: 650;
 }
+.tree-repo-separator {
+  flex: none;
+  color: var(--faint);
+}
 .tree-repo-branch {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+  flex: 0 2 auto;
+  max-width: 40%;
   color: var(--muted);
   font-size: 11px;
   font-weight: 400;
@@ -2440,8 +2442,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 48px;
-  padding: 6px 14px 6px 0;
+  height: 38px;
+  padding: 0 14px 0 0;
 }
 .module.single .mh-line1 {
   padding-left: 14px;
@@ -2486,28 +2488,26 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .mh-repo {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 7px;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .mh-repo-main {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  max-width: 100%;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 .mh-repo .fork {
   color: var(--faint);
   flex: none;
 }
 .mh-branch {
-  max-width: 100%;
-  flex: 0 1 auto;
+  max-width: 180px;
+  flex: 0 2 auto;
   color: var(--faint);
-  line-height: 1.2;
 }
 .mod-name {
   font-weight: 700;
@@ -2558,7 +2558,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
  * visible while scrolling. */
 .modmain .file-header,
 .diff-pane .module .file-header {
-  top: 88px;
+  top: 78px;
 }
 /* When a module is collapsed its line 2 is hidden, so the body (and its file
  * headers) are gone too — no offset adjustment needed. */
