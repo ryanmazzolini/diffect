@@ -70,6 +70,8 @@ Line two.
 
   await git(repoDir, ["add", "."]);
   await git(repoDir, ["commit", "-m", "base"]);
+  await git(repoDir, ["branch", "feature"]);
+  await git(repoDir, ["tag", "v1"]);
 
   writeFileSync(join(repoDir, ".git", "info", "exclude"), ".plans/\n");
   mkdirSync(join(repoDir, ".plans"), { recursive: true });

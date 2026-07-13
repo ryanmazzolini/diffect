@@ -5,6 +5,7 @@ import type {
   DiffFile,
   RefList,
   RepoDiff,
+  ReviewTargetPresentation,
   RepoSummary,
   Thread,
   ThreadStatus,
@@ -24,6 +25,7 @@ import {
   savePreferredEditor,
 } from "./editorPreference.js";
 import { getSessionStored, getStored, setSessionStored, setStored } from "./storage.js";
+import { hasWorkingTreeSide } from "./reviewTarget.js";
 import { fileElementId, orderedDiffFiles } from "./fileTree.js";
 import { CurrentSnapshotContext } from "./currentSnapshot.js";
 import { usePaneLayout } from "./usePaneLayout.js";
@@ -77,6 +79,7 @@ function reconcileRepoDiff(previous: RepoDiff | undefined, next: RepoDiff): Repo
 interface StoredSelection {
   worktree: string | null;
   target: string;
+  presentation?: ReviewTargetPresentation;
 }
 type PendingFollow = DiffChangedPayload & {
   repo: string;
@@ -121,7 +124,7 @@ function readFollowMode(): boolean {
   return new URLSearchParams(window.location.search).get("shell") === "desktop";
 }
 function isFollowableTarget(target: string): boolean {
-  return target === "work" || target === "unstaged";
+  return hasWorkingTreeSide(target);
 }
 const PLACE_KEY = "diffect-place-v1";
 const WORKSPACE_PLACES_KEY = "diffect-workspace-places-v1";
@@ -133,17 +136,41 @@ const EMPTY_PLACE: StoredPlace = {
   file: null,
   selections: {},
 };
+function parsePresentation(value: unknown): ReviewTargetPresentation | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (
+    raw.kind === "compare" &&
+    typeof raw.baseRef === "string" &&
+    typeof raw.baseLabel === "string" &&
+    typeof raw.compareRef === "string" &&
+    typeof raw.compareLabel === "string"
+  ) {
+    return {
+      kind: "compare",
+      baseRef: raw.baseRef,
+      baseLabel: raw.baseLabel,
+      ...(raw.baseIsRepoStart === true ? { baseIsRepoStart: true } : {}),
+      compareRef: raw.compareRef,
+      compareLabel: raw.compareLabel,
+    };
+  }
+  return undefined;
+}
 function parseSelection(value: unknown): StoredSelection | null {
   if (!value || typeof value !== "object") return null;
   const sel = value as Partial<Record<keyof StoredSelection, unknown>>;
+  const presentation = parsePresentation(sel.presentation);
   return {
     worktree: typeof sel.worktree === "string" ? sel.worktree : null,
     target: typeof sel.target === "string" ? sel.target : DEFAULT_TARGET,
+    ...(presentation ? { presentation } : {}),
   };
 }
 function parseStoredPlace(value: unknown): StoredPlace {
   if (!value || typeof value !== "object") return EMPTY_PLACE;
   const place = value as Partial<Record<keyof StoredPlace, unknown>>;
+  const presentation = parsePresentation(place.presentation);
   const selections: Record<string, StoredSelection> = {};
   if (place.selections && typeof place.selections === "object") {
     for (const [name, sel] of Object.entries(place.selections)) {
@@ -156,6 +183,7 @@ function parseStoredPlace(value: unknown): StoredPlace {
     repo: typeof place.repo === "string" ? place.repo : null,
     worktree: typeof place.worktree === "string" ? place.worktree : null,
     target: typeof place.target === "string" ? place.target : DEFAULT_TARGET,
+    ...(presentation ? { presentation } : {}),
     file: typeof place.file === "string" ? place.file : null,
     selections,
   };
@@ -224,7 +252,13 @@ function recentSelectionsFor(
   const allowed = new Set(entry.repos.map((r) => r.name));
   const out: Record<string, StoredSelection> = {};
   for (const [repo, review] of Object.entries(reviewRecency[entry.path] ?? {})) {
-    if (allowed.has(repo)) out[repo] = { worktree: review.worktree, target: review.target };
+    if (allowed.has(repo)) {
+      out[repo] = {
+        worktree: review.worktree,
+        target: review.target,
+        ...(review.presentation ? { presentation: review.presentation } : {}),
+      };
+    }
   }
   return out;
 }
@@ -371,20 +405,22 @@ export function App() {
   const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(
     initialWorkspacePath,
   );
-  // Per-repo review selection (checkout + target), so each stacked module keeps
-  // its own base..compare independently. The active repo's entry is projected to
+  // Per-repo review selection (checkout + target + optional display metadata),
+  // so each stacked module keeps its own review task independently. The active
+  // repo's entry is projected to
   // the `worktree`/`target` scalars below, which the rest of the component reads
   // unchanged. A repo absent from the map renders its first-visit default
   // (primary checkout, work target) via that projection.
-  const [selections, setSelections] = useState<
-    Map<string, { worktree: string | null; target: string }>
-  >(() => {
-    const m = new Map<string, { worktree: string | null; target: string }>();
+  const [selections, setSelections] = useState<Map<string, StoredSelection>>(() => {
+    const m = new Map<string, StoredSelection>();
     for (const [name, sel] of Object.entries(initialPlace.selections)) m.set(name, sel);
     if (initialRepo) {
       m.set(initialRepo, {
         worktree: initialDeepLink.repo ? initialDeepLink.worktree : initialPlace.worktree,
         target: initialDeepLink.repo ? initialDeepLink.target : initialPlace.target,
+        ...(!initialDeepLink.repo && initialPlace.presentation
+          ? { presentation: initialPlace.presentation }
+          : {}),
       });
     }
     return m;
@@ -574,6 +610,7 @@ export function App() {
       placeRepo = repo,
       placeWorktree = worktree,
       placeTarget = target,
+      placePresentation = placeRepo ? selections.get(placeRepo)?.presentation : undefined,
     ) => {
       if (!activeWorkspacePath || !activeEntry || activeEntry.path !== activeWorkspacePath) return;
       const workspacePath = activeEntry.path;
@@ -589,6 +626,7 @@ export function App() {
         repo: placeRepo,
         worktree: placeWorktree,
         target: placeTarget,
+        ...(placePresentation ? { presentation: placePresentation } : {}),
         file,
         selections: storedSelections,
       };
@@ -739,7 +777,7 @@ export function App() {
       setRepo(fileRepo);
       lockProgrammaticFile(scrollPath);
       setActiveFile(scrollPath);
-      persistPlace(scrollPath, fileRepo, sel.worktree, sel.target);
+      persistPlace(scrollPath, fileRepo, sel.worktree, sel.target, sel.presentation);
       setSpacePreviewFile(null);
       if (match) {
         setPreviewFile(null);
@@ -810,7 +848,7 @@ export function App() {
       setRepo(threadRepo);
       lockProgrammaticFile(scrollPath);
       setActiveFile(scrollPath);
-      persistPlace(scrollPath, threadRepo, sel.worktree, sel.target);
+      persistPlace(scrollPath, threadRepo, sel.worktree, sel.target, sel.presentation);
       setSpacePreviewFile(null);
       if (match) {
         setPreviewFile(null);
@@ -918,7 +956,13 @@ export function App() {
       for (const [name, sel] of Object.entries(selectionsToRestore)) {
         if (!allowed.has(name)) continue;
         const cur = next.get(name);
-        if (cur?.worktree === sel.worktree && cur.target === sel.target) continue;
+        if (
+          cur?.worktree === sel.worktree &&
+          cur.target === sel.target &&
+          JSON.stringify(cur.presentation) === JSON.stringify(sel.presentation)
+        ) {
+          continue;
+        }
         next.set(name, sel);
         changed = true;
       }
@@ -1163,11 +1207,15 @@ export function App() {
   // highlight and let the landing diff settle it. The checkout is preserved — only
   // the target changes. Repo-parameterized so each stacked module retargets itself.
   const changeTargetFor = useCallback(
-    (forRepo: string, next: string) => {
+    (forRepo: string, next: string, presentation?: ReviewTargetPresentation) => {
       setUnscopedFor(forRepo, false);
       setPendingFor(forRepo, null);
       setThreadSessionFor(forRepo, null);
-      const sel = { worktree: selectionsRef.current.get(forRepo)?.worktree ?? null, target: next };
+      const sel: StoredSelection = {
+        worktree: selectionsRef.current.get(forRepo)?.worktree ?? null,
+        target: next,
+        ...(presentation ? { presentation } : {}),
+      };
       setSelections((prev) => new Map(prev).set(forRepo, sel));
       markReviewOpened(forRepo, sel);
     },
@@ -2056,6 +2104,7 @@ export function App() {
                           wrap={wrapLines}
                           theme={theme}
                           target={selections.get(r.name)?.target ?? DEFAULT_TARGET}
+                          presentation={selections.get(r.name)?.presentation}
                           refs={refsByRepo.get(r.name) ?? null}
                           refThreadCounts={refThreadCountsByRepo.get(r.name) ?? EMPTY_REF_THREAD_COUNTS}
                           defaultBranch={r.defaultBranch}
@@ -2087,6 +2136,7 @@ export function App() {
                     wrap={wrapLines}
                     theme={theme}
                     target={target}
+                    presentation={selections.get(repo)?.presentation}
                     refs={refs}
                     refThreadCounts={refThreadCountsByRepo.get(repo) ?? EMPTY_REF_THREAD_COUNTS}
                     defaultBranch={activeRepo?.defaultBranch ?? null}

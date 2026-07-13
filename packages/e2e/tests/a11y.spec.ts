@@ -29,6 +29,23 @@ for (const theme of ["dark", "light"] as const) {
   });
 }
 
+test("review task picker has no serious/critical a11y violations", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".file-header").first()).toBeVisible();
+  await page.locator(".target-picker .review-target-trigger").click();
+  const picker = page.getByRole("dialog", { name: "Review changes" });
+  await expect(picker.getByRole("button", { name: /Branch: / })).toBeVisible();
+
+  const result = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa"])
+    .exclude(".diff")
+    .analyze();
+  const blocking = result.violations.filter(
+    (violation) => violation.impact === "serious" || violation.impact === "critical",
+  );
+  expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join("\n")).toEqual([]);
+});
+
 test("no serious/critical a11y violations in split view", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Options" }).click();

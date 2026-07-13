@@ -74,6 +74,25 @@ describe("computeTargetDiff", () => {
     expect(paths).not.toContain("indexed.txt");
   });
 
+  it("an explicit branch base compares its tip to the working tree after divergence", async () => {
+    await git(dir, ["branch", "feature"]);
+    await writeFile(join(dir, "main-only.txt"), "main\n");
+    await git(dir, ["add", "main-only.txt"]);
+    await git(dir, ["commit", "-m", "advance main"]);
+    await git(dir, ["checkout", "-q", "feature"]);
+    await writeFile(join(dir, "local.txt"), "local\n");
+
+    const explicit = await computeTargetDiff(dir, normalizeTarget("main"));
+    const explicitPaths = explicit.files.map((file) => file.path);
+    expect(explicitPaths).toContain("main-only.txt");
+    expect(explicitPaths).toContain("local.txt");
+
+    // The legacy work target starts at the merge base and therefore cannot
+    // represent the branch-tip comparison promised by the picker.
+    const mergeBase = await computeTargetDiff(dir, normalizeTarget("work"));
+    expect(mergeBase.files.map((file) => file.path)).not.toContain("main-only.txt");
+  });
+
   it("a commit range shows committed changes only, ignoring the worktree", async () => {
     await git(dir, ["checkout", "-q", "-b", "feature"]);
     await writeFile(join(dir, "a.txt"), "1\n2\n3\n4\n");

@@ -205,6 +205,10 @@ export interface RefList {
   /** Remote-tracking branches by short name (e.g. "origin/main"); excludes each remote's symbolic HEAD alias. */
   remotes: string[];
   commits: { sha: string; subject: string }[];
+  /** True when `commits` contains the complete reachable history rather than only its recent tail. */
+  commitsReachRoot: boolean;
+  /** Git's empty tree for this repository's object format, used by the synthetic empty-repo base. */
+  repoStartSha: string | null;
 }
 
 export type RefSearchKind = "branch" | "tag" | "remote" | "commit";
@@ -329,9 +333,21 @@ export interface WorkspaceEntry {
   repos: RepoSummary[];
 }
 
+export type ReviewTargetPresentation = {
+  kind: "compare";
+  baseRef: string;
+  baseLabel: string;
+  /** True when baseRef is Git's empty tree rather than a normal ref or commit. */
+  baseIsRepoStart?: boolean;
+  compareRef: string;
+  compareLabel: string;
+};
+
 export interface UiReviewSelection {
   worktree: string | null;
   target: string;
+  /** Optional task-oriented display metadata; raw target remains authoritative. */
+  presentation?: ReviewTargetPresentation;
   openedAt: number;
 }
 

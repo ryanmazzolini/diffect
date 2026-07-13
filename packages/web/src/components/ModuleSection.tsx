@@ -10,6 +10,7 @@ import type {
   PullRequestLink,
   RefList,
   RepoDiff,
+  ReviewTargetPresentation,
   Thread,
 } from "@diffect/shared";
 import type { Theme } from "../theme.js";
@@ -52,14 +53,19 @@ interface Props {
   split: boolean;
   wrap: boolean;
   theme: Theme;
-  /** This module's review target plus the refs/defaultBranch backing its inline
-   * base…compare picker. `onTarget` is repo-parameterized so a module retargets
+  /** This module's review target plus the refs/default branch backing its
+   * task-first picker. `onTarget` is repo-parameterized so a module retargets
    * only itself. */
   target?: string;
+  presentation?: ReviewTargetPresentation;
   refs?: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch?: string | null;
-  onTarget?: (repo: string, target: string) => void;
+  onTarget?: (
+    repo: string,
+    target: string,
+    presentation?: ReviewTargetPresentation,
+  ) => void;
   /** Collapse is owned by App (so the repo rail can drive it too); this module is
    * controlled. Stacked layout only. */
   collapsed?: boolean;
@@ -100,6 +106,7 @@ export const ModuleSection = memo(function ModuleSection({
   wrap,
   theme,
   target = "work",
+  presentation,
   refs = null,
   refThreadCounts,
   defaultBranch = null,
@@ -120,7 +127,8 @@ export const ModuleSection = memo(function ModuleSection({
   const files = useMemo(() => orderedDiffFiles(diff?.files ?? EMPTY_FILES), [diff]);
   // Bind the target change to THIS module's repo so it doesn't defeat the memo.
   const handleTarget = useCallback(
-    (t: string) => onTarget?.(repo, t),
+    (nextTarget: string, nextPresentation?: ReviewTargetPresentation) =>
+      onTarget?.(repo, nextTarget, nextPresentation),
     [onTarget, repo],
   );
   // Bind the collapse toggle to THIS module's repo, mirroring the others.
@@ -165,6 +173,7 @@ export const ModuleSection = memo(function ModuleSection({
           branch={branch}
           pullRequest={pullRequest}
           target={target}
+          presentation={presentation}
           refs={refs}
           refThreadCounts={refThreadCounts}
           defaultBranch={defaultBranch}
@@ -190,6 +199,7 @@ export const ModuleSection = memo(function ModuleSection({
       branch={branch}
       pullRequest={pullRequest}
       target={target}
+      presentation={presentation}
       refs={refs}
       refThreadCounts={refThreadCounts}
       defaultBranch={defaultBranch}
@@ -203,7 +213,7 @@ export const ModuleSection = memo(function ModuleSection({
 });
 
 /** A repo module: line 1 names repo/branch/PR/status/stats, line 2 carries
- *  the base…compare picker. Multi-repo adds the band + collapse caret. */
+ *  the review picker. Multi-repo adds the band + collapse caret. */
 function StackedModule({
   repo,
   repoLabel,
@@ -215,6 +225,7 @@ function StackedModule({
   branch,
   pullRequest,
   target,
+  presentation,
   refs,
   refThreadCounts,
   defaultBranch,
@@ -233,10 +244,11 @@ function StackedModule({
   branch: string | null;
   pullRequest: PullRequestLink | null;
   target: string;
+  presentation?: ReviewTargetPresentation;
   refs: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch: string | null;
-  onTarget: (target: string) => void;
+  onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
   /** Collapse is controlled by App (so the rail can drive it too). */
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -297,11 +309,10 @@ function StackedModule({
             defaultBranch={defaultBranch}
             currentBranch={branch}
             target={target}
+            presentation={presentation}
             onTarget={onTarget}
             refs={refs}
             refThreadCounts={refThreadCounts}
-            // Repo headers live inside scroll panes, which clip inline popovers.
-            portalPopover
           />
         </div>
       </header>

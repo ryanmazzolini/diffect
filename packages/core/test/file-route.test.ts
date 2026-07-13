@@ -72,9 +72,20 @@ describe("PUT /repos/:repo/file/content", () => {
     expect(await readFile(join(dir, "f.txt"), "utf8")).toBe("saved\n");
   });
 
+  it("writes explicit-ref target content to the working tree", async () => {
+    const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=f.txt&target=main`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "saved from ref\n" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await readFile(join(dir, "f.txt"), "utf8")).toBe("saved from ref\n");
+  });
+
   it("rejects non-working-tree targets", async () => {
     const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
-    const res = await fetch(`${base}/repos/${repo}/file/content?path=f.txt&target=staged`, {
+    const res = await fetch(`${base}/repos/${repo}/file/content?path=f.txt&target=main..HEAD`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "saved\n" }),

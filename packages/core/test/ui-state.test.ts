@@ -21,7 +21,20 @@ it("merges workspace and review recency updates", async () => {
   await updateUiState({
     workspaceRecency: { "/b": 2 },
     reviewRecency: {
-      "/b": { repo: { worktree: null, target: "main...feature", openedAt: 3 } },
+      "/b": {
+        repo: {
+          worktree: null,
+          target: "main...feature",
+          presentation: {
+            kind: "compare",
+            baseRef: "main",
+            baseLabel: "main",
+            compareRef: "feature",
+            compareLabel: "feature",
+          },
+          openedAt: 3,
+        },
+      },
     },
   });
   await updateUiState({
@@ -34,7 +47,18 @@ it("merges workspace and review recency updates", async () => {
     workspaceRecency: { "/a": 1, "/b": 2 },
     reviewRecency: {
       "/b": {
-        repo: { worktree: null, target: "main...feature", openedAt: 3 },
+        repo: {
+          worktree: null,
+          target: "main...feature",
+          presentation: {
+            kind: "compare",
+            baseRef: "main",
+            baseLabel: "main",
+            compareRef: "feature",
+            compareLabel: "feature",
+          },
+          openedAt: 3,
+        },
         other: { worktree: "wt", target: "work", openedAt: 4 },
       },
     },

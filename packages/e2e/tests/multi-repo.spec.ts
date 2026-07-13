@@ -341,44 +341,42 @@ test("a module's ref picker popover escapes the module scroll clip", async ({ pa
   await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');
   await expect(alpha).toBeVisible();
+  const targetTrigger = alpha.locator(".review-target-trigger");
 
-  // Open alpha's base picker from its module header.
-  await alpha.locator('.compare .ref-trigger[title^="Base:"]').click();
+  // The task menu itself is portaled out of `.modmain`.
+  await targetTrigger.click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".modmain .review-target-popover")).toHaveCount(0);
 
-  // The popover is portaled to the body, NOT left inside `.modmain` (whose
-  // overflow:auto would clip it to a ~51px sliver). So it exists once globally
-  // but zero times under the scroll container.
+  const baseTrigger = dialog.getByRole("button", { name: "Base: main", exact: true });
+  await baseTrigger.click();
+
+  // The nested ref search stays under the body-level task popover, so the module
+  // scroll container cannot clip it.
   const popover = page.locator(".ref-popover");
   await expect(popover).toBeVisible();
   await expect(page.locator(".modmain .ref-popover")).toHaveCount(0);
-  // And it renders at full height, not clipped to the header band.
   const box = await popover.boundingBox();
   expect(box).not.toBeNull();
   expect(box.height).toBeGreaterThan(100);
 
-  // The portaled popover stays interactive: typing + clicking an option inside it
-  // must not register as an outside click (which would close it before the option
-  // is chosen). At rest this module shows the default "All local changes" mode, so
-  // exactly one local mode is active.
-  await expect(alpha.locator(".target-mode.active")).toHaveCount(1);
   await page.getByPlaceholder("Find a branch, tag, or commit…").fill("main");
   await page.getByRole("option", { name: /main/ }).first().click();
-
-  // Choosing a base…compare target switches the module off every local mode and
-  // closes the popover — only possible if the in-popover click actually selected
-  // an option (i.e. the portal-aware click-outside guard let it through). Focus
-  // returns to the trigger rather than being stranded at the body.
-  const baseTrigger = alpha.locator('.compare .ref-trigger[title="Base: main"]');
-  await expect(baseTrigger).toBeVisible();
-  await expect(alpha.locator(".target-mode.active")).toHaveCount(0);
-  await expect(page.locator(".ref-popover")).toHaveCount(0);
   await expect(baseTrigger).toBeFocused();
+  await expect(page.locator(".ref-popover")).toHaveCount(0);
+
+  // Ref choices apply live while the single task popover remains open.
+  await expect(targetTrigger).toHaveText("main → HEAD▾");
+  await expect(dialog).toBeVisible();
   await expect(page.locator(".ref-search-error")).toHaveCount(0);
 
-  // Escape also dismisses the popover and hands focus back to the trigger.
+  // Escape from nested search returns to its trigger; Escape again closes the
+  // whole task popover and restores the module trigger.
   await baseTrigger.click();
-  await expect(page.locator(".ref-popover")).toBeVisible();
   await page.getByPlaceholder("Find a branch, tag, or commit…").press("Escape");
-  await expect(page.locator(".ref-popover")).toHaveCount(0);
   await expect(baseTrigger).toBeFocused();
+  await baseTrigger.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(targetTrigger).toBeFocused();
 });

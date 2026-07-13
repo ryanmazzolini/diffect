@@ -973,6 +973,109 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   gap: 8px;
   min-width: 0;
 }
+.review-target-menu {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.review-target-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  min-width: 112px;
+  max-width: 250px;
+  cursor: pointer;
+}
+.review-target-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-target-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 55;
+  width: min(400px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-overlay);
+  overflow-y: auto;
+  animation: pop-in var(--motion) both;
+}
+.review-target-heading {
+  display: block;
+  padding: 12px 12px 5px;
+  color: var(--text);
+  font-size: 13px;
+}
+.review-scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 12px 12px;
+}
+.review-scope-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.review-scope-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.review-scope-section > .ref-picker,
+.review-scope-section > .ref-picker .ref-trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+.compare-inline-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.compare-inline-controls .ref-picker,
+.compare-inline-controls .ref-trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+.review-scope-section .ref-trigger {
+  border-color: var(--border-strong);
+}
+.review-scope-arrow {
+  color: var(--muted);
+  font-weight: 700;
+}
+.review-scope-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.review-scope-divider::before,
+.review-scope-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+@media (max-height: 320px) {
+  .review-target-popover.ref-picker-open {
+    max-height: calc((100vh - 28px) / 2);
+  }
+}
 .local-targets {
   display: flex;
   align-items: center;
@@ -991,12 +1094,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   cursor: pointer;
   transition: background var(--motion), color var(--motion);
 }
-.target-mode.current-branch {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .target-mode:last-child {
   border-right: 0;
 }
@@ -1008,22 +1105,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--on-accent);
   background: var(--accent-strong);
   font-weight: 600;
-}
-.compare {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.compare-label {
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.compare-sep {
-  color: var(--muted);
-  font-weight: 700;
 }
 .ref-picker {
   position: relative;
@@ -1046,8 +1127,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   z-index: 50;
   display: flex;
   flex-direction: column;
-  width: min(430px, 90vw);
-  max-height: 480px;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(480px, calc(100vh - 16px));
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
@@ -1138,7 +1219,13 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   font-family: var(--mono);
   white-space: nowrap;
 }
+.ref-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ref-sha {
+  flex: 0 0 auto;
   color: var(--accent);
 }
 .ref-subject {

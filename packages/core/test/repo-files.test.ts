@@ -39,6 +39,25 @@ it("GET /repos/:repo/files lists tracked files", async () => {
   expect(files.sort()).toEqual(["a.txt", "src/b.txt"]);
 });
 
+it("GET /repos/:repo/refs exposes Repo Start for a root comparison", async () => {
+  const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+  const refsResponse = await fetch(`${base}/repos/${repo}/refs`);
+
+  expect(refsResponse.status).toBe(200);
+  const refs = await refsResponse.json();
+  expect(refs.repoStartSha).toMatch(/^[0-9a-f]{40}$/);
+
+  const target = `${refs.repoStartSha}..main`;
+  const diff = await fetch(
+    `${base}/repos/${repo}/diff?target=${encodeURIComponent(target)}`,
+  );
+  expect(diff.status).toBe(200);
+  expect((await diff.json()).files.map((file: { path: string }) => file.path).sort()).toEqual([
+    "a.txt",
+    "src/b.txt",
+  ]);
+});
+
 it("404s for an unknown repo", async () => {
   expect((await fetch(`${base}/repos/nope/files`)).status).toBe(404);
 });

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { git } from "../src/git/exec.js";
 import { listRefs, searchRefs } from "../src/git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "../src/git/target.js";
+import { resolveScope, sessionIdForScope } from "../src/reviews/scope.js";
 
 let dir: string;
 
@@ -31,8 +32,21 @@ describe("listRefs", () => {
     expect(refs.tags).toEqual(["v1"]);
     expect(refs.remotes).toEqual([]);
     expect(refs.commits).toHaveLength(1);
+    expect(refs.commitsReachRoot).toBe(true);
     expect(refs.commits[0]!.subject).toBe("first commit");
     expect(refs.commits[0]!.sha).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it("hides the root boundary when recent commits do not reach it", async () => {
+    for (let index = 0; index < 30; index += 1) {
+      await writeFile(join(dir, "a.txt"), `revision ${index}\n`);
+      await git(dir, ["commit", "-am", `revision ${index}`]);
+    }
+
+    const refs = await listRefs(dir);
+    expect(refs.commits).toHaveLength(30);
+    expect(refs.commitsReachRoot).toBe(false);
+    expect(refs.commits.at(-1)?.subject).toBe("revision 0");
   });
 
   it("searches branches, tags, commit subjects, and SHA prefixes", async () => {
@@ -68,6 +82,48 @@ describe("listRefs", () => {
     expect(existsSync(victim)).toBe(true);
     const { readFile } = await import("node:fs/promises");
     expect(await readFile(victim, "utf8")).toBe("important");
+  });
+});
+
+describe("Repo Start", () => {
+  it("exposes the repository empty tree and includes the root commit", async () => {
+    const refs = await listRefs(dir);
+    expect(refs.repoStartSha).toMatch(/^[0-9a-f]{40}$/);
+
+    const target = normalizeTarget(`${refs.repoStartSha}..HEAD`);
+    const diff = await computeTargetDiff(dir, target);
+    expect(diff.files.map((file) => file.path)).toEqual(["a.txt"]);
+    expect(diff.files[0]?.status).toBe("added");
+
+    const scope = await resolveScope(dir, target, null);
+    expect(scope).toMatchObject({
+      baseRef: refs.repoStartSha,
+      headRef: "HEAD",
+      baseSha: refs.repoStartSha,
+    });
+    expect(sessionIdForScope(await resolveScope(dir, target, null))).toBe(
+      sessionIdForScope(scope),
+    );
+  });
+
+  it("creates the empty tree for SHA-256 repositories", async () => {
+    const sha256Dir = await mkdtemp(join(tmpdir(), "diffect-refs-sha256-"));
+    try {
+      await git(sha256Dir, ["init", "--object-format=sha256", "-b", "main"]);
+      await git(sha256Dir, ["config", "user.email", "t@e.com"]);
+      await git(sha256Dir, ["config", "user.name", "T"]);
+      await writeFile(join(sha256Dir, "sha256.txt"), "content\n");
+      await git(sha256Dir, ["add", "."]);
+      await git(sha256Dir, ["commit", "-m", "root"]);
+
+      const refs = await listRefs(sha256Dir);
+      expect(refs.repoStartSha).toMatch(/^[0-9a-f]{64}$/);
+      const target = normalizeTarget(`${refs.repoStartSha}..HEAD`);
+      const diff = await computeTargetDiff(sha256Dir, target);
+      expect(diff.files[0]).toMatchObject({ path: "sha256.txt", status: "added" });
+    } finally {
+      await rm(sha256Dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,6 +1,11 @@
-import type { RefList, RefSearchOption, RefSearchResults, RepoFileList } from "@diffect/shared";
+import type {
+  RefList,
+  RefSearchOption,
+  RefSearchResults,
+  RepoFileList,
+} from "@diffect/shared";
 import { ignoredUntrackedFiles } from "./diff.js";
-import { gitTry } from "./exec.js";
+import { gitTry, gitWithInput } from "./exec.js";
 
 const lines = (s: string | null): string[] =>
   (s ?? "").split("\n").filter(Boolean);
@@ -15,6 +20,7 @@ const isRemoteBranch = (name: string): boolean =>
 
 const DEFAULT_SEARCH_LIMIT = 12;
 const MAX_SEARCH_LIMIT = 50;
+const RECENT_COMMIT_LIMIT = 30;
 
 /**
  * List a repo's branches, tags, and recent commits for the compare picker.
@@ -46,13 +52,22 @@ export async function listRefs(repoRoot: string): Promise<RefList> {
       "refs/remotes",
     ]),
   ).filter(isRemoteBranch);
-  const commits = lines(
-    await gitTry(repoRoot, ["log", "-30", "--format=%h\t%s"]),
-  ).map((l) => {
+  const recentCommitLines = lines(
+    await gitTry(repoRoot, ["log", `-${RECENT_COMMIT_LIMIT + 1}`, "--format=%h\t%s"]),
+  );
+  const commitsReachRoot = recentCommitLines.length <= RECENT_COMMIT_LIMIT;
+  const commits = recentCommitLines.slice(0, RECENT_COMMIT_LIMIT).map((l) => {
     const tab = l.indexOf("\t");
     return { sha: l.slice(0, tab), subject: l.slice(tab + 1) };
   });
-  return { branches, tags, remotes, commits };
+  let repoStartSha: string | null = null;
+  try {
+    // `mktree` derives the empty-tree id for either SHA-1 or SHA-256 repos.
+    repoStartSha = (await gitWithInput(repoRoot, ["mktree"], "")).stdout.trim() || null;
+  } catch {
+    // Keep ref discovery usable for malformed or unsupported repositories.
+  }
+  return { branches, tags, remotes, commits, commitsReachRoot, repoStartSha };
 }
 
 /**
@@ -138,7 +153,7 @@ async function searchCommits(
     return [...bySha.values()].slice(0, limit);
   }
 
-  if (/^[0-9a-f]{4,40}$/i.test(query)) {
+  if (/^[0-9a-f]{4,64}$/i.test(query)) {
     const sha = await gitTry(repoRoot, [
       "rev-parse",
       "--verify",

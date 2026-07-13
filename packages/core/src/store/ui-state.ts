@@ -1,6 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { UiReviewSelection, UiState, UiStateUpdate, WebsiteReviewUiState } from "@diffect/shared";
+import type {
+  ReviewTargetPresentation,
+  UiReviewSelection,
+  UiState,
+  UiStateUpdate,
+  WebsiteReviewUiState,
+} from "@diffect/shared";
 import { uiStatePath } from "./paths.js";
 
 const EMPTY_UI_STATE: UiState = { workspaceRecency: {}, reviewRecency: {} };
@@ -125,13 +131,37 @@ function mergeWebsiteReview(
   };
 }
 
+function cleanReviewPresentation(value: unknown): ReviewTargetPresentation | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (
+    raw.kind === "compare" &&
+    typeof raw.baseRef === "string" &&
+    typeof raw.baseLabel === "string" &&
+    typeof raw.compareRef === "string" &&
+    typeof raw.compareLabel === "string"
+  ) {
+    return {
+      kind: "compare",
+      baseRef: raw.baseRef,
+      baseLabel: raw.baseLabel,
+      ...(raw.baseIsRepoStart === true ? { baseIsRepoStart: true } : {}),
+      compareRef: raw.compareRef,
+      compareLabel: raw.compareLabel,
+    };
+  }
+  return undefined;
+}
+
 function cleanReview(value: unknown): UiReviewSelection | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Partial<UiReviewSelection>;
   if (typeof raw.target !== "string") return null;
+  const presentation = cleanReviewPresentation(raw.presentation);
   return {
     worktree: typeof raw.worktree === "string" ? raw.worktree : null,
     target: raw.target,
+    ...(presentation ? { presentation } : {}),
     openedAt: typeof raw.openedAt === "number" && Number.isFinite(raw.openedAt) ? raw.openedAt : 0,
   };
 }

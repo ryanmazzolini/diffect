@@ -14,6 +14,7 @@ import { api } from "../api.js";
 import { Icon } from "../icons.js";
 import { highlightLine, langForPath } from "../highlight.js";
 import { fileElementId } from "../fileTree.js";
+import { hasWorkingTreeSide } from "../reviewTarget.js";
 import { CommentForm } from "./CommentForm.js";
 import { FullFilePreview } from "./FullFilePreview.js";
 import { DiffStat } from "./DiffStat.js";
@@ -239,7 +240,7 @@ const FileDiff = memo(function FileDiff({
   const [content, setContent] = useState<FileContent | "error" | null>(null);
 
   const canUseCodeMirror = readableFileContent(content);
-  const editableTarget = localDaemon && (target === "work" || target === "unstaged");
+  const editableTarget = localDaemon && hasWorkingTreeSide(target);
   const deletedFile = file.status === "deleted";
   const canEditCodeMirror = canUseCodeMirror && editableTarget && !deletedFile;
   const showCodeMirrorModeToggle = canUseCodeMirror || editableTarget;

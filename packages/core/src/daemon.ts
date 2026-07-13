@@ -733,8 +733,8 @@ async function fileContentRoute(
     sendJson(res, 403, { error: "editing files is only allowed on a loopback-bound daemon" });
     return true;
   }
-  if (target.kind !== "work" && target.kind !== "unstaged") {
-    sendJson(res, 400, { error: "only work and unstaged targets are editable" });
+  if (target.kind !== "work" && target.kind !== "unstaged" && target.kind !== "ref") {
+    sendJson(res, 400, { error: "only working-tree targets are editable" });
     return true;
   }
   const body = await readJsonBody<WriteFileContentRequest>(req);
