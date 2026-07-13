@@ -737,6 +737,17 @@ export function App() {
     }
   }, []);
 
+  const lockProgrammaticRepo = useCallback((name: string, duration = 350) => {
+    programmaticRepoRef.current = name;
+    if (programmaticRepoTimerRef.current !== null) {
+      window.clearTimeout(programmaticRepoTimerRef.current);
+    }
+    programmaticRepoTimerRef.current = window.setTimeout(() => {
+      if (programmaticRepoRef.current === name) programmaticRepoRef.current = null;
+      programmaticRepoTimerRef.current = null;
+    }, duration);
+  }, []);
+
   const selectFile = useCallback(
     (path: string) => {
       fileScrollGenerationRef.current += 1;
@@ -774,6 +785,9 @@ export function App() {
       const match = fileDiff?.files.find((f) => f.path === path || f.oldPath === path);
       const scrollPath = match?.path ?? path;
       const sel = selectionsRef.current.get(fileRepo) ?? { worktree: null, target: DEFAULT_TARGET };
+      // Keep module focus on this repo through lazy diff mounting and the
+      // follow-up hunk-centering scroll, both of which can retrigger scroll-spy.
+      lockProgrammaticRepo(fileRepo, 1_200);
       setRepo(fileRepo);
       lockProgrammaticFile(scrollPath);
       setActiveFile(scrollPath);
@@ -794,7 +808,7 @@ export function App() {
         diffPaneRef.current?.scrollTo({ top: 0 });
       }
     },
-    [diff, diffs, lockProgrammaticFile, persistPlace, repo],
+    [diff, diffs, lockProgrammaticFile, lockProgrammaticRepo, persistPlace, repo],
   );
 
   useEffect(() => {
@@ -869,21 +883,14 @@ export function App() {
   // in sync as the user scrolls. At N=1 there's one module already in view, so the
   // scroll is a no-op and this is just `setRepo`.
   const selectRepo = useCallback((name: string) => {
-    programmaticRepoRef.current = name;
-    if (programmaticRepoTimerRef.current !== null) {
-      window.clearTimeout(programmaticRepoTimerRef.current);
-    }
+    lockProgrammaticRepo(name);
     setRepo(name);
     setSpacePreviewFile(null);
     setReselectTick((n) => n + 1);
     diffPaneRef.current
       ?.querySelector(`.module[data-repo="${cssEscape(name)}"]`)
       ?.scrollIntoView({ block: "start" });
-    programmaticRepoTimerRef.current = window.setTimeout(() => {
-      if (programmaticRepoRef.current === name) programmaticRepoRef.current = null;
-      programmaticRepoTimerRef.current = null;
-    }, 350);
-  }, []);
+  }, [lockProgrammaticRepo]);
   const selectWorkspace = useCallback(
     (path: string) => {
       const entry = entries.find((ws) => ws.path === path);
@@ -1387,16 +1394,58 @@ export function App() {
   useEffect(() => {
     const root = diffPaneRef.current;
     if (!root) return;
+    let syncFrame = 0;
     const unlock = () => {
       programmaticFileRef.current = null;
+      programmaticRepoRef.current = null;
+      if (programmaticRepoTimerRef.current !== null) {
+        window.clearTimeout(programmaticRepoTimerRef.current);
+        programmaticRepoTimerRef.current = null;
+      }
     };
-    root.addEventListener("wheel", unlock, { passive: true });
-    root.addEventListener("touchstart", unlock, { passive: true });
+    const syncRepoAfterUserScroll = () => {
+      if (!stacked || programmaticRepoRef.current) return;
+      window.cancelAnimationFrame(syncFrame);
+      syncFrame = window.requestAnimationFrame(() => {
+        const marker = root.getBoundingClientRect().top + 1;
+        const modules = Array.from(root.querySelectorAll<HTMLElement>(".module[data-repo]"));
+        const visible = modules.find((module) => {
+          const rect = module.getBoundingClientRect();
+          return rect.top <= marker && rect.bottom > marker;
+        }) ?? modules.find((module) => module.getBoundingClientRect().top > marker);
+        const name = visible?.getAttribute("data-repo");
+        if (name) setRepo(name);
+      });
+    };
+    const unlockAndSync = () => {
+      unlock();
+      syncRepoAfterUserScroll();
+    };
+    const unlockOnKeyboardScroll = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) return;
+      if (["Home", "End", "PageUp", "PageDown", "ArrowUp", "ArrowDown"].includes(event.key)) {
+        unlockAndSync();
+      }
+    };
+    root.addEventListener("wheel", unlockAndSync, { passive: true });
+    root.addEventListener("touchstart", unlockAndSync, { passive: true });
+    root.addEventListener("keydown", unlockOnKeyboardScroll);
+    root.addEventListener("scroll", syncRepoAfterUserScroll, { passive: true });
     return () => {
-      root.removeEventListener("wheel", unlock);
-      root.removeEventListener("touchstart", unlock);
+      window.cancelAnimationFrame(syncFrame);
+      root.removeEventListener("wheel", unlockAndSync);
+      root.removeEventListener("touchstart", unlockAndSync);
+      root.removeEventListener("keydown", unlockOnKeyboardScroll);
+      root.removeEventListener("scroll", syncRepoAfterUserScroll);
     };
-  }, []);
+  }, [stacked]);
 
   // Scroll-spy: highlight the file in the sidebar that's at the top of the diff
   // pane as the user scrolls, so the tree tracks reading position. Tracks the
@@ -1454,13 +1503,6 @@ export function App() {
         if (!name) return;
         const locked = programmaticRepoRef.current;
         if (locked && name !== locked) return;
-        if (locked === name) {
-          programmaticRepoRef.current = null;
-          if (programmaticRepoTimerRef.current !== null) {
-            window.clearTimeout(programmaticRepoTimerRef.current);
-            programmaticRepoTimerRef.current = null;
-          }
-        }
         setRepo(name);
       },
       { root, rootMargin: "0px 0px -80% 0px", threshold: 0 },

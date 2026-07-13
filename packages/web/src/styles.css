@@ -2489,6 +2489,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
  * next module by an 8px band of the page backdrop so the two stacked modules
  * read as distinct surfaces (not a hairline, which looked like a file split). */
 .module {
+  container-type: inline-size;
   background: var(--panel);
   border-bottom: 8px solid var(--bg);
 }
@@ -2508,9 +2509,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .module.is-empty .mh-files {
   color: var(--muted);
 }
-/* The module header parks ABOVE file headers in the sticky stack so a file's
- * own sticky header never rides over the repo name it belongs under. Two lines:
- * line 1 names the repo, line 2 carries the inline target picker. */
+/* The module header parks above file headers in the sticky stack so a file's
+ * own sticky header never rides over the repo context and review controls. */
 .mod-head {
   position: sticky;
   top: 0;
@@ -2524,15 +2524,15 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .module.focused > .mod-head {
   background: var(--panel-2);
 }
-/* Line 1: band spine, collapse caret, repo identity, right-aligned diffstat. */
-.mh-line1 {
+/* Repository identity, review target, local modes, and stats share one row. */
+.mh-row {
   display: flex;
   align-items: center;
   gap: 9px;
-  height: 38px;
+  height: 46px;
   padding: 0 14px 0 0;
 }
-.module.single .mh-line1 {
+.module.single .mh-row {
   padding-left: 14px;
 }
 /* A full-height wayfinding spine: a low-sat hue per module (m1/m2), alternating
@@ -2605,6 +2605,21 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Review controls sit beside identity with a quiet divider between contexts. */
+.mh-target {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding-left: 11px;
+  border-left: 1px solid var(--border);
+}
+.mh-target .target-picker {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+.module.collapsed .mh-target {
+  display: none;
+}
 /* Right-aligned per-module stats: diffstat and file count. */
 .mh-stat {
   margin-left: auto;
@@ -2621,34 +2636,47 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .mod-empty {
   font-style: italic;
 }
-/* Line 2: the inline base…compare target picker, dashed-separated from line 1.
- * Hidden when the module is collapsed. */
-.mh-line2 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 5px 14px 5px 17px;
-  border-top: 1px dashed var(--border);
-  flex-wrap: wrap;
-}
-.module.collapsed .mh-line2 {
-  display: none;
-}
-/* The module picker is a touch denser than the topbar's. */
-.mh-line2 .target-picker {
-  flex-wrap: wrap;
-  gap: 6px;
-}
-/* File sticky headers inside a module park just below the two-line module header
- * (line 1 = 38px + line 2 = 40px) rather than at the container top, so both stay
- * visible while scrolling. */
+/* File sticky headers park just below the compact module context row. */
 .modmain .file-header,
 .diff-pane .module .file-header {
-  top: 78px;
+  top: 46px;
 }
-/* When a module is collapsed its line 2 is hidden, so the body (and its file
- * headers) are gone too — no offset adjustment needed. */
+
+/* On a narrow window, restore a second control row rather than squeezing
+ * repository identity, target selection, and statistics into each other. */
+@container (max-width: 620px) {
+  .mh-row {
+    height: auto;
+    min-height: 46px;
+    padding-top: 8px;
+    flex-wrap: wrap;
+  }
+  .mh-repo {
+    flex: 1 1 0;
+  }
+  .mh-target {
+    order: 2;
+    flex: 0 0 100%;
+    min-height: 40px;
+    padding: 5px 0 5px 17px;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+  .module.single .mh-target {
+    margin-left: -14px;
+    padding-left: 11px;
+  }
+  .mh-target .target-picker {
+    gap: 5px;
+  }
+  .module.collapsed .mh-row {
+    min-height: 46px;
+  }
+  .modmain .file-header,
+  .diff-pane .module .file-header {
+    top: 78px;
+  }
+}
 
 .loading,
 .empty,

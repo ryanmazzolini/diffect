@@ -25,6 +25,30 @@ async function scrollSpyCount(page: Page): Promise<number> {
   );
 }
 
+async function moduleAtScrollerTop(page: Page): Promise<string | null> {
+  return page.locator(".modmain").evaluate((root) => {
+    const marker = root.getBoundingClientRect().top + 1;
+    const modules = Array.from(root.querySelectorAll<HTMLElement>(".module[data-repo]"));
+    const visible = modules.find((module) => {
+      const rect = module.getBoundingClientRect();
+      return rect.top <= marker && rect.bottom > marker;
+    }) ?? modules.find((module) => module.getBoundingClientRect().top > marker);
+    return visible?.getAttribute("data-repo") ?? null;
+  });
+}
+
+async function lockBetaWhileAlphaIsAtScrollerTop(page: Page): Promise<void> {
+  await page.goto("/");
+  const scroller = page.locator(".modmain");
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight))
+    .toBeGreaterThan(0);
+  await page.locator(".tree-repo", { hasText: "beta" }).click();
+  await expect(page.locator('.module[data-repo="beta"]')).toHaveClass(/focused/);
+  await scroller.evaluate((root) => root.scrollTo({ top: 1 }));
+  await expect.poll(() => moduleAtScrollerTop(page)).toBe("alpha");
+}
+
 /**
  * The multi-repo "modules view". This project runs against a daemon seeded by
  * fixture-server.mjs with FIXTURE_MULTI=1 (see playwright.config's MULTI_PORT):
@@ -120,6 +144,23 @@ test("selecting a repo in the sidebar focuses its module", async ({ page }) => {
   await expect(page.locator('.module[data-repo="alpha"]')).toHaveClass(/focused/);
   await expect(page.locator(".module.focused")).toHaveCount(1);
 });
+
+test("wheel scrolling releases programmatic repo focus", async ({ page }) => {
+  await lockBetaWhileAlphaIsAtScrollerTop(page);
+  await page.locator(".modmain").hover();
+  await page.mouse.wheel(0, -10_000);
+  await expect.poll(() => moduleAtScrollerTop(page)).toBe("alpha");
+  await expect(page.locator('.module[data-repo="alpha"]')).toHaveClass(/focused/);
+});
+
+for (const key of ["Home", "ArrowUp"] as const) {
+  test(`${key} scrolling releases programmatic repo focus`, async ({ page }) => {
+    await lockBetaWhileAlphaIsAtScrollerTop(page);
+    await page.getByRole("button", { name: "Collapse beta" }).press(key);
+    await expect.poll(() => moduleAtScrollerTop(page)).toBe("alpha");
+    await expect(page.locator('.module[data-repo="alpha"]')).toHaveClass(/focused/);
+  });
+}
 
 test("desktop follow mode focuses the changed repo and hunk", async ({ page }) => {
   await page.goto("/?shell=desktop");

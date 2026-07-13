@@ -212,8 +212,7 @@ export const ModuleSection = memo(function ModuleSection({
   );
 });
 
-/** A repo module: line 1 names repo/branch/PR/status/stats, line 2 carries
- *  the review picker. Multi-repo adds the band + collapse caret. */
+/** A repo module with one compact context row. Multi-repo adds the band and collapse caret. */
 function StackedModule({
   repo,
   repoLabel,
@@ -265,7 +264,7 @@ function StackedModule({
       data-repo={repo}
     >
       <header className="mod-head">
-        <div className="mh-line1">
+        <div className="mh-row">
           {collapsible && <span className="mod-band" aria-hidden="true" />}
           {collapsible && (
             <button
@@ -289,6 +288,19 @@ function StackedModule({
             </span>
           </span>
           <PullRequestBadge pullRequest={pullRequest} />
+          <span className="mh-target">
+            <TargetPicker
+              repo={repo}
+              worktree={worktree}
+              defaultBranch={defaultBranch}
+              currentBranch={branch}
+              target={target}
+              presentation={presentation}
+              onTarget={onTarget}
+              refs={refs}
+              refThreadCounts={refThreadCounts}
+            />
+          </span>
           <span className="mh-stat">
             {hasFiles ? (
               <>
@@ -301,19 +313,6 @@ function StackedModule({
               <span className="mh-files mod-empty">No changes</span>
             )}
           </span>
-        </div>
-        <div className="mh-line2">
-          <TargetPicker
-            repo={repo}
-            worktree={worktree}
-            defaultBranch={defaultBranch}
-            currentBranch={branch}
-            target={target}
-            presentation={presentation}
-            onTarget={onTarget}
-            refs={refs}
-            refThreadCounts={refThreadCounts}
-          />
         </div>
       </header>
       {!collapsed && <div className="mod-body">{children}</div>}
