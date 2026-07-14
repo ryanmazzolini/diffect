@@ -997,27 +997,28 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   top: calc(100% + 6px);
   left: 0;
   z-index: 55;
-  width: min(400px, calc(100vw - 16px));
+  width: min(440px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow-overlay);
   overflow-y: auto;
+  font-size: 12px;
   animation: pop-in var(--motion) both;
 }
 .review-target-heading {
   display: block;
-  padding: 12px 12px 5px;
+  padding: 10px 10px 4px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .review-scope-options {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 6px 12px 12px;
+  padding: 5px 10px 10px;
 }
 .review-scope-section {
   display: flex;
@@ -1071,10 +1072,36 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   flex: 1;
   border-top: 1px solid var(--border);
 }
-@media (max-height: 320px) {
-  .review-target-popover.ref-picker-open {
-    max-height: calc((100vh - 28px) / 2);
-  }
+.review-target-popover.ref-picker-open .review-scope-options > :not(:has(.ref-popover)) {
+  display: none;
+}
+.review-target-popover.ref-picker-open .compare-inline-controls:has(.ref-popover) {
+  display: block;
+}
+.review-target-popover.ref-picker-open
+  .compare-inline-controls:has(.ref-popover)
+  > :not(.ref-picker:has(.ref-popover)) {
+  display: none;
+}
+.review-target-popover .ref-picker:has(.ref-popover) {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+.review-target-popover .ref-popover {
+  position: static;
+  width: 100%;
+  max-height: none;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+.review-target-popover .ref-results {
+  max-height: min(420px, calc(100vh - 150px));
 }
 .local-targets {
   display: flex;
@@ -1149,12 +1176,14 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   }
 }
 .ref-search-input {
+  width: 100%;
   border: 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  padding: 10px 12px;
+  padding: 8px 10px;
   font: inherit;
+  font-size: 12px;
   outline: none;
 }
 .ref-search-input:focus {
@@ -1164,8 +1193,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .ref-search-error,
 .ref-empty {
   color: var(--muted);
-  font-size: 12px;
-  padding: 8px 12px;
+  font-size: 11px;
+  padding: 6px 10px;
 }
 .ref-search-error {
   color: var(--must-fix);
@@ -1184,9 +1213,9 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 }
 .ref-group-title {
   display: block;
-  padding: 8px 12px 4px;
+  padding: 7px 10px 3px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1199,8 +1228,9 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 11.5px;
   text-align: left;
   cursor: pointer;
 }
@@ -1212,7 +1242,10 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 7px;
+}
+.ref-option-main.commit {
+  width: 100%;
 }
 .ref-name,
 .ref-sha {
@@ -1229,10 +1262,31 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   color: var(--accent);
 }
 .ref-subject {
-  color: var(--muted);
+  min-width: 48px;
+  flex: 1 1 auto;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.ref-commit-meta {
+  min-width: 0;
+  max-width: 180px;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.ref-author {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ref-commit-meta time {
+  flex: none;
 }
 .ref-thread-count {
   flex: 0 0 auto;

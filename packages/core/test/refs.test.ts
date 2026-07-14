@@ -33,8 +33,12 @@ describe("listRefs", () => {
     expect(refs.remotes).toEqual([]);
     expect(refs.commits).toHaveLength(1);
     expect(refs.commitsReachRoot).toBe(true);
-    expect(refs.commits[0]!.subject).toBe("first commit");
+    expect(refs.commits[0]).toMatchObject({
+      subject: "first commit",
+      authorName: "T",
+    });
     expect(refs.commits[0]!.sha).toMatch(/^[0-9a-f]+$/);
+    expect(refs.commits[0]!.authoredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("hides the root boundary when recent commits do not reach it", async () => {
@@ -65,12 +69,23 @@ describe("listRefs", () => {
     expect(subjectMatches.commits[0]).toMatchObject({
       label: expect.stringMatching(/^[0-9a-f]+$/),
       subject: "searchable topic",
+      authorName: "T",
+      authoredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       sha: fullSha,
       value: fullSha,
     });
 
     const hashMatches = await searchRefs(dir, fullSha.slice(0, 8), 5);
     expect(hashMatches.commits[0]).toMatchObject({ sha: fullSha });
+
+    await git(dir, ["config", "user.name", "Recent Author"]);
+    await writeFile(join(dir, "a.txt"), "three\n");
+    await git(dir, ["commit", "-am", "authored change"]);
+    const authorMatches = await searchRefs(dir, "Recent Author", 5);
+    expect(authorMatches.commits[0]).toMatchObject({
+      subject: "authored change",
+      authorName: "Recent Author",
+    });
   });
 
   it("does not let a flag-like target inject a git option (argument injection)", async () => {

@@ -21,6 +21,10 @@ const isRemoteBranch = (name: string): boolean =>
 const DEFAULT_SEARCH_LIMIT = 12;
 const MAX_SEARCH_LIMIT = 50;
 const RECENT_COMMIT_LIMIT = 30;
+const COMMIT_FIELD_SEPARATOR = "\x1f";
+const COMMIT_RECORD_SEPARATOR = "\x1e";
+const LIST_COMMIT_FORMAT = "%h%x1f%s%x1f%an%x1f%aI%x1e";
+const SEARCH_COMMIT_FORMAT = "%h%x1f%H%x1f%s%x1f%an%x1f%aI%x1e";
 
 /**
  * List a repo's branches, tags, and recent commits for the compare picker.
@@ -52,14 +56,15 @@ export async function listRefs(repoRoot: string): Promise<RefList> {
       "refs/remotes",
     ]),
   ).filter(isRemoteBranch);
-  const recentCommitLines = lines(
-    await gitTry(repoRoot, ["log", `-${RECENT_COMMIT_LIMIT + 1}`, "--format=%h\t%s"]),
+  const recentCommits = parseListCommits(
+    await gitTry(repoRoot, [
+      "log",
+      `-${RECENT_COMMIT_LIMIT + 1}`,
+      `--format=${LIST_COMMIT_FORMAT}`,
+    ]),
   );
-  const commitsReachRoot = recentCommitLines.length <= RECENT_COMMIT_LIMIT;
-  const commits = recentCommitLines.slice(0, RECENT_COMMIT_LIMIT).map((l) => {
-    const tab = l.indexOf("\t");
-    return { sha: l.slice(0, tab), subject: l.slice(tab + 1) };
-  });
+  const commitsReachRoot = recentCommits.length <= RECENT_COMMIT_LIMIT;
+  const commits = recentCommits.slice(0, RECENT_COMMIT_LIMIT);
   let repoStartSha: string | null = null;
   try {
     // `mktree` derives the empty-tree id for either SHA-1 or SHA-256 repos.
@@ -73,7 +78,7 @@ export async function listRefs(repoRoot: string): Promise<RefList> {
 /**
  * Search selectable compare points server-side so the browser doesn't have to
  * render a painful all-history dropdown. Branches/tags are filtered by name;
- * commits search full reachable history by subject and by SHA prefix.
+ * commits search full reachable history by subject, author, and SHA prefix.
  */
 export async function searchRefs(
   repoRoot: string,
@@ -135,15 +140,15 @@ async function searchCommits(
 ): Promise<RefSearchOption[]> {
   const bySha = new Map<string, RefSearchOption>();
   const add = (raw: string | null) => {
-    for (const line of lines(raw)) {
-      const commit = parseCommitLine(line);
-      if (!commit) continue;
+    for (const commit of parseSearchCommits(raw)) {
       bySha.set(commit.sha, {
         kind: "commit",
         value: commit.sha,
         label: commit.shortSha,
         sha: commit.sha,
         subject: commit.subject,
+        authorName: commit.authorName,
+        authoredAt: commit.authoredAt,
       });
     }
   };
@@ -165,7 +170,7 @@ async function searchCommits(
         await gitTry(repoRoot, [
           "show",
           "-s",
-          "--format=%h\t%H\t%s",
+          `--format=${SEARCH_COMMIT_FORMAT}`,
           sha,
         ]),
       );
@@ -180,22 +185,60 @@ async function searchCommits(
       "--regexp-ignore-case",
       "--fixed-strings",
       `--grep=${query}`,
-      "--format=%h\t%H\t%s",
+      `--format=${SEARCH_COMMIT_FORMAT}`,
+    ]),
+  );
+  add(
+    await gitTry(repoRoot, [
+      "log",
+      "--all",
+      `--max-count=${limit}`,
+      "--regexp-ignore-case",
+      "--extended-regexp",
+      `--author=${escapeExtendedRegExp(query)}`,
+      `--format=${SEARCH_COMMIT_FORMAT}`,
     ]),
   );
   return [...bySha.values()].slice(0, limit);
 }
 
 function commitLogArgs(limit: number): string[] {
-  return ["log", "--all", `--max-count=${limit}`, "--format=%h\t%H\t%s"];
+  return ["log", "--all", `--max-count=${limit}`, `--format=${SEARCH_COMMIT_FORMAT}`];
 }
 
-function parseCommitLine(line: string):
-  | { shortSha: string; sha: string; subject: string }
-  | null {
-  const [shortSha, sha, ...subjectParts] = line.split("\t");
-  if (!shortSha || !sha) return null;
-  return { shortSha, sha, subject: subjectParts.join("\t") };
+function parseListCommits(raw: string | null): RefList["commits"] {
+  return commitRecords(raw).flatMap((fields) => {
+    const [sha, subject, authorName, authoredAt] = fields;
+    return sha && subject !== undefined && authorName !== undefined && authoredAt
+      ? [{ sha, subject, authorName, authoredAt }]
+      : [];
+  });
+}
+
+function parseSearchCommits(raw: string | null): Array<{
+  shortSha: string;
+  sha: string;
+  subject: string;
+  authorName: string;
+  authoredAt: string;
+}> {
+  return commitRecords(raw).flatMap((fields) => {
+    const [shortSha, sha, subject, authorName, authoredAt] = fields;
+    return shortSha && sha && subject !== undefined && authorName !== undefined && authoredAt
+      ? [{ shortSha, sha, subject, authorName, authoredAt }]
+      : [];
+  });
+}
+
+function commitRecords(raw: string | null): string[][] {
+  return (raw ?? "")
+    .split(COMMIT_RECORD_SEPARATOR)
+    .map((record) => record.trim().split(COMMIT_FIELD_SEPARATOR))
+    .filter((fields) => fields.some(Boolean));
+}
+
+function escapeExtendedRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function clampLimit(limit: number): number {

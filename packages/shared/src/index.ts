@@ -204,7 +204,12 @@ export interface RefList {
   tags: string[];
   /** Remote-tracking branches by short name (e.g. "origin/main"); excludes each remote's symbolic HEAD alias. */
   remotes: string[];
-  commits: { sha: string; subject: string }[];
+  commits: {
+    sha: string;
+    subject: string;
+    authorName: string;
+    authoredAt: string;
+  }[];
   /** True when `commits` contains the complete reachable history rather than only its recent tail. */
   commitsReachRoot: boolean;
   /** Git's empty tree for this repository's object format, used by the synthetic empty-repo base. */
@@ -222,6 +227,10 @@ export interface RefSearchOption {
   label: string;
   /** Commit subject, when known. */
   subject?: string;
+  /** Commit author name, when known. */
+  authorName?: string;
+  /** Commit author timestamp in ISO 8601 form, when known. */
+  authoredAt?: string;
   /** Full commit SHA for commit results. */
   sha?: string;
 }

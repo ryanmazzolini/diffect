@@ -16,6 +16,7 @@ import type {
   ReviewTargetPresentation,
 } from "@diffect/shared";
 import { api } from "../api.js";
+import { relativeTime } from "../relativeTime.js";
 
 const EMPTY_REPO_LABEL = "empty repo";
 
@@ -391,7 +392,7 @@ function LiveReviewScopePicker({
           includeHead={false}
           placeholder="Find a branch…"
           autoFocus
-          portalPopover
+          portalPopover={false}
           positionAnchorRef={menuRef}
           stayOutsideAnchor
           onOpenChange={onPickerOpenChange}
@@ -417,7 +418,7 @@ function LiveReviewScopePicker({
             selectedLabel={baseLabel}
             fallbackResults={fallbackResults}
             trailingCommitOptions={showEmptyRepoOption && repoStartOption ? [repoStartOption] : []}
-            portalPopover
+            portalPopover={false}
             positionAnchorRef={menuRef}
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
@@ -437,7 +438,7 @@ function LiveReviewScopePicker({
             selectedLabel={compareLabel}
             fallbackResults={fallbackResults}
             refThreadCounts={refThreadCounts}
-            portalPopover
+            portalPopover={false}
             positionAnchorRef={menuRef}
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
@@ -503,7 +504,7 @@ function RefSearchPicker({
   allowedKinds,
   includeHead = true,
   trailingCommitOptions = [],
-  placeholder = "Find a branch, tag, or commit…",
+  placeholder = "Search refs, commits, or authors…",
   autoFocus = false,
   refThreadCounts,
   portalPopover,
@@ -526,6 +527,8 @@ function RefSearchPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const branchOnly =
+    allowedKinds?.every((kind) => kind === "branch" || kind === "remote") === true;
   const coords = usePopoverPosition(
     open,
     portalPopover,
@@ -545,7 +548,7 @@ function RefSearchPicker({
     setError(null);
     const handle = window.setTimeout(() => {
       api
-        .searchRefs(repo, { query, limit: query ? 12 : 30, worktree })
+        .searchRefs(repo, { query, limit: branchOnly ? 50 : query ? 12 : 30, worktree })
         .then((next) => {
           if (current === seq.current) {
             setResults(next);
@@ -560,7 +563,7 @@ function RefSearchPicker({
         });
     }, query ? 120 : 0);
     return () => window.clearTimeout(handle);
-  }, [open, query, repo, worktree]);
+  }, [branchOnly, open, query, repo, worktree]);
 
   useEffect(() => {
     if (!open) return;
@@ -587,7 +590,6 @@ function RefSearchPicker({
   );
   const flat = groups.flatMap((group) => group.options);
   const hasResults = flat.length > 0;
-  const branchOnly = allowedKinds?.every((kind) => kind === "branch" || kind === "remote") === true;
 
   const choose = (option: RefSearchOption) => {
     onSelect(option);
@@ -602,8 +604,6 @@ function RefSearchPicker({
   const popover = open ? (
     <span
       className="ref-popover"
-      role="dialog"
-      aria-labelledby={buttonId}
       ref={popoverRef}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -681,7 +681,15 @@ function RefSearchPicker({
       />
 
       <span className="ref-results-meta" role="status" aria-live="polite" aria-atomic="true">
-        {loading ? "Searching…" : error ? "Search failed" : branchOnly ? "Branches" : "Branches, tags, and commits"}
+        {loading
+          ? "Searching…"
+          : error
+            ? "Search failed"
+            : branchOnly
+              ? "Branches"
+              : query
+                ? "Matching refs and commits"
+                : "Suggested refs and recent commits"}
       </span>
       {error && <span className="ref-search-error" role="alert">{error}</span>}
 
@@ -697,6 +705,8 @@ function RefSearchPicker({
                 const idx = flat.indexOf(option);
                 const threadCount = refThreadCounts?.get(option.value);
                 const countLabel = refThreadCountLabel(threadCount);
+                const commitTime = option.authoredAt ? relativeTime(option.authoredAt) : "";
+                const hasCommitDetails = option.kind === "commit" && Boolean(option.subject);
                 return (
                   <li key={`${option.kind}-${option.value}`}>
                     <button
@@ -708,12 +718,21 @@ function RefSearchPicker({
                       onMouseEnter={() => setActiveIndex(idx)}
                       onClick={() => choose(option)}
                     >
-                      <span className="ref-option-main">
+                      <span className={`ref-option-main${hasCommitDetails ? " commit" : ""}`}>
                         <span className={option.kind === "commit" ? "ref-sha" : "ref-name"}>
                           {option.label}
                         </span>
-                        {option.kind === "commit" && option.subject && (
-                          <span className="ref-subject">{option.subject}</span>
+                        {hasCommitDetails && (
+                          <>
+                            <span className="ref-subject">{option.subject}</span>
+                            {(option.authorName || commitTime) && (
+                              <span className="ref-commit-meta">
+                                {option.authorName && <span className="ref-author">{option.authorName}</span>}
+                                {option.authorName && commitTime && <span aria-hidden="true">·</span>}
+                                {commitTime && <time dateTime={option.authoredAt}>{commitTime}</time>}
+                              </span>
+                            )}
+                          </>
                         )}
                         {countLabel && (
                           <span
@@ -885,6 +904,8 @@ function refsToSearchResults(refs: RefList | null): RefSearchResults {
       value: commit.sha,
       label: commit.sha,
       subject: commit.subject,
+      authorName: commit.authorName,
+      authoredAt: commit.authoredAt,
       sha: commit.sha,
     })),
   };
@@ -903,19 +924,33 @@ function groupedOptions(
     allowed(option.kind) &&
     (needle === "" ||
       option.label.toLowerCase().includes(needle) ||
-      option.subject?.toLowerCase().includes(needle) === true);
+      option.subject?.toLowerCase().includes(needle) === true ||
+      option.authorName?.toLowerCase().includes(needle) === true);
   const head: RefSearchOption[] =
     includeHead && matches({ kind: "branch", value: "HEAD", label: "HEAD" })
       ? [{ kind: "branch", value: "HEAD", label: "HEAD", subject: "current checkout" }]
       : [];
+  const branches = [...head, ...results.branches.filter(matches)];
+  const remotes = results.remotes.filter(matches);
+  const tags = results.tags.filter(matches);
+  const commits = results.commits.filter(matches);
+  const repositoryOptions = trailingCommitOptions.filter(matches);
+  const branchOnly =
+    allowedKinds?.every((kind) => kind === "branch" || kind === "remote") === true;
+
+  if (branchOnly) {
+    return [
+      { title: "Branches", options: branches },
+      { title: "Remote branches", options: remotes },
+    ].filter((group) => group.options.length > 0);
+  }
+
   return [
-    { title: "Branches", options: [...head, ...results.branches.filter(matches)] },
-    { title: "Remote branches", options: results.remotes.filter(matches) },
-    { title: "Tags", options: results.tags.filter(matches) },
-    {
-      title: "Commits",
-      options: [...results.commits.filter(matches), ...trailingCommitOptions.filter(matches)],
-    },
+    { title: "Branches", options: branches.slice(0, 4) },
+    { title: needle ? "Commits" : "Recent commits", options: commits.slice(0, 8) },
+    { title: "Remote branches", options: remotes.slice(0, 4) },
+    { title: "Tags", options: tags.slice(0, 3) },
+    { title: "Repository", options: repositoryOptions },
   ].filter((group) => group.options.length > 0);
 }
 

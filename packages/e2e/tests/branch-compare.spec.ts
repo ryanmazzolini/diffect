@@ -86,16 +86,20 @@ test("empty repo follows commits and appears only in the base picker", async ({ 
   const dialog = page.getByRole("dialog", { name: "Review changes" });
   await dialog.getByRole("button", { name: "Base: main", exact: true }).click();
   const options = page.getByRole("option");
-  const optionCount = await options.count();
-  expect(optionCount).toBeGreaterThan(1);
-  await expect(options.nth(optionCount - 2)).toContainText("base");
+  expect(await page.locator(".ref-group-title").allTextContents()).toEqual([
+    "Branches",
+    "Recent commits",
+    "Tags",
+    "Repository",
+  ]);
+  await expect(page.getByRole("option", { name: /^[0-9a-f]+\s+base\s+E2E/ })).toBeVisible();
   const emptyRepo = options.last();
   await expect(emptyRepo).toHaveAccessibleName("empty repo");
   await emptyRepo.click();
   await expect(dialog.getByRole("button", { name: "Base: empty repo" })).toBeFocused();
 
   await dialog.getByRole("button", { name: "Compare: HEAD" }).click();
-  let search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  let search = page.getByPlaceholder("Search refs, commits, or authors…");
   await search.fill("main");
   await page.getByRole("option", { name: "main", exact: true }).click();
 
@@ -107,10 +111,62 @@ test("empty repo follows commits and appears only in the base picker", async ({ 
 
   // The empty repository is a meaningful base, not a valid compare endpoint.
   await dialog.getByRole("button", { name: "Compare: main" }).click();
-  search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  search = page.getByPlaceholder("Search refs, commits, or authors…");
   await search.fill("empty repo");
   await expect(page.getByRole("option", { name: "empty repo" })).toHaveCount(0);
   await expect(page.locator(".ref-empty")).toContainText("No refs or commits match");
+});
+
+test("puts a compact recent commit window before remote branches", async ({ page }) => {
+  await page.route("**/refs/search?**", async (route) => {
+    const response = await route.fetch();
+    const refs = await response.json();
+    const authoredAt = new Date().toISOString();
+    const options = (kind: "branch" | "remote" | "tag", count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        kind,
+        value: `${kind}-${index}`,
+        label: `${kind}-${index}`,
+      }));
+    await route.fulfill({
+      response,
+      json: {
+        ...refs,
+        branches: options("branch", 10),
+        remotes: options("remote", 10),
+        tags: options("tag", 10),
+        commits: Array.from({ length: 10 }, (_, index) => ({
+          kind: "commit",
+          value: `${index}`.padStart(40, "a"),
+          label: `${index}`.padStart(7, "a"),
+          sha: `${index}`.padStart(40, "a"),
+          subject: `recent commit ${index}`,
+          authorName: "E2E",
+          authoredAt,
+        })),
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.locator(".target-picker .review-target-trigger").click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  await dialog.getByRole("button", { name: "Base: main", exact: true }).click();
+  await expect(dialog.locator(".ref-results-meta")).toHaveText(
+    "Suggested refs and recent commits",
+  );
+
+  const groups = dialog.locator(".ref-group");
+  await expect(groups.locator(".ref-group-title")).toHaveText([
+    "Branches",
+    "Recent commits",
+    "Remote branches",
+    "Tags",
+    "Repository",
+  ]);
+  expect(await groups.evaluateAll((elements) =>
+    elements.map((element) => element.querySelectorAll('[role="option"]').length),
+  )).toEqual([4, 8, 4, 3, 1]);
 });
 
 test("hides empty repo when the recent commit list does not reach the root", async ({ page }) => {
@@ -125,7 +181,7 @@ test("hides empty repo when the recent commit list does not reach the root", asy
   await page.locator(".target-picker .review-target-trigger").click();
   const dialog = page.getByRole("dialog", { name: "Review changes" });
   await dialog.getByRole("button", { name: "Base: main", exact: true }).click();
-  const search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  const search = page.getByPlaceholder("Search refs, commits, or authors…");
   await search.fill("empty repo");
   await expect(page.getByRole("option", { name: "empty repo" })).toHaveCount(0);
 });
@@ -140,10 +196,10 @@ test("compare ref pickers support keyboard search and live updates", async ({ pa
   const compare = dialog.getByRole("button", { name: "Compare: HEAD" });
   await compare.focus();
   await compare.press("Enter");
-  let search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  let search = page.getByPlaceholder("Search refs, commits, or authors…");
   await expect(page.locator(".ref-results-meta")).toHaveAttribute("aria-live", "polite");
   await search.fill("base");
-  await expect(page.getByRole("option", { name: /^[0-9a-f]+\s+base$/ })).toBeVisible();
+  await expect(page.getByRole("option", { name: /^[0-9a-f]+\s+base\s+E2E/ })).toBeVisible();
   await search.press("Enter");
 
   const selected = dialog.getByRole("button", { name: /^Compare: [0-9a-f]{7}$/ });
@@ -151,14 +207,36 @@ test("compare ref pickers support keyboard search and live updates", async ({ pa
   await expect(trigger).toHaveText(/^main → [0-9a-f]+▾$/);
 
   await dialog.getByRole("button", { name: "Base: main", exact: true }).click();
-  search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  search = page.getByPlaceholder("Search refs, commits, or authors…");
   await search.fill("v1");
   await expect(page.getByRole("option", { name: "v1", exact: true })).toBeVisible();
   await search.press("Enter");
   await expect(dialog.getByRole("button", { name: "Base: v1" })).toBeFocused();
 });
 
-test("keeps nested pickers separate and reachable in a short narrow viewport", async ({ page }) => {
+test("commit search shows author and time in one compact row", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".target-picker .review-target-trigger").click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  await dialog.getByRole("button", { name: "Base: main", exact: true }).click();
+
+  const search = page.getByPlaceholder("Search refs, commits, or authors…");
+  await search.fill("E2E");
+  const commit = page.getByRole("option", { name: /^[0-9a-f]+\s+base\s+E2E/ });
+  await expect(commit).toBeVisible();
+  await expect(commit.locator(".ref-author")).toHaveText("E2E");
+  await expect(commit.locator("time")).not.toBeEmpty();
+
+  const centers = await commit
+    .locator(".ref-sha, .ref-subject, .ref-commit-meta")
+    .evaluateAll((elements) => elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.top + rect.height / 2;
+    }));
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(3);
+});
+
+test("keeps ref search inside one picker in a short narrow viewport", async ({ page }) => {
   await page.setViewportSize({ width: 420, height: 220 });
   await page.goto("/");
   const trigger = page.locator(".target-picker .review-target-trigger");
@@ -166,7 +244,7 @@ test("keeps nested pickers separate and reachable in a short narrow viewport", a
 
   const dialog = page.getByRole("dialog", { name: "Review changes" });
   await expect(dialog).toBeVisible();
-  const dialogBox = await dialog.boundingBox();
+  let dialogBox = await dialog.boundingBox();
   expect(dialogBox).not.toBeNull();
   expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
   expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
@@ -176,29 +254,27 @@ test("keeps nested pickers separate and reachable in a short narrow viewport", a
   const base = dialog.getByRole("button", { name: "Base: main", exact: true });
   await base.scrollIntoViewIfNeeded();
   await base.press("Enter");
-  const refPopover = page.locator(".ref-popover");
-  await expect(refPopover).toBeVisible();
-  const refBox = await refPopover.boundingBox();
-  expect(refBox).not.toBeNull();
-  expect(refBox!.x).toBeGreaterThanOrEqual(0);
-  expect(refBox!.y).toBeGreaterThanOrEqual(0);
-  expect(refBox!.x + refBox!.width).toBeLessThanOrEqual(420);
-  expect(refBox!.y + refBox!.height).toBeLessThanOrEqual(220);
-
-  const panelsAreSeparated = async () => {
-    const [outer, nested] = await Promise.all([dialog.boundingBox(), refPopover.boundingBox()]);
-    if (!outer || !nested) return false;
-    return nested.y + nested.height <= outer.y || nested.y >= outer.y + outer.height;
-  };
-  await expect.poll(panelsAreSeparated).toBe(true);
+  const refSearch = dialog.locator(".ref-popover");
+  await expect(refSearch).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.locator("body > .ref-popover")).toHaveCount(0);
+  const [searchBox, activeDialogBox] = await Promise.all([
+    page.getByPlaceholder("Search refs, commits, or authors…").boundingBox(),
+    dialog.boundingBox(),
+  ]);
+  expect(searchBox).not.toBeNull();
+  expect(activeDialogBox).not.toBeNull();
+  expect(searchBox!.x).toBeGreaterThanOrEqual(activeDialogBox!.x);
+  expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(
+    activeDialogBox!.x + activeDialogBox!.width,
+  );
 
   await page.setViewportSize({ width: 420, height: 180 });
-  await expect(page.getByPlaceholder("Find a branch, tag, or commit…")).toBeVisible();
-  await expect.poll(panelsAreSeparated).toBe(true);
-  const resizedRefBox = await refPopover.boundingBox();
-  expect(resizedRefBox).not.toBeNull();
-  expect(resizedRefBox!.y).toBeGreaterThanOrEqual(0);
-  expect(resizedRefBox!.y + resizedRefBox!.height).toBeLessThanOrEqual(180);
+  await expect(page.getByPlaceholder("Search refs, commits, or authors…")).toBeVisible();
+  dialogBox = await dialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+  expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(180);
 });
 
 test("restores empty repo labels and target-only comparisons", async ({ page }) => {
@@ -269,9 +345,9 @@ test("external local target changes cancel a pending live comparison", async ({ 
   const dialog = page.getByRole("dialog", { name: "Review changes" });
 
   await dialog.getByRole("button", { name: "Compare: HEAD" }).click();
-  const search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  const search = page.getByPlaceholder("Search refs, commits, or authors…");
   await search.fill("base");
-  await page.getByRole("option", { name: /^[0-9a-f]+\s+base$/ }).click();
+  await page.getByRole("option", { name: /^[0-9a-f]+\s+base\s+E2E/ }).click();
   await staged.evaluate((button: HTMLButtonElement) => button.click());
 
   await expect(staged).toHaveAttribute("aria-pressed", "true");

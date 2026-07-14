@@ -378,7 +378,7 @@ test("disk updates in one repo do not delay another repo", async ({ page }) => {
   expect(refreshedRepos.filter((repo) => repo === "beta")).toHaveLength(1);
 });
 
-test("a module's ref picker popover escapes the module scroll clip", async ({ page }) => {
+test("a module's ref search stays in the body-level task picker", async ({ page }) => {
   await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');
   await expect(alpha).toBeVisible();
@@ -393,16 +393,16 @@ test("a module's ref picker popover escapes the module scroll clip", async ({ pa
   const baseTrigger = dialog.getByRole("button", { name: "Base: main", exact: true });
   await baseTrigger.click();
 
-  // The nested ref search stays under the body-level task popover, so the module
-  // scroll container cannot clip it.
-  const popover = page.locator(".ref-popover");
+  // Ref search expands inside the body-level task popover, so it remains a
+  // single surface and the module scroll container cannot clip it.
+  const popover = dialog.locator(".ref-popover");
   await expect(popover).toBeVisible();
   await expect(page.locator(".modmain .ref-popover")).toHaveCount(0);
   const box = await popover.boundingBox();
   expect(box).not.toBeNull();
   expect(box.height).toBeGreaterThan(100);
 
-  await page.getByPlaceholder("Find a branch, tag, or commit…").fill("main");
+  await page.getByPlaceholder("Search refs, commits, or authors…").fill("main");
   await page.getByRole("option", { name: /main/ }).first().click();
   await expect(baseTrigger).toBeFocused();
   await expect(page.locator(".ref-popover")).toHaveCount(0);
@@ -412,10 +412,10 @@ test("a module's ref picker popover escapes the module scroll clip", async ({ pa
   await expect(dialog).toBeVisible();
   await expect(page.locator(".ref-search-error")).toHaveCount(0);
 
-  // Escape from nested search returns to its trigger; Escape again closes the
+  // Escape from ref search returns to its trigger; Escape again closes the
   // whole task popover and restores the module trigger.
   await baseTrigger.click();
-  await page.getByPlaceholder("Find a branch, tag, or commit…").press("Escape");
+  await page.getByPlaceholder("Search refs, commits, or authors…").press("Escape");
   await expect(baseTrigger).toBeFocused();
   await baseTrigger.press("Escape");
   await expect(dialog).toBeHidden();
