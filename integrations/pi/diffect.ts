@@ -4,13 +4,24 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+  acceptsFeedback,
+  filterFeedbackJson,
+  rememberEventId,
+  watchFeedbackEvents,
+  type FeedbackEvent,
+  type WatchConnectionState,
+} from "./watch.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:7421";
 const DEFAULT_TARGET = "work";
 const MAX_OUTPUT = 50_000;
 const WORKSPACE_ENTRY = "diffect-workspace";
+const WATCH_ENTRY = "diffect-feedback-watch";
+const WATCH_STATUS = "diffect-watch";
+const FEEDBACK_BATCH_MS = 250;
 const MAX_WORKSPACE_CHOICES = 12;
 
 type Command = { command: string; args: string[] };
@@ -19,10 +30,24 @@ type ReviewMode = "feedback" | "proactive";
 type ReviewWorkspace = { workspaceRoot: string; anchorRoot: string | null };
 type WorkspaceCandidate = ReviewWorkspace & { dirty: boolean; score: number; sources: Set<string> };
 type WorkspaceResolveOptions = { forcePicker?: boolean; interactive?: boolean; save?: boolean };
+type EnsureDaemonOptions = { openApp?: boolean };
+type WatchConfig = {
+  enabled: boolean;
+  workspaceRoot: string;
+  agentLabel: string;
+  includeAgents: boolean;
+};
+type WatchRuntime = {
+  config: WatchConfig;
+  controller: AbortController;
+  agentName: string;
+  seenEventIds: Set<string>;
+};
 type SessionLike = {
   sessionManager?: {
     getBranch?: () => unknown[];
     getEntries?: () => unknown[];
+    getSessionId?: () => string;
   };
 };
 type CwdContext = SessionLike & {
@@ -31,6 +56,223 @@ type CwdContext = SessionLike & {
 };
 
 export default function diffectExtension(pi: ExtensionAPI) {
+  let sessionContext: ExtensionContext | null = null;
+  let watchConfig: WatchConfig | null = null;
+  let watchRuntime: WatchRuntime | null = null;
+  let sessionAgentName = "pi";
+  let feedbackTimer: NodeJS.Timeout | null = null;
+  let flushingFeedback = false;
+  const pendingFeedback = new Map<string, FeedbackEvent>();
+
+  function stopFeedbackWatch() {
+    watchRuntime?.controller.abort();
+    watchRuntime = null;
+    if (feedbackTimer) clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+    pendingFeedback.clear();
+    sessionContext?.ui.setStatus(WATCH_STATUS, undefined);
+  }
+
+  function scheduleFeedback() {
+    if (feedbackTimer) return;
+    feedbackTimer = setTimeout(() => {
+      feedbackTimer = null;
+      flushFeedback();
+    }, FEEDBACK_BATCH_MS);
+  }
+
+  function flushFeedback() {
+    const ctx = sessionContext;
+    const runtime = watchRuntime;
+    if (flushingFeedback || !ctx || !runtime || pendingFeedback.size === 0) return;
+    if (!ctx.isIdle()) return;
+
+    const events = [...pendingFeedback.values()];
+    pendingFeedback.clear();
+    flushingFeedback = true;
+    try {
+      pi.sendUserMessage(
+        diffectFeedbackPrompt(events, runtime.config.workspaceRoot, runtime.agentName),
+      );
+    } catch {
+      // Another extension may have started a turn after isIdle(). Preserve the
+      // batch and let agent_settled retry instead of losing or duplicating it.
+      if (watchRuntime === runtime) {
+        for (const event of events) pendingFeedback.set(event.eventId, event);
+      }
+    } finally {
+      flushingFeedback = false;
+    }
+  }
+
+  function watchStatus(state: WatchConnectionState): string {
+    if (state === "connected") return "Diffect: watching feedback";
+    if (state === "reconnecting") return "Diffect: reconnecting";
+    return "Diffect: connecting";
+  }
+
+  async function startFeedbackWatch(
+    ctx: ExtensionContext,
+    config: WatchConfig,
+  ): Promise<string | null> {
+    sessionContext = ctx;
+    sessionAgentName = scopedAgentName(config.agentLabel, ctx.sessionManager.getSessionId());
+    if (
+      watchRuntime &&
+      !watchRuntime.controller.signal.aborted &&
+      sameWatchConfig(watchRuntime.config, config)
+    ) {
+      return watchRuntime.agentName;
+    }
+
+    stopFeedbackWatch();
+    watchConfig = config;
+    const controller = new AbortController();
+    const runtime: WatchRuntime = {
+      config,
+      controller,
+      agentName: sessionAgentName,
+      seenEventIds: new Set(),
+    };
+    watchRuntime = runtime;
+    ctx.ui.setStatus(WATCH_STATUS, "Diffect: connecting");
+
+    try {
+      const connectDaemon = async (signal: AbortSignal) => {
+        const url = await ensureDaemon(pi, config.workspaceRoot, signal, { openApp: false });
+        await registerWorkspace(url, config.workspaceRoot, signal);
+        return url;
+      };
+      const baseUrl = await connectDaemon(controller.signal);
+      if (watchRuntime !== runtime || controller.signal.aborted) return null;
+
+      void watchFeedbackEvents({
+        baseUrl,
+        signal: controller.signal,
+        reconnect: connectDaemon,
+        onState(state) {
+          if (watchRuntime === runtime) sessionContext?.ui.setStatus(WATCH_STATUS, watchStatus(state));
+        },
+        onFeedback(event) {
+          if (watchRuntime !== runtime) return;
+          if (
+            !acceptsFeedback(event, {
+              workspaceRoot: config.workspaceRoot,
+              includeAgents: config.includeAgents,
+              agentName: runtime.agentName,
+            }) ||
+            !rememberEventId(runtime.seenEventIds, event.eventId)
+          ) {
+            return;
+          }
+          pendingFeedback.set(event.eventId, event);
+          scheduleFeedback();
+        },
+      }).catch((error) => {
+        if (watchRuntime !== runtime || controller.signal.aborted) return;
+        ctx.ui.setStatus(WATCH_STATUS, "Diffect: disconnected");
+        ctx.ui.notify(`Diffect feedback watch stopped: ${messageOf(error)}`, "warning");
+      });
+      return runtime.agentName;
+    } catch (error) {
+      if (watchRuntime === runtime) {
+        watchRuntime = null;
+        ctx.ui.setStatus(WATCH_STATUS, "Diffect: disconnected");
+      }
+      if (controller.signal.aborted) return null;
+      throw error;
+    }
+  }
+
+  pi.on("session_start", (_event, ctx) => {
+    sessionContext = ctx;
+    watchConfig = latestWatchConfig(ctx);
+    sessionAgentName = scopedAgentName(
+      watchConfig?.agentLabel ?? "pi",
+      ctx.sessionManager.getSessionId(),
+    );
+    if (!watchConfig?.enabled) return;
+
+    void startFeedbackWatch(ctx, watchConfig).catch((error) => {
+      ctx.ui.setStatus(WATCH_STATUS, "Diffect: disconnected");
+      ctx.ui.notify(`Diffect feedback reconnect failed: ${messageOf(error)}`, "warning");
+    });
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    sessionContext = ctx;
+    flushFeedback();
+  });
+
+  pi.on("session_shutdown", (_event, ctx) => {
+    stopFeedbackWatch();
+    ctx.ui.setStatus(WATCH_STATUS, undefined);
+    sessionContext = null;
+  });
+
+  pi.registerCommand("diffect-connect", {
+    description: "Watch this Pi session's Diffect feedback",
+    handler: async (args, ctx) => {
+      try {
+        const parsed = parseConnectArgs(args);
+        const workspace = await resolveReviewWorkspace(
+          pi,
+          ctx,
+          parsed.workspace,
+          undefined,
+          { interactive: true, save: true },
+        );
+        const config: WatchConfig = {
+          enabled: true,
+          workspaceRoot: workspace.workspaceRoot,
+          agentLabel: parsed.agentLabel ?? watchConfig?.agentLabel ?? "pi",
+          includeAgents: parsed.includeAgents ?? watchConfig?.includeAgents ?? false,
+        };
+        validateAgentLabel(config.agentLabel);
+        if (
+          watchRuntime &&
+          !watchRuntime.controller.signal.aborted &&
+          sameWatchConfig(watchRuntime.config, config)
+        ) {
+          ctx.ui.notify(
+            `Already watching Diffect feedback for ${shortPath(config.workspaceRoot)} as ${watchRuntime.agentName}`,
+            "info",
+          );
+          return;
+        }
+        const name = await startFeedbackWatch(ctx, config);
+        if (!name) return;
+        watchConfig = config;
+        pi.appendEntry(WATCH_ENTRY, config);
+        ctx.ui.notify(
+          `Watching Diffect feedback for ${shortPath(config.workspaceRoot)} as ${name}${
+            config.includeAgents ? " (including other agents)" : ""
+          }`,
+          "info",
+        );
+      } catch (error) {
+        ctx.ui.notify(`Diffect connect failed: ${messageOf(error)}`, "error");
+      }
+    },
+  });
+
+  pi.registerCommand("diffect-disconnect", {
+    description: "Stop watching Diffect feedback",
+    handler: async (_args, ctx) => {
+      const previous = watchConfig ?? latestWatchConfig(ctx);
+      if (!watchRuntime && !previous?.enabled) {
+        ctx.ui.notify("Diffect feedback watch is already disconnected", "info");
+        return;
+      }
+      stopFeedbackWatch();
+      if (previous) {
+        watchConfig = { ...previous, enabled: false };
+        pi.appendEntry(WATCH_ENTRY, watchConfig);
+      }
+      ctx.ui.notify("Diffect feedback watch disconnected", "info");
+    },
+  });
+
   pi.registerCommand("diffect", {
     description: "Open the current Diffect workspace",
     handler: async (args, ctx) => {
@@ -113,6 +355,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       status: Type.Optional(Type.String({ description: "open, closed, or all; default: open" })),
+      ids: Type.Optional(Type.Array(Type.String(), { description: "Return only these thread ids" })),
       repo: Type.Optional(Type.String()),
       worktree: Type.Optional(Type.String()),
       workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
@@ -122,7 +365,8 @@ export default function diffectExtension(pi: ExtensionAPI) {
       if (params.status && params.status !== "all") args.push("--status", params.status);
       if (params.repo) args.push("--repo", params.repo);
       if (params.worktree) args.push("--worktree", params.worktree);
-      return runDiffectTool(pi, ctx, args, signal, params.workspace);
+      const result = await runDiffectTool(pi, ctx, args, signal, params.workspace);
+      return params.ids ? filterFeedbackResult(result, params.ids) : result;
     },
   });
 
@@ -133,14 +377,14 @@ export default function diffectExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       id: Type.String({ description: "Diffect thread id" }),
       body: Type.String({ description: "Reply body" }),
-      agent: Type.Optional(Type.String({ description: "Agent author name; default: pi" })),
+      agent: Type.Optional(Type.String({ description: "Agent author name; defaults to this Pi session" })),
       workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       return runDiffectTool(
         pi,
         ctx,
-        ["reply", params.id, "--agent", params.agent ?? "pi", "--body", params.body],
+        ["reply", params.id, "--agent", params.agent ?? sessionAgentName, "--body", params.body],
         signal,
         params.workspace,
       );
@@ -154,14 +398,14 @@ export default function diffectExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       id: Type.String({ description: "Diffect thread id" }),
       summary: Type.String({ description: "What changed / why it is resolved" }),
-      agent: Type.Optional(Type.String({ description: "Agent author name; default: pi" })),
+      agent: Type.Optional(Type.String({ description: "Agent author name; defaults to this Pi session" })),
       workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       return runDiffectTool(
         pi,
         ctx,
-        ["resolve", params.id, "--agent", params.agent ?? "pi", "--summary", params.summary],
+        ["resolve", params.id, "--agent", params.agent ?? sessionAgentName, "--summary", params.summary],
         signal,
         params.workspace,
       );
@@ -224,7 +468,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
       worktree: Type.Optional(Type.String()),
       workspace: Type.Optional(Type.String({ description: "Workspace/space path; inferred when omitted" })),
       body: Type.String(),
-      agent: Type.Optional(Type.String({ description: "Agent author name; default: pi" })),
+      agent: Type.Optional(Type.String({ description: "Agent author name; defaults to this Pi session" })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const args = [
@@ -238,7 +482,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
         "--target",
         params.target ?? DEFAULT_TARGET,
         "--agent",
-        params.agent ?? "pi",
+        params.agent ?? sessionAgentName,
         "--body",
         params.body,
       ];
@@ -289,6 +533,79 @@ function splitArgs(raw: string): string[] {
   return raw.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((s) => s.replace(/^(["'])(.*)\1$/, "$2")) ?? [];
 }
 
+function parseConnectArgs(raw: string): {
+  workspace?: string;
+  agentLabel?: string;
+  includeAgents?: boolean;
+} {
+  const tokens = splitArgs(raw.trim());
+  const parsed: { workspace?: string; agentLabel?: string; includeAgents?: boolean } = {};
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--workspace" || token === "-w") {
+      parsed.workspace = tokens[++index];
+      if (!parsed.workspace) throw new Error("--workspace requires a path");
+    } else if (token === "--agent") {
+      parsed.agentLabel = tokens[++index];
+      if (!parsed.agentLabel) throw new Error("--agent requires a label");
+    } else if (token === "--include-agents") {
+      parsed.includeAgents = true;
+    } else if (token === "--users-only") {
+      parsed.includeAgents = false;
+    } else {
+      throw new Error(
+        "Usage: /diffect-connect [--workspace PATH] [--agent LABEL] [--include-agents|--users-only]",
+      );
+    }
+  }
+  return parsed;
+}
+
+function validateAgentLabel(label: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(label)) {
+    throw new Error("Agent label must use 1-48 letters, numbers, dots, underscores, or hyphens");
+  }
+}
+
+function scopedAgentName(label: string, sessionId: string): string {
+  const suffix = sessionId.replace(/[^A-Za-z0-9]/g, "").slice(0, 8) || "session";
+  return `${label}/${suffix}`;
+}
+
+function sameWatchConfig(left: WatchConfig, right: WatchConfig): boolean {
+  return (
+    left.enabled === right.enabled &&
+    real(left.workspaceRoot) === real(right.workspaceRoot) &&
+    left.agentLabel === right.agentLabel &&
+    left.includeAgents === right.includeAgents
+  );
+}
+
+function latestWatchConfig(ctx: SessionLike): WatchConfig | null {
+  for (const entry of safeSessionEntries(ctx).slice().reverse()) {
+    if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== WATCH_ENTRY) continue;
+    const data = entry.data;
+    if (
+      !isRecord(data) ||
+      typeof data.enabled !== "boolean" ||
+      typeof data.workspaceRoot !== "string" ||
+      !data.workspaceRoot ||
+      typeof data.agentLabel !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(data.agentLabel) ||
+      typeof data.includeAgents !== "boolean"
+    ) {
+      continue;
+    }
+    return {
+      enabled: data.enabled,
+      workspaceRoot: data.workspaceRoot,
+      agentLabel: data.agentLabel,
+      includeAgents: data.includeAgents,
+    };
+  }
+  return null;
+}
+
 function parseReviewCommandArgs(raw: string, cwd: string): { mode: ReviewMode; workspace?: string } {
   const tokens = splitArgs(raw.trim());
   let mode: ReviewMode = "feedback";
@@ -309,6 +626,15 @@ function diffectReviewPrompt(mode: ReviewMode, workspaceRoot: string): string {
     return `Review the Diffect workspace at ${workspaceRoot}.\n\nInspect the current changes. Do not edit files. Create concise diffect_comment comments for must-fix issues only, passing workspace: ${workspace}. If there are no must-fix issues, say so.`;
   }
   return `Review open Diffect feedback for workspace ${workspaceRoot}.\n\nFirst call diffect_list_feedback with status: "open" and workspace: ${workspace}. Summarize the open comments/threads, then apply the smallest safe fixes. Verify before using diffect_reply or diffect_resolve, and only resolve threads you actually addressed.`;
+}
+
+function diffectFeedbackPrompt(
+  events: FeedbackEvent[],
+  workspaceRoot: string,
+  agentName: string,
+): string {
+  const ids = [...new Set(events.map((event) => event.threadId))];
+  return `New Diffect feedback arrived for workspace ${workspaceRoot}.\n\nFirst call diffect_list_feedback with status: "open", ids: ${JSON.stringify(ids)}, and workspace: ${JSON.stringify(workspaceRoot)}. Only inspect and address those threads. If none are open, stop. Apply the smallest safe fixes, verify them, then reply or resolve only what you addressed. Your default Diffect author identity is ${JSON.stringify(agentName)}.`;
 }
 
 async function resolveReviewWorkspace(
@@ -513,6 +839,7 @@ async function ensureDaemon(
   pi: ExtensionAPI,
   workspaceRoot: string,
   signal?: AbortSignal,
+  options: EnsureDaemonOptions = {},
 ): Promise<string> {
   const configured = process.env.DIFFECT_URL?.trim();
   if (configured) {
@@ -523,7 +850,7 @@ async function ensureDaemon(
   const marked = await liveMarkedDaemon(signal);
   if (marked) return marked;
 
-  if (await openDiffectApp(pi, workspaceRoot, undefined, signal)) {
+  if (options.openApp !== false && (await openDiffectApp(pi, workspaceRoot, undefined, signal))) {
     for (let i = 0; i < 80; i++) {
       await sleep(100, signal);
       const url = await liveMarkedDaemon(signal);
@@ -614,6 +941,16 @@ async function runDiffectTool(
   });
   if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim() || `diffect exited ${r.code}`);
   return textResult(truncate(r.stdout.trim() || "{}"), { stdout: r.stdout, stderr: r.stderr, code: r.code });
+}
+
+function filterFeedbackResult(
+  result: ReturnType<typeof textResult>,
+  ids: string[],
+): ReturnType<typeof textResult> {
+  const details = isRecord(result.details) ? result.details : {};
+  const stdout = typeof details.stdout === "string" ? details.stdout : "";
+  const output = filterFeedbackJson(stdout, ids);
+  return textResult(truncate(output), { ...details, stdout: output });
 }
 
 async function findCli(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<Command> {

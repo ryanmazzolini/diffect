@@ -21,6 +21,7 @@ export const MIN_THREAD_SCHEMA_VERSION = 1 as const;
  */
 export const DAEMON_EVENTS = {
   diffChanged: "diff.changed",
+  feedbackAdded: "feedback.added",
   threadChanged: "thread.changed",
   workspaceChanged: "workspace.changed",
 } as const;
@@ -31,7 +32,27 @@ export interface DiffChangedPayload {
   worktree?: string | null;
   path?: string | null;
 }
-export type DaemonEventPayload = DiffChangedPayload;
+
+export type FeedbackAddedSource = "thread.created" | "comment.added";
+
+/** A newly appended review comment, emitted without its body over `GET /events`. */
+export interface FeedbackAddedPayload {
+  eventId: string;
+  /** Registered workspaces that contain the changed review store. */
+  workspacePaths: string[];
+  threadId: string;
+  source: FeedbackAddedSource;
+  author: Author;
+}
+
+/** Loose envelope used by coarse events; event-specific consumers validate required fields. */
+export interface DaemonEventPayload extends DiffChangedPayload {
+  eventId?: string;
+  workspacePaths?: string[];
+  threadId?: string;
+  source?: FeedbackAddedSource;
+  author?: Author;
+}
 
 export type DiffLineType = "context" | "add" | "del";
 export type Side = "old" | "new";

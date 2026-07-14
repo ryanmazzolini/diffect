@@ -33,6 +33,45 @@ Use `/diffect-review` to ask the agent to read open Diffect feedback for the
 inferred workspace. Use `/diffect-review proactive` to ask it to inspect changes
 and leave Diffect comments without editing files.
 
+## Feedback watch
+
+Connect the current Pi session after choosing the workspace:
+
+```text
+/diffect-connect
+```
+
+The first connection is explicit. It reuses or starts `diffectd` without opening
+another application window, then reconnects automatically when this Pi session
+reloads, resumes, or forks. Pi's selected workspace is authoritative; Diffect
+does not choose another terminal or agent session.
+
+By default, only new user-authored threads and replies trigger the agent. Existing
+feedback becomes the connection baseline and does not trigger a turn. Events are
+filtered and batched before the model runs, and the agent receives only the
+affected thread ids.
+
+For a conductor that should also receive feedback from other agents:
+
+```text
+/diffect-connect --agent conductor --include-agents
+```
+
+Each Pi session adds a short session suffix to its author label, such as
+`conductor/1a2b3c4d`. Conductor mode ignores that exact identity while accepting
+other named agents. Use `--users-only` to return to user-only feedback.
+
+Stop automatic feedback turns with:
+
+```text
+/diffect-disconnect
+```
+
+Short connection interruptions replay a bounded set of recent feedback events.
+Feedback received while the daemon is fully stopped is not replayed automatically.
+Use `/diffect-review` as the manual fallback. The watch is independent of Herdr,
+Ghostty, and other terminal hosts.
+
 It tries the desktop app first:
 
 - `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set
@@ -57,7 +96,7 @@ The extension also registers minimal tools:
 
 ```text
 diffect_open
-diffect_list_feedback
+diffect_list_feedback   # optional ids array limits output to affected threads
 diffect_comment
 diffect_reply
 diffect_resolve

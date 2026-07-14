@@ -123,7 +123,7 @@ async function loadWorkspaces(seed: string | null): Promise<Workspace[]> {
 async function rebuildWorkspaces(ctx: RouteContext): Promise<void> {
   ctx.workspaces = await loadWorkspaces(ctx.seed);
   ctx.ws = mergeWorkspaces(ctx.workspaces);
-  ctx.events.rebuild(ctx.ws);
+  await ctx.events.rebuild(ctx.ws);
 }
 
 /**
@@ -136,7 +136,7 @@ export async function createServer(opts: DaemonOptions): Promise<Server> {
   const workspaces = await loadWorkspaces(seed);
   const ws = mergeWorkspaces(workspaces);
   const events = new EventHub(ws);
-  events.start();
+  await events.start();
   const editors = await detectEditors();
   const ctx: RouteContext = {
     workspaces,
@@ -187,7 +187,9 @@ async function handle(
 
   // --- Live updates (SSE) -------------------------------------------------
   if (method === "GET" && path === "/events") {
-    const dispose = ctx.events.addClient(res);
+    const rawLastEventId = req.headers["last-event-id"];
+    const lastEventId = Array.isArray(rawLastEventId) ? rawLastEventId[0] : rawLastEventId;
+    const dispose = ctx.events.addClient(res, lastEventId);
     req.on("close", dispose);
     return; // keep the connection open
   }
