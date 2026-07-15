@@ -1037,18 +1037,10 @@ async function openDiffectApp(
 ): Promise<boolean> {
   const args = url ? [url] : [];
   const envPath = process.env.DIFFECT_APP_PATH?.trim();
-  const candidates = [
-    envPath && existsSync(envPath) ? envPath : null,
-    localFile("packages/desktop/src-tauri/target/debug/diffect-desktop"),
-    localFile("packages/desktop/src-tauri/target/debug/diffect-desktop.exe"),
-    localFile("packages/desktop/src-tauri/target/release/diffect-desktop"),
-    localFile("packages/desktop/src-tauri/target/release/diffect-desktop.exe"),
-    await pathCommand(pi, "diffect-desktop", cwd, signal),
-  ].filter((v): v is string => Boolean(v));
+  if (envPath && existsSync(envPath) && spawnDetached(envPath, args, cwd)) return true;
 
-  for (const command of candidates) {
-    if (spawnDetached(command, args, cwd)) return true;
-  }
+  const pathApp = await pathCommand(pi, "diffect-desktop", cwd, signal);
+  if (pathApp && spawnDetached(pathApp, args, cwd)) return true;
 
   if (process.platform === "darwin") {
     for (const openArgs of diffectAppOpenArgs(url)) {
@@ -1056,6 +1048,7 @@ async function openDiffectApp(
       if (r.code === 0) return true;
     }
   }
+
   return false;
 }
 

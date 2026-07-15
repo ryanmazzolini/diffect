@@ -1,0 +1,239 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag to rebuild and publish
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Prepare release
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # Release Please creates tags and draft releases.
+      issues: write # Release Please manages release labels.
+      pull-requests: write # Release Please creates and updates its release PR.
+    outputs:
+      should-build: ${{ steps.release.outputs.release_created == 'true' || steps.retry.outputs.release_created == 'true' }}
+      tag: ${{ steps.release.outputs.tag_name || steps.retry.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version || steps.retry.outputs.version }}
+      sha: ${{ steps.release.outputs.sha || steps.retry.outputs.sha }}
+    steps:
+      - name: Create or update the Release Please PR
+        id: release
+        if: github.event_name == 'push'
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
+      - name: Check out tags for a draft retry
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the draft retry
+        id: retry
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid stable release tag: $TAG" >&2
+            exit 1
+          fi
+          if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != true ]]; then
+            echo "release $TAG is not an existing draft" >&2
+            exit 1
+          fi
+          git fetch --force origin \
+            "refs/heads/main:refs/remotes/origin/main" \
+            "refs/tags/$TAG:refs/tags/$TAG"
+          sha="$(git rev-list -n 1 "$TAG")"
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "release $TAG does not point to a commit on main" >&2
+            exit 1
+          fi
+          {
+            echo "release_created=true"
+            echo "tag_name=$TAG"
+            echo "version=${TAG#v}"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  desktop-build:
+    name: ${{ matrix.label }}
+    if: needs.release.outputs.should-build == 'true'
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x86_64
+            # Build on the oldest supported base to keep the AppImage's glibc floor low.
+            runner: ubuntu-22.04
+            platform: linux
+            arch: x86_64
+            bundle: appimage
+          - label: macOS Apple Silicon
+            runner: macos-15
+            platform: macos
+            arch: aarch64
+            bundle: app
+          - label: macOS Intel
+            runner: macos-15-intel
+            platform: macos
+            arch: x86_64
+            bundle: app
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # GitHub provenance uses OIDC to sign each asset.
+      attestations: write # Store the signed build provenance.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      BUNDLE: ${{ matrix.bundle }}
+      PLATFORM: ${{ matrix.platform }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Check out the released commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget
+
+      - name: Install Node and pnpm
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install the Rust toolchain
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          rustup default 1.94.1
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Verify the release version
+        run: |
+          pnpm check:release-version
+          test "$(node -p 'require("./package.json").version')" = "$VERSION"
+
+      - name: Build the desktop bundle
+        run: |
+          pnpm build
+          pnpm --filter @diffect/desktop sidecar
+          pnpm --filter @diffect/desktop exec tauri build \
+            --config src-tauri/tauri.bundle.conf.json \
+            --bundles "$BUNDLE"
+
+      - name: Stage the Linux release asset
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="packages/desktop/src-tauri/target/release/bundle/appimage"
+          count="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.AppImage' | wc -l | tr -d ' ')"
+          test "$count" -eq 1
+          source="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          mkdir -p release-assets
+          install -m 0755 "$source" "release-assets/diffect-v${VERSION}-${PLATFORM}-${ARCH}.AppImage"
+
+      - name: Stage the macOS release asset
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="packages/desktop/src-tauri/target/release/bundle/macos/Diffect.app"
+          test -d "$app"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app" "release-assets/diffect-v${VERSION}-${PLATFORM}-${ARCH}.app.zip"
+
+      - name: Attest the release asset
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release-assets/*
+
+      - name: Save the release asset
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    if: needs.release.outputs.should-build == 'true'
+    needs: [release, desktop-build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # Upload assets and publish the completed draft release.
+    steps:
+      - name: Download every desktop asset
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Checksum and publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != true ]]; then
+            echo "release $TAG is no longer a draft" >&2
+            exit 1
+          fi
+          asset_count="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          test "$asset_count" -eq 3
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f -printf '%f\n' \
+              | LC_ALL=C sort \
+              | xargs sha256sum > SHA256SUMS
+          )
+          gh release upload "$TAG" release-assets/* --clobber
+          gh release edit "$TAG" --draft=false --latest

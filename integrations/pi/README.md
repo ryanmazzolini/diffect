@@ -72,15 +72,16 @@ Feedback received while the daemon is fully stopped is not replayed automaticall
 Use `/diffect-review` as the manual fallback. The watch is independent of Herdr,
 Ghostty, and other terminal hosts.
 
-It tries the desktop app first:
+It reuses the daemon for whichever app is already running, then opens the UI
+with this launcher order:
 
-- `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set
-- the local dev binary at `packages/desktop/src-tauri/target/{debug,release}/diffect-desktop`
-- `diffect-desktop` on `PATH`
+- `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set (use this to opt into a local dev build)
+- `diffect-desktop` on `PATH`, including a stable release installed by mise
 - macOS app lookup (`open -b app.diffect.desktop`, then `open -a Diffect`)
 
-The desktop app's single-instance hook focuses/navigates the existing window. If
-none of those work, it falls back to the browser.
+The desktop app's single-instance hook makes the installed launcher focus and
+navigate an already-running dev or stable window. A stale local build is never
+started implicitly. If no app launcher works, it falls back to the browser.
 
 For global use:
 
