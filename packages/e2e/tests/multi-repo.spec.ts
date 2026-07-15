@@ -378,6 +378,54 @@ test("disk updates in one repo do not delay another repo", async ({ page }) => {
   expect(refreshedRepos.filter((repo) => repo === "beta")).toHaveLength(1);
 });
 
+test("live refresh keeps the reading anchor stable in a stacked module", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  const anchor = page.locator('.module[data-repo="alpha"] .file[data-path="alpha.js"] .cm-line', {
+    hasText: "return REPO // TODO alpha",
+  });
+  await expect(anchor).toBeVisible();
+  await anchor.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  const initialTop = await anchor.evaluate((element) => element.getBoundingClientRect().top);
+
+  const workspace = await page.request.get("/workspace").then((response) => response.json()) as {
+    repos: Array<{ name: string; root: string }>;
+  };
+  const alpha = workspace.repos.find((repo) => repo.name === "alpha");
+  if (!alpha) throw new Error("alpha fixture repo missing");
+
+  const contentRefresh = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().method() === "GET" &&
+      url.pathname.endsWith("/file/content") &&
+      url.searchParams.get("path") === "alpha.js"
+    );
+  });
+  const alphaPath = join(alpha.root, "alpha.js");
+  const original = await readFile(alphaPath, "utf8");
+  const generated = Array.from(
+    { length: 120 },
+    (_, index) => `export const generated${index} = ${index};`,
+  ).join("\n");
+  await writeFile(alphaPath, `${generated}\n${original}`);
+  await contentRefresh;
+  await expect(
+    page.locator('.module[data-repo="alpha"] .file[data-path="alpha.js"] .diffstat'),
+  ).toContainText("+121");
+
+  await expect(anchor).toBeInViewport({ timeout: 1_000 });
+  await expect
+    .poll(async () => {
+      const finalTop = await anchor.evaluate((element) => element.getBoundingClientRect().top);
+      return Math.abs(finalTop - initialTop);
+    }, { timeout: 1_000 })
+    .toBeLessThanOrEqual(2);
+});
+
 test("a module's ref picker popover escapes the module scroll clip", async ({ page }) => {
   await page.goto("/");
   const alpha = page.locator('.module[data-repo="alpha"]');

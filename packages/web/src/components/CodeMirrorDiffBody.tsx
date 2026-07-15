@@ -91,6 +91,15 @@ interface ViewContext {
   view: EditorView;
 }
 
+interface ReadingAnchor {
+  scrollRoot: HTMLElement;
+  view: EditorView;
+  position: number;
+  blockTop: number;
+  screenTop: number;
+  scrollTop: number;
+}
+
 interface CmLineWidgetData {
   side: Side;
   line: number;
@@ -492,10 +501,15 @@ export function CodeMirrorDiffBody({
     const contexts = viewContextsRef.current;
     if (contexts.length === 0) return;
 
+    const readingAnchor = captureReadingAnchor(contexts);
     for (const { side, view } of contexts) {
       const nextText = side === "old" ? content.old : content.new;
       const currentText = view.state.doc.toString();
-      const changes = minimalTextChange(currentText, nextText);
+      const change = minimalTextChange(currentText, nextText);
+      const changes = change ? ChangeSet.of(change, currentText.length) : null;
+      if (readingAnchor?.view === view && changes) {
+        readingAnchor.position = changes.mapPos(readingAnchor.position, 1);
+      }
       const anchors = side === "unified"
         ? buildLineAnchors(file, countDocLines(nextText))
         : buildSideLineAnchors(side, countDocLines(nextText), file);
@@ -521,6 +535,12 @@ export function CodeMirrorDiffBody({
       }
 
       view.dispatch({ changes: changes ?? undefined, effects });
+    }
+    if (readingAnchor) {
+      // MergeView aligns its two sides on the next animation frame. Measure
+      // after that alignment so its spacer heights are included in the delta.
+      if (contexts.length > 1) requestAnimationFrame(() => restoreReadingAnchor(readingAnchor));
+      else restoreReadingAnchor(readingAnchor);
     }
   }, [anchorCompartment, content.new, content.old, editableUnified, file, viewVersion]);
 
@@ -1020,6 +1040,85 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
     else targetsByDocLine.set(target.docLine, [target]);
   }
   return { old, new: next, targets, targetsByDocLine };
+}
+
+function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
+  // Prefer the new/unified side in split views. Both sides share vertical
+  // alignment, and the new side is the primary reading surface.
+  for (let index = contexts.length - 1; index >= 0; index -= 1) {
+    const view = contexts[index]?.view;
+    if (!view) continue;
+    const scrollRoot = view.dom.closest<HTMLElement>(".diff-pane, .modmain");
+    if (!scrollRoot) continue;
+    const rootRect = scrollRoot.getBoundingClientRect();
+    const contentRect = view.contentDOM.getBoundingClientRect();
+    const visibleTop = Math.max(rootRect.top, contentRect.top);
+    const visibleBottom = Math.min(rootRect.bottom, contentRect.bottom);
+    if (visibleBottom <= visibleTop) continue;
+
+    const position = view.posAtCoords(
+      {
+        x: contentRect.left + Math.min(4, contentRect.width / 2),
+        y: visibleTop + (visibleBottom - visibleTop) / 2,
+      },
+      false,
+    );
+    const screenTop = lineScreenTop(view, position);
+    if (screenTop === null) continue;
+    return {
+      scrollRoot,
+      view,
+      position,
+      blockTop: view.lineBlockAt(position).top,
+      screenTop,
+      scrollTop: scrollRoot.scrollTop,
+    };
+  }
+  return null;
+}
+
+function restoreReadingAnchor(anchor: ReadingAnchor): void {
+  if (!anchor.view.dom.isConnected || !anchor.scrollRoot.isConnected) return;
+  anchor.view.requestMeasure({
+    key: anchor.scrollRoot,
+    read(view) {
+      const position = Math.min(anchor.position, view.state.doc.length);
+      return view.lineBlockAt(position).top;
+    },
+    write(nextBlockTop, view) {
+      // A user scroll between the refresh and measurement always wins. Native
+      // scroll anchoring may also have already made the correction for us.
+      if (Math.abs(anchor.scrollRoot.scrollTop - anchor.scrollTop) > 1) return;
+      const delta = (nextBlockTop - anchor.blockTop) * view.scaleY;
+      const expectedScrollTop = anchor.scrollTop + delta;
+      anchor.scrollRoot.scrollTop = expectedScrollTop;
+      requestAnimationFrame(() => restorePreciseReadingAnchor(anchor, expectedScrollTop));
+    },
+  });
+}
+
+function restorePreciseReadingAnchor(anchor: ReadingAnchor, expectedScrollTop: number): void {
+  if (!anchor.view.dom.isConnected || !anchor.scrollRoot.isConnected) return;
+  anchor.view.requestMeasure({
+    key: anchor,
+    read(view) {
+      const position = Math.min(anchor.position, view.state.doc.length);
+      return lineScreenTop(view, position);
+    },
+    write(nextScreenTop) {
+      if (nextScreenTop === null) return;
+      if (Math.abs(anchor.scrollRoot.scrollTop - expectedScrollTop) > 1) return;
+      anchor.scrollRoot.scrollTop += nextScreenTop - anchor.screenTop;
+    },
+  });
+}
+
+function lineScreenTop(view: EditorView, position: number): number | null {
+  const lineStart = view.state.doc.lineAt(position).from;
+  for (const line of view.contentDOM.querySelectorAll<HTMLElement>(".cm-line")) {
+    if (view.posAtDOM(line, 0) === lineStart) return line.getBoundingClientRect().top;
+  }
+  return null;
 }
 
 function minimalTextChange(current: string, next: string): ChangeSpec | null {
