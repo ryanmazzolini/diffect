@@ -96,6 +96,7 @@ interface ReadingAnchor {
   view: EditorView;
   position: number;
   blockTop: number;
+  documentTop: number;
   screenTop: number;
   scrollTop: number;
 }
@@ -1043,23 +1044,28 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
 }
 
 function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
-  // Prefer the new/unified side in split views. Both sides share vertical
-  // alignment, and the new side is the primary reading surface.
-  for (let index = contexts.length - 1; index >= 0; index -= 1) {
-    const view = contexts[index]?.view;
+  const scrollRoot = contexts[0]?.view.dom.closest<HTMLElement>(".diff-pane, .modmain");
+  if (!scrollRoot) return null;
+  const rootRect = scrollRoot.getBoundingClientRect();
+  const readingY = rootRect.top + rootRect.height / 2;
+  const editors = Array.from(scrollRoot.querySelectorAll<HTMLElement>(".cm-editor"));
+
+  // Select the editor under the shared viewport's reading point, not merely a
+  // visible sliver of the file that happened to refresh. Reversing also prefers
+  // the new side in a split MergeView.
+  for (let index = editors.length - 1; index >= 0; index -= 1) {
+    const editor = editors[index];
+    const content = editor?.querySelector<HTMLElement>(".cm-content");
+    if (!editor || !content) continue;
+    const contentRect = content.getBoundingClientRect();
+    if (readingY < contentRect.top || readingY > contentRect.bottom) continue;
+    const view = EditorView.findFromDOM(editor);
     if (!view) continue;
-    const scrollRoot = view.dom.closest<HTMLElement>(".diff-pane, .modmain");
-    if (!scrollRoot) continue;
-    const rootRect = scrollRoot.getBoundingClientRect();
-    const contentRect = view.contentDOM.getBoundingClientRect();
-    const visibleTop = Math.max(rootRect.top, contentRect.top);
-    const visibleBottom = Math.min(rootRect.bottom, contentRect.bottom);
-    if (visibleBottom <= visibleTop) continue;
 
     const position = view.posAtCoords(
       {
         x: contentRect.left + Math.min(4, contentRect.width / 2),
-        y: visibleTop + (visibleBottom - visibleTop) / 2,
+        y: readingY,
       },
       false,
     );
@@ -1070,6 +1076,7 @@ function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
       view,
       position,
       blockTop: view.lineBlockAt(position).top,
+      documentTop: view.documentTop,
       screenTop,
       scrollTop: scrollRoot.scrollTop,
     };
@@ -1083,14 +1090,18 @@ function restoreReadingAnchor(anchor: ReadingAnchor): void {
     key: anchor.scrollRoot,
     read(view) {
       const position = Math.min(anchor.position, view.state.doc.length);
-      return view.lineBlockAt(position).top;
+      return {
+        blockTop: view.lineBlockAt(position).top,
+        documentTop: view.documentTop,
+      };
     },
-    write(nextBlockTop, view) {
+    write(next, view) {
       // A user scroll between the refresh and measurement always wins. Native
       // scroll anchoring may also have already made the correction for us.
       if (Math.abs(anchor.scrollRoot.scrollTop - anchor.scrollTop) > 1) return;
-      const delta = (nextBlockTop - anchor.blockTop) * view.scaleY;
-      const expectedScrollTop = anchor.scrollTop + delta;
+      const lineDelta = (next.blockTop - anchor.blockTop) * view.scaleY;
+      const layoutDelta = next.documentTop - anchor.documentTop;
+      const expectedScrollTop = anchor.scrollTop + lineDelta + layoutDelta;
       anchor.scrollRoot.scrollTop = expectedScrollTop;
       requestAnimationFrame(() => restorePreciseReadingAnchor(anchor, expectedScrollTop));
     },

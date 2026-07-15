@@ -28,7 +28,12 @@ async function centerReadingAnchor(page: Page): Promise<{ anchor: Locator; top: 
   };
 }
 
-async function prependGeneratedLines(page: Page, root: string, path: string): Promise<void> {
+async function addGeneratedLines(
+  page: Page,
+  root: string,
+  path: string,
+  placement: "before" | "after" = "before",
+): Promise<void> {
   const contentRefresh = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (
@@ -39,7 +44,10 @@ async function prependGeneratedLines(page: Page, root: string, path: string): Pr
   });
   const filePath = join(root, ...path.split("/"));
   const original = await readFile(filePath, "utf8");
-  await writeFile(filePath, `${GENERATED_PREFIX}\n${original}`);
+  const next = placement === "before"
+    ? `${GENERATED_PREFIX}\n${original}`
+    : `${original}\n${GENERATED_PREFIX}`;
+  await writeFile(filePath, next);
   await contentRefresh;
   await page.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
@@ -70,7 +78,7 @@ test.beforeEach(async ({ page }) => {
 
 test("live refresh keeps the reading anchor stable with follow off", async ({ page }) => {
   const { anchor, top } = await centerReadingAnchor(page);
-  await prependGeneratedLines(page, await fixtureRoot(page), "calc.js");
+  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
   await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
   await expectReadingAnchorStable(anchor, top);
 });
@@ -141,14 +149,21 @@ test("live refresh keeps the reading anchor stable in split view", async ({ page
   await page.getByRole("button", { name: "Options" }).click();
   await page.getByRole("button", { name: "Split" }).click();
   const { anchor, top } = await centerReadingAnchor(page);
-  await prependGeneratedLines(page, await fixtureRoot(page), "calc.js");
+  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
   await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
   await expectReadingAnchorStable(anchor, top);
 });
 
 test("live refresh keeps the reading anchor stable when an earlier file changes", async ({ page }) => {
   const { anchor, top } = await centerReadingAnchor(page);
-  await prependGeneratedLines(page, await fixtureRoot(page), "src/util/math.js");
+  await addGeneratedLines(page, await fixtureRoot(page), "src/util/math.js");
   await expect(page.locator('.file[data-path="src/util/math.js"] .diffstat')).toContainText("+121");
+  await expectReadingAnchorStable(anchor, top, 4);
+});
+
+test("live refresh anchors the reading point when an earlier file grows below it", async ({ page }) => {
+  const { anchor, top } = await centerReadingAnchor(page);
+  await addGeneratedLines(page, await fixtureRoot(page), "src/util/math.js", "after");
+  await expect(page.locator('.file[data-path="src/util/math.js"] .diffstat')).toContainText("+122");
   await expectReadingAnchorStable(anchor, top, 4);
 });
