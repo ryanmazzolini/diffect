@@ -5,6 +5,7 @@ import type {
   CreateThreadRequest,
   DaemonEventPayload,
   DaemonEventType,
+  DiffectSettings,
   FileContent,
   FileRange,
   FsListing,
@@ -67,6 +68,15 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(req),
     }).then((r) => json<UiState>(r)),
+
+  settings: () => fetch("/settings").then((r) => json<DiffectSettings>(r)),
+
+  replaceSettings: (settings: DiffectSettings) =>
+    fetch("/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(settings),
+    }).then((r) => json<DiffectSettings>(r)),
 
   workspaces: () => fetch("/workspaces").then((r) => json<WorkspaceEntry[]>(r)),
 
