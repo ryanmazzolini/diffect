@@ -20,8 +20,32 @@ and opens a GitHub-style review UI in the browser or desktop app.
 
 ## Status
 
-Diffect is experimental but usable from a source checkout. Hosted review, GitHub
-sync, auth, signed installers, and auto-updates are not built yet.
+Diffect is experimental but usable from a source checkout or a downloadable
+desktop build. Hosted review, GitHub sync, auth, signed installers, and
+auto-updates are not built yet. The current macOS downloads are ad-hoc signed,
+so macOS may ask you to confirm the first launch.
+
+## Install the desktop app
+
+Each [GitHub release](https://github.com/ryanmazzolini/diffect/releases) includes
+a Linux x86_64 AppImage and zipped macOS apps for Apple Silicon and Intel.
+Release assets include SHA-256 checksums and GitHub build provenance.
+
+To install the latest stable release as `diffect-desktop` with
+[mise](https://mise.jdx.dev):
+
+```sh
+# Linux x86_64
+mise use -g 'github:ryanmazzolini/diffect[matching=linux,bin=diffect-desktop]@latest'
+
+# macOS Apple Silicon; use matching=macos-x86_64 on an Intel Mac
+mise use -g 'github:ryanmazzolini/diffect[matching=macos-aarch64,strip_components=0,bin_path=Diffect.app/Contents/MacOS,filter_bins=diffect-desktop]@latest'
+```
+
+Mise's GitHub backend ignores prereleases for `latest`. Run `mise upgrade` to
+install a newer stable release when one is available. You can instead download
+the platform asset directly from the release page; make a downloaded AppImage
+executable before launching it.
 
 ## Layout
 
@@ -90,6 +114,12 @@ mise run build
 mise run test
 mise run desktop:check
 ```
+
+Release Please maintains a release PR from Conventional Commits on `main`.
+Merging that reviewed PR creates a draft release; GitHub Actions builds and
+attests every desktop asset, then publishes the release only after all platform
+builds succeed. A failed draft can be retried from the Release workflow by
+providing its `vX.Y.Z` tag.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor notes and
 [integrations/pi](integrations/pi/README.md) for agent usage.

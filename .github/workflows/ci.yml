@@ -26,6 +26,7 @@ jobs:
       - run: corepack enable
       - run: corepack prepare pnpm@11.9.0 --activate
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check:release-version
       - run: pnpm build
       - run: pnpm --filter @diffect/e2e test
 

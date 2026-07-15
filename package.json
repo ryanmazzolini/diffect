@@ -1,5 +1,6 @@
 {
-  "name": "diffect-monorepo",
+  "name": "diffect",
+  "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -8,6 +9,7 @@
   },
   "packageManager": "pnpm@11.9.0",
   "scripts": {
+    "check:release-version": "node scripts/check-release-version.mjs",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @diffect/e2e test",
