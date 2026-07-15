@@ -462,6 +462,69 @@ export interface UiStateUpdate {
   websiteReview?: WebsiteReviewUiState;
 }
 
+/** Current schema version for host-local Diffect settings. */
+export const DIFFECT_SETTINGS_VERSION = 1 as const;
+
+export type WorkspaceProviderKind =
+  | "herdr"
+  | "cmux"
+  | "pi-session"
+  | "claude-session"
+  | "cwd";
+
+interface WorkspaceProviderBase {
+  /** Stable local identifier used by ordering and workspace bindings. */
+  id: string;
+  kind: WorkspaceProviderKind;
+  enabled: boolean;
+}
+
+export type WorkspaceProviderConfig =
+  | (WorkspaceProviderBase & {
+      kind: "herdr";
+      command: string;
+      session?: string;
+    })
+  | (WorkspaceProviderBase & {
+      kind: "cmux";
+      command: string;
+      socketPath?: string;
+    })
+  | (WorkspaceProviderBase & {
+      kind: "pi-session";
+      sessionsPath: string;
+    })
+  | (WorkspaceProviderBase & {
+      kind: "claude-session";
+      projectsPath: string;
+    })
+  | (WorkspaceProviderBase & {
+      kind: "cwd";
+    });
+
+export interface WorkspaceBinding {
+  providerId: string;
+  externalWorkspaceId: string;
+  diffectWorkspacePath: string;
+}
+
+export interface WorkspaceResolutionSettings {
+  /** Provider priority is the order of this array. */
+  providers: WorkspaceProviderConfig[];
+  bindings: WorkspaceBinding[];
+}
+
+export interface DiffectSettings {
+  version: typeof DIFFECT_SETTINGS_VERSION;
+  workspaceResolution: WorkspaceResolutionSettings;
+}
+
+/** One settings validation problem, addressed with a form-friendly field path. */
+export interface SettingsValidationIssue {
+  path: string;
+  message: string;
+}
+
 /** Body for POST/DELETE /workspaces. */
 export interface WorkspaceMutationRequest {
   path: string;

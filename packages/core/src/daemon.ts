@@ -78,6 +78,12 @@ import {
 } from "./store/attachments.js";
 import { readPrDraft, updatePrDraft, type PrDraftScope } from "./store/pr-draft.js";
 import { readUiState, updateUiState } from "./store/ui-state.js";
+import {
+  readSettings,
+  replaceSettings,
+  SettingsReadError,
+  SettingsValidationError,
+} from "./store/settings.js";
 import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
 import { listSpaceFiles, readSpaceFileLines } from "./space-files.js";
 
@@ -208,6 +214,7 @@ async function handle(
   }
 
   // Delegate to route groups; each returns true once it has sent a response.
+  if (await settingsRoutes(ctx, req, res, method, path)) return;
   if (await uiStateRoutes(req, res, method, path)) return;
   if (await workspaceRoutes(ctx, req, res, url, method, path)) return;
   if (await openReviewRoutes(ctx, res, url, method, path)) return;
@@ -229,6 +236,54 @@ async function handle(
   }
 
   sendJson(res, 404, { error: "not found" });
+}
+
+/** Durable host settings; paths and executable configuration stay loopback-only. */
+async function settingsRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (path !== "/settings" || (method !== "GET" && method !== "PUT")) return false;
+  if (!isLoopback(ctx.host)) {
+    sendJson(res, 403, {
+      error: "settings are only available on a loopback-bound daemon",
+    });
+    return true;
+  }
+
+  if (method === "GET") {
+    try {
+      sendJson(res, 200, await readSettings());
+    } catch (error) {
+      if (error instanceof SettingsValidationError) {
+        sendJson(res, 500, { error: "settings file is invalid", issues: error.issues });
+      } else if (error instanceof SettingsReadError) {
+        sendJson(res, 500, { error: error.message });
+      } else {
+        throw error;
+      }
+    }
+    return true;
+  }
+
+  const body = await readJsonDocument(req);
+  if (!body.ok) {
+    sendJson(res, 400, { error: "a valid settings document is required" });
+    return true;
+  }
+  try {
+    sendJson(res, 200, await replaceSettings(body.value));
+  } catch (error) {
+    if (error instanceof SettingsValidationError) {
+      sendJson(res, 400, { error: error.message, issues: error.issues });
+      return true;
+    }
+    throw error;
+  }
+  return true;
 }
 
 /** Host-local UI state that survives desktop daemon port changes. */
@@ -1333,7 +1388,12 @@ async function readRawBody(
   return Buffer.concat(chunks);
 }
 
-async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
+type JsonDocument =
+  | { ok: true; value: unknown }
+  | { ok: false };
+
+/** Distinguish malformed/empty input from a successfully parsed JSON `null`. */
+async function readJsonDocument(req: IncomingMessage): Promise<JsonDocument> {
   const contentType = (req.headers["content-type"] ?? "")
     .split(";", 1)[0]!
     .trim()
@@ -1341,12 +1401,17 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
   if (contentType !== "application/json") throw new UnsupportedMediaTypeError();
 
   const raw = (await readRawBody(req, MAX_BODY_BYTES)).toString("utf8");
-  if (!raw.trim()) return null;
+  if (!raw.trim()) return { ok: false };
   try {
-    return JSON.parse(raw) as T;
+    return { ok: true, value: JSON.parse(raw) as unknown };
   } catch {
-    return null;
+    return { ok: false };
   }
+}
+
+async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
+  const body = await readJsonDocument(req);
+  return body.ok ? (body.value as T) : null;
 }
 
 /** Attachments can be images, so allow a larger body than JSON comments. */

@@ -52,6 +52,11 @@ export function workspacesRegistryPath(): string {
   return join(configDir(), "workspaces.json");
 }
 
+/** Durable, user-controlled host settings shared by every Diffect frontend. */
+export function settingsPath(): string {
+  return join(configDir(), "settings.json");
+}
+
 /** Host-local UI preferences shared across desktop daemon ports. */
 export function uiStatePath(): string {
   return join(configDir(), "ui-state.json");
