@@ -145,6 +145,19 @@ jobs:
           rustup toolchain install 1.94.1 --profile minimal
           rustup default 1.94.1
 
+      - name: Restore Rust release build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/desktop/src-tauri/target/release/.fingerprint
+            packages/desktop/src-tauri/target/release/build
+            packages/desktop/src-tauri/target/release/deps
+          key: cargo-release-${{ matrix.runner }}-${{ matrix.arch }}-rust-1.94.1-${{ hashFiles('packages/desktop/src-tauri/Cargo.lock', 'packages/desktop/src-tauri/Cargo.toml') }}
+          restore-keys: |
+            cargo-release-${{ matrix.runner }}-${{ matrix.arch }}-rust-1.94.1-
+
       - name: Install dependencies
         run: |
           corepack enable
