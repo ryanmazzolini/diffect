@@ -22,6 +22,14 @@ export type FeedbackFilter = {
 };
 
 export type WatchConnectionState = "connecting" | "connected" | "reconnecting";
+export type WatchStatus = WatchConnectionState | "disconnected";
+
+export function watchStatusLabel(state: WatchStatus): string {
+  if (state === "connected") return "Diffect ●";
+  if (state === "reconnecting") return "Diffect ↻";
+  if (state === "disconnected") return "Diffect !";
+  return "Diffect ◌";
+}
 
 type WatchFeedbackOptions = {
   baseUrl: string;

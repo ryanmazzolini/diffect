@@ -1,4 +1,11 @@
+import { mkdtemp, mkdir, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  findLocalFile,
+  resolveTrustedCommand,
+} from "../../../integrations/pi/local-files.js";
 import {
   acceptsFeedback,
   filterFeedbackJson,
@@ -6,6 +13,7 @@ import {
   readFeedbackStream,
   rememberEventId,
   watchFeedbackEvents,
+  watchStatusLabel,
   type FeedbackEvent,
 } from "../../../integrations/pi/watch.js";
 
@@ -18,6 +26,51 @@ const feedback: FeedbackEvent = {
 };
 
 describe("pi feedback watch", () => {
+  it("uses compact connection status labels", () => {
+    expect(watchStatusLabel("connecting")).toBe("Diffect ◌");
+    expect(watchStatusLabel("connected")).toBe("Diffect ●");
+    expect(watchStatusLabel("reconnecting")).toBe("Diffect ↻");
+    expect(watchStatusLabel("disconnected")).toBe("Diffect !");
+  });
+
+  it("finds built files only through the symlinked extension package", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diffect-pi-package-"));
+    const sourceRoot = join(root, "source");
+    const workspaceRoot = join(root, "workspace");
+    const extensionPath = join(sourceRoot, "integrations/pi/diffect.ts");
+    const installedExtensionPath = join(root, "installed/diffect.ts");
+    const installedCommandPath = join(root, "installed/diffect");
+    const relativePath = "packages/core/dist/workspace-cli.js";
+    const trustedCliPath = join(sourceRoot, relativePath);
+    const workspaceCliPath = join(workspaceRoot, relativePath);
+
+    try {
+      await mkdir(join(sourceRoot, "integrations/pi"), { recursive: true });
+      await mkdir(join(sourceRoot, "packages/core/dist"), { recursive: true });
+      await mkdir(join(workspaceRoot, "packages/core/dist"), { recursive: true });
+      await mkdir(join(root, "installed"), { recursive: true });
+      await writeFile(extensionPath, "");
+      await writeFile(trustedCliPath, "");
+      await writeFile(workspaceCliPath, "malicious");
+      await symlink(extensionPath, installedExtensionPath);
+      await symlink(workspaceCliPath, installedCommandPath);
+
+      expect(findLocalFile(relativePath, installedExtensionPath)).toBe(
+        await realpath(trustedCliPath),
+      );
+      expect(resolveTrustedCommand(trustedCliPath, root, workspaceRoot)).toBe(
+        await realpath(trustedCliPath),
+      );
+      expect(resolveTrustedCommand(workspaceCliPath, root, workspaceRoot)).toBeNull();
+      expect(resolveTrustedCommand(installedCommandPath, root, workspaceRoot)).toBeNull();
+
+      await unlink(trustedCliPath);
+      expect(findLocalFile(relativePath, installedExtensionPath)).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("validates feedback payloads", () => {
     expect(parseFeedbackEvent(feedback)).toEqual(feedback);
     expect(parseFeedbackEvent({ ...feedback, workspacePaths: [] })).toBeNull();

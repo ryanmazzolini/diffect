@@ -165,6 +165,10 @@ export async function createServer(opts: DaemonOptions): Promise<Server> {
         }
         return;
       }
+      if (err instanceof UnsupportedMediaTypeError) {
+        sendJson(res, 415, { error: "content-type must be application/json" });
+        return;
+      }
       // Don't leak internals (paths, stack traces) to the client; log instead.
       process.stderr.write(`diffectd: ${err?.stack ?? err}\n`);
       sendJson(res, 500, { error: "internal error" });
@@ -184,6 +188,11 @@ async function handle(
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
   const method = req.method ?? "GET";
+
+  if (isLoopback(ctx.host) && !isLoopbackRequest(req)) {
+    sendJson(res, 403, { error: "loopback daemon requires a loopback host and origin" });
+    return;
+  }
 
   // --- Live updates (SSE) -------------------------------------------------
   if (method === "GET" && path === "/events") {
@@ -1142,7 +1151,48 @@ async function listWorkspaces(ctx: RouteContext): Promise<WorkspaceEntry[]> {
 
 /** Loopback hosts may manage workspaces; a network-bound daemon may not. */
 function isLoopback(host: string): boolean {
-  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+  const normalized = host.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+function isLoopbackRequest(req: IncomingMessage): boolean {
+  const host = req.headers.host;
+  if (!host || !isLoopbackAuthority(host)) return false;
+
+  const origin = req.headers.origin;
+  return !origin || isLoopbackOrigin(origin);
+}
+
+function isLoopbackAuthority(value: string): boolean {
+  try {
+    const url = new URL(`http://${value}`);
+    return (
+      !url.username &&
+      !url.password &&
+      url.pathname === "/" &&
+      !url.search &&
+      !url.hash &&
+      isLoopback(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      !url.username &&
+      !url.password &&
+      (url.pathname === "" || url.pathname === "/") &&
+      !url.search &&
+      !url.hash &&
+      isLoopback(url.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -1164,6 +1214,7 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
 const MAX_BODY_BYTES = 1024 * 1024;
 
 class BodyTooLargeError extends Error {}
+class UnsupportedMediaTypeError extends Error {}
 
 /** Buffer the request body up to `maxBytes`, throwing past the cap. */
 async function readRawBody(
@@ -1186,6 +1237,12 @@ async function readRawBody(
 }
 
 async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
+  const contentType = (req.headers["content-type"] ?? "")
+    .split(";", 1)[0]!
+    .trim()
+    .toLowerCase();
+  if (contentType !== "application/json") throw new UnsupportedMediaTypeError();
+
   const raw = (await readRawBody(req, MAX_BODY_BYTES)).toString("utf8");
   if (!raw.trim()) return null;
   try {

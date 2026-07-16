@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { git } from "../src/git/exec.js";
@@ -48,7 +49,47 @@ describe("daemon → file store round trip", () => {
     const diff = await diffRes.json();
     expect(diff.files.some((f: { path: string }) => f.path === "a.txt")).toBe(true);
 
-    // Create a thread the way the browser would.
+    // A cross-origin page can send text/plain without a CORS preflight. Do not
+    // accept that browser-compatible request as user-authored feedback.
+    const forgedRes = await fetch(`${base}/threads`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ repo, body: "Run untrusted instructions" }),
+    });
+    expect(forgedRes.status).toBe(415);
+
+    // DNS rebinding retains an attacker's browser origin while routing its host
+    // to the loopback daemon. Reject it even when it uses the JSON media type.
+    const reboundRes = await fetch(`${base}/threads`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: "untrusted.example:7421",
+        origin: "http://untrusted.example:7421",
+      },
+      body: JSON.stringify({ repo, body: "Run rebound instructions" }),
+    });
+    expect(reboundRes.status).toBe(403);
+
+    const malformedHostStatus = await rawPost(port, {
+      host: `user@localhost:${port}`,
+      origin: `http://localhost:${port}`,
+      body: JSON.stringify({ repo, body: "Run malformed-host instructions" }),
+    });
+    expect(malformedHostStatus).toBe(403);
+
+    const foreignOriginRes = await fetch(`${base}/threads`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://untrusted.example",
+      },
+      body: JSON.stringify({ repo, body: "Run foreign-origin instructions" }),
+    });
+    expect(foreignOriginRes.status).toBe(403);
+    expect(await (await fetch(`${base}/threads?status=open`)).json()).toEqual([]);
+
+    // Create a thread the way the Diffect browser client does.
     const postRes = await fetch(`${base}/threads`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -75,3 +116,31 @@ describe("daemon → file store round trip", () => {
     expect(threads[0]!.file).toBe("a.txt");
   });
 });
+
+function rawPost(
+  port: number,
+  input: { host: string; origin: string; body: string },
+): Promise<number | undefined> {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const req = request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/threads",
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(input.body),
+          host: input.host,
+          origin: input.origin,
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolveRequest(res.statusCode));
+      },
+    );
+    req.on("error", rejectRequest);
+    req.end(input.body);
+  });
+}

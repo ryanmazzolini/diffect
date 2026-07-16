@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -11,9 +11,10 @@ import {
   filterFeedbackJson,
   rememberEventId,
   watchFeedbackEvents,
+  watchStatusLabel,
   type FeedbackEvent,
-  type WatchConnectionState,
 } from "./watch.js";
+import { findLocalFile, resolveTrustedCommand } from "./local-files.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:7421";
 const DEFAULT_TARGET = "work";
@@ -105,12 +106,6 @@ export default function diffectExtension(pi: ExtensionAPI) {
     }
   }
 
-  function watchStatus(state: WatchConnectionState): string {
-    if (state === "connected") return "Diffect: watching feedback";
-    if (state === "reconnecting") return "Diffect: reconnecting";
-    return "Diffect: connecting";
-  }
-
   async function startFeedbackWatch(
     ctx: ExtensionContext,
     config: WatchConfig,
@@ -135,7 +130,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
       seenEventIds: new Set(),
     };
     watchRuntime = runtime;
-    ctx.ui.setStatus(WATCH_STATUS, "Diffect: connecting");
+    ctx.ui.setStatus(WATCH_STATUS, watchStatusLabel("connecting"));
 
     try {
       const connectDaemon = async (signal: AbortSignal) => {
@@ -151,7 +146,9 @@ export default function diffectExtension(pi: ExtensionAPI) {
         signal: controller.signal,
         reconnect: connectDaemon,
         onState(state) {
-          if (watchRuntime === runtime) sessionContext?.ui.setStatus(WATCH_STATUS, watchStatus(state));
+          if (watchRuntime === runtime) {
+            sessionContext?.ui.setStatus(WATCH_STATUS, watchStatusLabel(state));
+          }
         },
         onFeedback(event) {
           if (watchRuntime !== runtime) return;
@@ -170,14 +167,14 @@ export default function diffectExtension(pi: ExtensionAPI) {
         },
       }).catch((error) => {
         if (watchRuntime !== runtime || controller.signal.aborted) return;
-        ctx.ui.setStatus(WATCH_STATUS, "Diffect: disconnected");
+        ctx.ui.setStatus(WATCH_STATUS, watchStatusLabel("disconnected"));
         ctx.ui.notify(`Diffect feedback watch stopped: ${messageOf(error)}`, "warning");
       });
       return runtime.agentName;
     } catch (error) {
       if (watchRuntime === runtime) {
         watchRuntime = null;
-        ctx.ui.setStatus(WATCH_STATUS, "Diffect: disconnected");
+        ctx.ui.setStatus(WATCH_STATUS, watchStatusLabel("disconnected"));
       }
       if (controller.signal.aborted) return null;
       throw error;
@@ -194,7 +191,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
     if (!watchConfig?.enabled) return;
 
     void startFeedbackWatch(ctx, watchConfig).catch((error) => {
-      ctx.ui.setStatus(WATCH_STATUS, "Diffect: disconnected");
+      ctx.ui.setStatus(WATCH_STATUS, watchStatusLabel("disconnected"));
       ctx.ui.notify(`Diffect feedback reconnect failed: ${messageOf(error)}`, "warning");
     });
   });
@@ -954,7 +951,10 @@ function filterFeedbackResult(
 }
 
 async function findCli(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<Command> {
-  const local = localFile("packages/core/dist/cli.js");
+  const local = findLocalFile(
+    "packages/core/dist/cli.js",
+    fileURLToPath(import.meta.url),
+  );
   if (local) return nodeCommand(local);
   const pathCli = await pathCommand(pi, "diffect", cwd, signal);
   if (pathCli) return { command: pathCli, args: [] };
@@ -962,7 +962,10 @@ async function findCli(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Pro
 }
 
 async function findDaemon(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<Command> {
-  const local = localFile("packages/core/dist/daemon-bin.js");
+  const local = findLocalFile(
+    "packages/core/dist/daemon-bin.js",
+    fileURLToPath(import.meta.url),
+  );
   if (local) return nodeCommand(local);
   const pathDaemon = await pathCommand(pi, "diffectd", cwd, signal);
   if (pathDaemon) return { command: pathDaemon, args: [] };
@@ -975,32 +978,14 @@ async function pathCommand(
   cwd: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const r = await pi.exec("bash", ["-lc", `command -v ${name}`], { cwd, signal, timeout: 5_000 });
-  return r.code === 0 ? r.stdout.trim() || null : null;
-}
-
-function localFile(relativePath: string): string | null {
-  for (const root of candidateRoots()) {
-    const p = resolve(root, relativePath);
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-function* candidateRoots(): Generator<string> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  yield* ancestors(here);
-  yield* ancestors(process.cwd());
-}
-
-function* ancestors(start: string): Generator<string> {
-  let dir = resolve(start);
-  while (true) {
-    yield dir;
-    const parent = dirname(dir);
-    if (parent === dir) return;
-    dir = parent;
-  }
+  const lookupDirectory = homedir();
+  const r = await pi.exec("bash", ["-lc", `command -v ${name}`], {
+    cwd: lookupDirectory,
+    signal,
+    timeout: 5_000,
+  });
+  if (r.code !== 0 || !r.stdout.trim()) return null;
+  return resolveTrustedCommand(r.stdout.trim(), lookupDirectory, cwd);
 }
 
 function nodeCommand(file: string): Command {
