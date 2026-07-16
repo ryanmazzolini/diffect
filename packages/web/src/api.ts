@@ -25,6 +25,8 @@ import type {
   UiStateUpdate,
   WorkspaceEntry,
   WorkspaceInfo,
+  WorkspaceResolutionRequest,
+  WorkspaceResolutionResponse,
   WriteFileContentRequest,
   WriteFileContentResponse,
 } from "@diffect/shared";
@@ -77,6 +79,13 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(settings),
     }).then((r) => json<DiffectSettings>(r)),
+
+  resolveWorkspace: (request: WorkspaceResolutionRequest) =>
+    fetch("/workspace-resolution", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    }).then((r) => json<WorkspaceResolutionResponse>(r)),
 
   workspaces: () => fetch("/workspaces").then((r) => json<WorkspaceEntry[]>(r)),
 
