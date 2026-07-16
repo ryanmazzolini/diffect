@@ -1,0 +1,29 @@
+{
+  "state_dir": "/state/cmux",
+  "default_codex_home": "/state/codex",
+  "total_matches": 1,
+  "limit": 20,
+  "stores": [
+    {
+      "agent": "pi",
+      "path": "/state/cmux/pi-hook-sessions.json",
+      "exists": true,
+      "session_count": 1
+    }
+  ],
+  "sessions": [
+    {
+      "agent": "pi",
+      "agent_display_name": "Pi",
+      "session_id": "session-1",
+      "workspace_id": "00000000-0000-0000-0000-000000000001",
+      "surface_id": "00000000-0000-0000-0000-000000000011",
+      "cwd": "/work/ticket/repo-a",
+      "transcript_path": "/sessions/pi/session.jsonl",
+      "launch_working_directory": "/work/ticket",
+      "active_for_workspace": true,
+      "active_for_surface": true,
+      "default_visible": true
+    }
+  ]
+}

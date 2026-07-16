@@ -1,0 +1,17 @@
+{
+  "id": "cli:pane:current",
+  "result": {
+    "type": "pane_current",
+    "pane": {
+      "pane_id": "workspace-a:p1",
+      "terminal_id": "term-a",
+      "workspace_id": "workspace-a",
+      "tab_id": "workspace-a:t1",
+      "focused": false,
+      "agent_status": "working",
+      "revision": 3,
+      "cwd": "/work/ticket",
+      "foreground_cwd": "/work/ticket/repo-a"
+    }
+  }
+}

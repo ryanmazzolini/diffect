@@ -1,0 +1,13 @@
+{
+  "window_id": "10000000-0000-0000-0000-000000000001",
+  "workspace_id": "00000000-0000-0000-0000-000000000002",
+  "workspace": {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "ref": "workspace:2",
+    "title": "Focused workspace",
+    "custom_title": null,
+    "selected": true,
+    "pinned": false,
+    "current_directory": "/work/focused/repo"
+  }
+}
