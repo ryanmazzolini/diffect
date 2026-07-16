@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/ryanmazzolini/diffect/compare/v0.2.0...v0.2.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* set repository for release publishing ([6bfb24d](https://github.com/ryanmazzolini/diffect/commit/6bfb24df9732f2ef73f0d769dc6875647dea6f31))
+* **web:** disable native diff scroll anchoring ([e38dec5](https://github.com/ryanmazzolini/diffect/commit/e38dec508002b21fa4ba2c03fbe0b5ae9df7f2bd))
+
 ## [0.2.0](https://github.com/ryanmazzolini/diffect/compare/v0.1.0...v0.2.0) (2026-07-15)
 
 
