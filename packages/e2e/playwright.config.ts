@@ -4,8 +4,9 @@ export default defineConfig({
   testDir: "./tests",
   // Every test gets its own daemon, Git fixture, and config store, so test files
   // can run concurrently without leaking review targets, comments, or edits.
+  // Keep local runs responsive; CI has dedicated capacity for wider concurrency.
   fullyParallel: true,
-  workers: 4,
+  workers: process.env.CI ? 4 : 2,
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: [["list"]],
