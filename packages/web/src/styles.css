@@ -1855,6 +1855,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 
 .diff-pane {
   overflow: auto;
+  overflow-anchor: none;
   padding: 0 0 80px;
   background: var(--panel);
 }
@@ -2480,6 +2481,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
  * .diff-pane instead, so none of this applies. */
 .modmain {
   overflow: auto;
+  overflow-anchor: none;
   padding: 0 0 80px;
   /* The page backdrop shows through the gap between modules, so each module
    * reads as its own panel-colored block rather than one continuous sheet. */

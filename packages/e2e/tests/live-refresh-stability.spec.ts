@@ -59,12 +59,12 @@ async function expectReadingAnchorStable(
   initialTop: number,
   tolerance = 2,
 ): Promise<void> {
-  await expect(anchor).toBeInViewport();
+  await expect(anchor).toBeInViewport({ timeout: 1_000 });
   await expect
     .poll(async () => {
       const finalTop = await anchor.evaluate((element) => element.getBoundingClientRect().top);
       return Math.abs(finalTop - initialTop);
-    })
+    }, { timeout: 1_000 })
     .toBeLessThanOrEqual(tolerance);
 }
 
