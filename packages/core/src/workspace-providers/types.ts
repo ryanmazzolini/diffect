@@ -9,6 +9,16 @@ export interface WorkspaceProviderContext {
   agentSession?: AgentSessionContext;
 }
 
+export type HerdrProviderConfig = Extract<
+  WorkspaceProviderConfig,
+  { kind: "herdr" }
+>;
+
+export type CmuxProviderConfig = Extract<
+  WorkspaceProviderConfig,
+  { kind: "cmux" }
+>;
+
 export type PiSessionProviderConfig = Extract<
   WorkspaceProviderConfig,
   { kind: "pi-session" }

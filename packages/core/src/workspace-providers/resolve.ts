@@ -13,7 +13,9 @@ import { gitTry } from "../git/exec.js";
 import { realpathSafe } from "../path-safe.js";
 import { discoverWorkspace, type Workspace } from "../workspace.js";
 import { discoverClaudeSessionWorkspaces } from "./claude-session.js";
+import { discoverCmuxWorkspaces } from "./cmux.js";
 import { discoverCwdWorkspace } from "./cwd.js";
+import { discoverHerdrWorkspaces } from "./herdr.js";
 import { discoverPiSessionWorkspaces } from "./pi-session.js";
 import type { WorkspaceProviderContext } from "./types.js";
 
@@ -156,22 +158,19 @@ async function observeProvider(
   provider: WorkspaceProviderConfig,
   context: WorkspaceProviderContext,
 ): Promise<WorkspaceProviderResult[]> {
+  if (provider.kind === "herdr") {
+    return discoverHerdrWorkspaces(provider, context);
+  }
+  if (provider.kind === "cmux") {
+    return discoverCmuxWorkspaces(provider, context);
+  }
   if (provider.kind === "pi-session") {
     return discoverPiSessionWorkspaces(provider, context);
   }
   if (provider.kind === "claude-session") {
     return discoverClaudeSessionWorkspaces(provider, context);
   }
-  if (provider.kind === "cwd") return discoverCwdWorkspace(provider, context);
-  return [
-    {
-      providerId: provider.id,
-      candidatePaths: [],
-      matchedSession: false,
-      status: "unavailable",
-      message: `${provider.kind} provider is not implemented yet`,
-    },
-  ];
+  return discoverCwdWorkspace(provider, context);
 }
 
 async function candidatesForResult(

@@ -1,0 +1,45 @@
+{
+  "active": {
+    "window_id": "10000000-0000-0000-0000-000000000001",
+    "workspace_id": "00000000-0000-0000-0000-000000000002",
+    "surface_id": "00000000-0000-0000-0000-000000000022"
+  },
+  "caller": null,
+  "windows": [
+    {
+      "kind": "window",
+      "id": "10000000-0000-0000-0000-000000000001",
+      "index": 0,
+      "workspaces": [
+        {
+          "kind": "workspace",
+          "id": "00000000-0000-0000-0000-000000000001",
+          "index": 0,
+          "title": "Ticket workspace",
+          "selected": false,
+          "panes": [
+            {
+              "kind": "pane",
+              "id": "00000000-0000-0000-0000-000000000010",
+              "surfaces": [
+                {
+                  "kind": "surface",
+                  "id": "00000000-0000-0000-0000-000000000011",
+                  "type": "terminal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "workspace",
+          "id": "00000000-0000-0000-0000-000000000002",
+          "index": 1,
+          "title": "Focused workspace",
+          "selected": true,
+          "panes": []
+        }
+      ]
+    }
+  ]
+}
