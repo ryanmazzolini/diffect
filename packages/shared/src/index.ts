@@ -525,6 +525,53 @@ export interface SettingsValidationIssue {
   message: string;
 }
 
+export type AgentSessionProvider = "pi" | "claude";
+
+export interface AgentSessionContext {
+  provider: AgentSessionProvider;
+  id?: string;
+  path?: string;
+  cwd?: string;
+}
+
+export interface WorkspaceResolutionRequest {
+  explicitWorkspace?: string;
+  cwd?: string;
+  agentSession?: AgentSessionContext;
+}
+
+export type WorkspaceProviderStatus = "available" | "unavailable" | "error";
+
+/** Native provider observation before common path validation and selection. */
+export interface WorkspaceProviderResult {
+  providerId: string;
+  externalWorkspaceId?: string;
+  label?: string;
+  candidatePaths: string[];
+  matchedSession: boolean;
+  status: WorkspaceProviderStatus;
+  message?: string;
+}
+
+/** One validated choice returned by the common workspace resolver. */
+export interface WorkspaceResolutionCandidate {
+  workspacePath: string;
+  /** Repo/worktree that supplied the context when the workspace is a container. */
+  anchorPath: string | null;
+  providerId: string | null;
+  externalWorkspaceId?: string;
+  label?: string;
+  matchedSession: boolean;
+}
+
+export interface WorkspaceResolutionResponse {
+  /** null when no provider resolves or equally ranked candidates need a choice. */
+  selected: WorkspaceResolutionCandidate | null;
+  candidates: WorkspaceResolutionCandidate[];
+  /** Attempted provider observations and non-fatal diagnostics, in priority order. */
+  results: WorkspaceProviderResult[];
+}
+
 /** Body for POST/DELETE /workspaces. */
 export interface WorkspaceMutationRequest {
   path: string;

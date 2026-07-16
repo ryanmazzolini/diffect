@@ -86,6 +86,11 @@ import {
 } from "./store/settings.js";
 import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
 import { listSpaceFiles, readSpaceFileLines } from "./space-files.js";
+import {
+  parseWorkspaceResolutionRequest,
+  resolveWorkspace,
+  WorkspaceResolutionError,
+} from "./workspace-providers/resolve.js";
 
 export interface DaemonOptions {
   /** Workspace to serve at boot, always included even if not yet registered. */
@@ -215,6 +220,7 @@ async function handle(
 
   // Delegate to route groups; each returns true once it has sent a response.
   if (await settingsRoutes(ctx, req, res, method, path)) return;
+  if (await workspaceResolutionRoutes(ctx, req, res, method, path)) return;
   if (await uiStateRoutes(req, res, method, path)) return;
   if (await workspaceRoutes(ctx, req, res, url, method, path)) return;
   if (await openReviewRoutes(ctx, res, url, method, path)) return;
@@ -282,6 +288,44 @@ async function settingsRoutes(
       return true;
     }
     throw error;
+  }
+  return true;
+}
+
+/** Resolve caller context through the configured providers without registering it. */
+async function workspaceResolutionRoutes(
+  ctx: RouteContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (method !== "POST" || path !== "/workspace-resolution") return false;
+  if (!isLoopback(ctx.host)) {
+    sendJson(res, 403, {
+      error: "workspace resolution is only available on a loopback-bound daemon",
+    });
+    return true;
+  }
+
+  const body = await readJsonDocument(req);
+  if (!body.ok) {
+    sendJson(res, 400, { error: "a valid workspace resolution request is required" });
+    return true;
+  }
+  try {
+    const request = parseWorkspaceResolutionRequest(body.value);
+    sendJson(res, 200, await resolveWorkspace(request, await readSettings()));
+  } catch (error) {
+    if (error instanceof WorkspaceResolutionError) {
+      sendJson(res, 400, { error: error.message, issues: error.issues });
+    } else if (error instanceof SettingsValidationError) {
+      sendJson(res, 500, { error: "settings file is invalid", issues: error.issues });
+    } else if (error instanceof SettingsReadError) {
+      sendJson(res, 500, { error: error.message });
+    } else {
+      throw error;
+    }
   }
   return true;
 }
