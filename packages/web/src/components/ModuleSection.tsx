@@ -61,6 +61,7 @@ interface Props {
   refs?: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch?: string | null;
+  preserveWorkTarget?: boolean;
   onTarget?: (
     repo: string,
     target: string,
@@ -110,6 +111,7 @@ export const ModuleSection = memo(function ModuleSection({
   refs = null,
   refThreadCounts,
   defaultBranch = null,
+  preserveWorkTarget = false,
   onTarget,
   collapsed = false,
   onToggleCollapse,
@@ -177,6 +179,7 @@ export const ModuleSection = memo(function ModuleSection({
           refs={refs}
           refThreadCounts={refThreadCounts}
           defaultBranch={defaultBranch}
+          preserveWorkTarget={preserveWorkTarget}
           onTarget={handleTarget}
           collapsed={false}
           onToggleCollapse={handleToggleCollapse}
@@ -203,6 +206,7 @@ export const ModuleSection = memo(function ModuleSection({
       refs={refs}
       refThreadCounts={refThreadCounts}
       defaultBranch={defaultBranch}
+      preserveWorkTarget={preserveWorkTarget}
       onTarget={handleTarget}
       collapsed={collapsed}
       onToggleCollapse={handleToggleCollapse}
@@ -228,6 +232,7 @@ function StackedModule({
   refs,
   refThreadCounts,
   defaultBranch,
+  preserveWorkTarget,
   onTarget,
   collapsed,
   onToggleCollapse,
@@ -247,6 +252,7 @@ function StackedModule({
   refs: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   defaultBranch: string | null;
+  preserveWorkTarget: boolean;
   onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
   /** Collapse is controlled by App (so the rail can drive it too). */
   collapsed: boolean;
@@ -294,6 +300,7 @@ function StackedModule({
               worktree={worktree}
               defaultBranch={defaultBranch}
               currentBranch={branch}
+              preserveWorkTarget={preserveWorkTarget}
               target={target}
               presentation={presentation}
               onTarget={onTarget}

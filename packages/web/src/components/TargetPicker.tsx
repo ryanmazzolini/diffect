@@ -34,6 +34,7 @@ interface Props {
   worktree: string | null;
   defaultBranch: string | null;
   currentBranch?: string | null;
+  preserveWorkTarget?: boolean;
   target: string;
   presentation?: ReviewTargetPresentation;
   onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
@@ -47,6 +48,7 @@ export function TargetPicker({
   worktree,
   defaultBranch,
   currentBranch = null,
+  preserveWorkTarget = false,
   target,
   presentation,
   onTarget,
@@ -74,8 +76,8 @@ export function TargetPicker({
     // `work` uses merge-base semantics, but this control promises the selected
     // branch tip → working tree. Normalize the legacy/default target as soon as
     // the repository's default branch is known so the label and diff agree.
-    if (target === "work" && fallbackBase) onTarget(fallbackBase);
-  }, [fallbackBase, onTarget, target]);
+    if (!preserveWorkTarget && target === "work" && fallbackBase) onTarget(fallbackBase);
+  }, [fallbackBase, onTarget, preserveWorkTarget, target]);
 
   return (
     <span className="target-picker">

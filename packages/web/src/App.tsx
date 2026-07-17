@@ -93,6 +93,7 @@ interface ReadyFollow {
 interface DeepLinkSelection extends StoredSelection {
   workspacePath: string | null;
   repo: string | null;
+  explicitTarget: boolean;
 }
 interface StoredPlace extends StoredSelection {
   workspacePath: string | null;
@@ -106,14 +107,22 @@ function cleanQueryValue(value: string | null): string | null {
 }
 function readInitialDeepLink(): DeepLinkSelection {
   if (typeof window === "undefined") {
-    return { workspacePath: null, repo: null, worktree: null, target: DEFAULT_TARGET };
+    return {
+      workspacePath: null,
+      repo: null,
+      worktree: null,
+      target: DEFAULT_TARGET,
+      explicitTarget: false,
+    };
   }
   const q = new URLSearchParams(window.location.search);
+  const target = cleanQueryValue(q.get("target"));
   return {
     workspacePath: cleanQueryValue(q.get("workspace")),
     repo: cleanQueryValue(q.get("repo")),
     worktree: cleanQueryValue(q.get("worktree")),
-    target: cleanQueryValue(q.get("target")) ?? DEFAULT_TARGET,
+    target: target ?? DEFAULT_TARGET,
+    explicitTarget: target !== null,
   };
 }
 function readFollowMode(): boolean {
@@ -398,8 +407,12 @@ export function App() {
   const [initialDeepLink] = useState(readInitialDeepLink);
   const [initialPlace] = useState(readStoredPlace);
   const initialRepo = initialDeepLink.repo ?? initialPlace.repo;
-  const initialWorkspacePath =
-    initialDeepLink.workspacePath ?? mostRecentStoredWorkspacePath() ?? initialPlace.workspacePath;
+  const [initialWorkspacePath] = useState(
+    () =>
+      initialDeepLink.workspacePath ??
+      mostRecentStoredWorkspacePath() ??
+      initialPlace.workspacePath,
+  );
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [repo, setRepo] = useState<string | null>(initialRepo);
   const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(
@@ -961,7 +974,12 @@ export function App() {
       const next = new Map(prev);
       let changed = false;
       for (const [name, sel] of Object.entries(selectionsToRestore)) {
-        if (!allowed.has(name)) continue;
+        const isLinkedSelection =
+          activeWorkspacePath === initialWorkspacePath &&
+          initialDeepLink.explicitTarget &&
+          name === initialDeepLink.repo;
+        // An explicit URL target seeded this repo; persisted state must not override it.
+        if (!allowed.has(name) || isLinkedSelection) continue;
         const cur = next.get(name);
         if (
           cur?.worktree === sel.worktree &&
@@ -983,7 +1001,16 @@ export function App() {
       setSpacePreviewFile(place.file);
       setPreviewFile(null);
     }
-  }, [activeEntry, activeWorkspacePath, initialDeepLink.repo, reviewRecency, uiStateLoaded, workspacePlaces]);
+  }, [
+    activeEntry,
+    activeWorkspacePath,
+    initialDeepLink.explicitTarget,
+    initialDeepLink.repo,
+    initialWorkspacePath,
+    reviewRecency,
+    uiStateLoaded,
+    workspacePlaces,
+  ]);
 
   useEffect(() => {
     if (
@@ -2150,6 +2177,12 @@ export function App() {
                           refs={refsByRepo.get(r.name) ?? null}
                           refThreadCounts={refThreadCountsByRepo.get(r.name) ?? EMPTY_REF_THREAD_COUNTS}
                           defaultBranch={r.defaultBranch}
+                          preserveWorkTarget={
+                            activeWorkspacePath === initialWorkspacePath &&
+                            initialDeepLink.explicitTarget &&
+                            initialDeepLink.repo === r.name &&
+                            initialDeepLink.target === "work"
+                          }
                           onTarget={changeTargetFor}
                           collapsed={collapsedRepos.has(r.name)}
                           onToggleCollapse={toggleCollapseFor}
@@ -2182,6 +2215,12 @@ export function App() {
                     refs={refs}
                     refThreadCounts={refThreadCountsByRepo.get(repo) ?? EMPTY_REF_THREAD_COUNTS}
                     defaultBranch={activeRepo?.defaultBranch ?? null}
+                    preserveWorkTarget={
+                      activeWorkspacePath === initialWorkspacePath &&
+                      initialDeepLink.explicitTarget &&
+                      initialDeepLink.repo === repo &&
+                      initialDeepLink.target === "work"
+                    }
                     onTarget={changeTargetFor}
                     previewFile={previewFile}
                     onBackToDiff={backToDiff}

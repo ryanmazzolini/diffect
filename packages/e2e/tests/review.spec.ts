@@ -141,6 +141,153 @@ test("resolves a thread and the open count drops", async ({ page }) => {
   await expect(openCount).toHaveText(String(before - 1));
 });
 
+test("explicit review deep link wins over a restored target", async ({ page }) => {
+  await page.goto("/");
+
+  const { root, repo } = await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((response) => response.json());
+    const repo = workspace.repos[0].name;
+    const response = await fetch("/threads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repo,
+        worktree: null,
+        target: "work",
+        file: "calc.js",
+        side: "new",
+        line: 28,
+        body: "keep this work-target thread visible",
+        author: { type: "agent", name: "test-agent" },
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return { root: workspace.root, repo };
+  });
+  await page.evaluate(
+    ({ root, repo }) => {
+      const selection = { worktree: null, target: "staged" };
+      sessionStorage.setItem(
+        "diffect-workspace-places-v1",
+        JSON.stringify({
+          [root]: {
+            workspacePath: root,
+            repo,
+            worktree: null,
+            target: "staged",
+            file: null,
+            selections: { [repo]: selection },
+          },
+        }),
+      );
+    },
+    { root, repo },
+  );
+
+  const query = new URLSearchParams({ workspace: root, repo, target: "work" });
+  const refsLoaded = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/repos/${encodeURIComponent(repo)}/refs`) && response.ok(),
+  );
+  await page.goto(`/?${query}`);
+  await refsLoaded;
+  await expect(page.locator(".review-target-trigger")).toContainText("main");
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+
+  await expect(page.locator(".thread-pane")).toContainText(
+    "keep this work-target thread visible",
+  );
+  await expect(page.locator(".filter", { hasText: "open" }).locator(".filter-count")).toHaveText(
+    "1",
+  );
+});
+
+test("empty target query restores the saved review target", async ({ page }) => {
+  await page.goto("/");
+  const { root, repo } = await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((response) => response.json());
+    return { root: workspace.root, repo: workspace.repos[0].name };
+  });
+  await page.evaluate(
+    ({ root, repo }) => {
+      const selection = { worktree: null, target: "staged" };
+      sessionStorage.setItem(
+        "diffect-workspace-places-v1",
+        JSON.stringify({
+          [root]: {
+            workspacePath: root,
+            repo,
+            worktree: null,
+            target: "staged",
+            file: null,
+            selections: { [repo]: selection },
+          },
+        }),
+      );
+    },
+    { root, repo },
+  );
+
+  const query = new URLSearchParams({ workspace: root, repo, target: "" });
+  await page.goto(`/?${query}`);
+
+  await expect(
+    page.locator(".local-targets").getByRole("button", {
+      name: "Staged changes",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("explicit work target stays scoped to its linked workspace", async ({ page }) => {
+  await page.goto("/");
+  const { workspace, entries } = await page.evaluate(async () => {
+    const [workspace, entries] = await Promise.all([
+      fetch("/workspace").then((response) => response.json()),
+      fetch("/workspaces").then((response) => response.json()),
+    ]);
+    return { workspace, entries };
+  });
+  const repo = workspace.repos[0].name as string;
+  const defaultTarget = workspace.repos[0].defaultBranch as string;
+  const linkedPath = workspace.root as string;
+  const linkedEntry = entries.find((entry: { path: string }) => entry.path === linkedPath);
+  if (!linkedEntry) throw new Error("fixture workspace entry missing");
+  const otherPath = `${linkedPath}-same-repo`;
+  await page.route("**/workspaces", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: [linkedEntry, { ...linkedEntry, path: otherPath }],
+    });
+  });
+  await page.route("**/workspace?*", async (route) => {
+    const requestedPath = new URL(route.request().url()).searchParams.get("workspace");
+    if (requestedPath !== otherPath) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ json: { ...workspace, root: otherPath } });
+  });
+
+  const query = new URLSearchParams({ workspace: linkedPath, repo, target: "work" });
+  await page.goto(`/?${query}`);
+  await expect(page.locator(".review-target-trigger")).toContainText("main");
+
+  const defaultDiffLoaded = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname.endsWith(`/repos/${repo}/diff`) && url.searchParams.get("target") === defaultTarget;
+  });
+  await page.getByRole("button", { name: "Toggle workspaces" }).click();
+  await page.locator(".workspace-option:visible", { hasText: otherPath }).click();
+
+  await defaultDiffLoaded;
+});
+
 test("switches review target without errors", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
