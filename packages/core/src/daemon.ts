@@ -22,6 +22,7 @@ import { resolveCurrentBranch, resolveWorkBase } from "./git/diff.js";
 import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
 import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, computeAnchor, readSideLines } from "./reviews/anchors.js";
+import { discoverOpenReviews } from "./reviews/open-reviews.js";
 import {
   resolveScope,
   legacySessionIdForScope,
@@ -209,6 +210,7 @@ async function handle(
   // Delegate to route groups; each returns true once it has sent a response.
   if (await uiStateRoutes(req, res, method, path)) return;
   if (await workspaceRoutes(ctx, req, res, url, method, path)) return;
+  if (await openReviewRoutes(ctx, res, url, method, path)) return;
   if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
   if (await threadItemRoutes(ctx, req, res, method, path)) return;
   if (await prDraftRoutes(ctx, req, res, url, method, path)) return;
@@ -289,6 +291,58 @@ function workspaceView(ctx: RouteContext, requested: string): Workspace | null {
   // when the reachable route is `/repos/team-b-api`.
   const repos = ctx.ws.repos.filter((repo) => repo.workspacePath && resolve(repo.workspacePath) === root);
   return { root: source.root, repos };
+}
+
+/** Exact open review groups for one registered workspace and visible repo. */
+async function openReviewRoutes(
+  ctx: RouteContext,
+  res: ServerResponse,
+  url: URL,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (method !== "GET" || path !== "/open-reviews") return false;
+  const requestedWorkspace = url.searchParams.get("workspace")?.trim();
+  const repoName = url.searchParams.get("repo")?.trim();
+  if (!requestedWorkspace || !repoName) {
+    sendJson(res, 400, { error: "workspace and repo are required" });
+    return true;
+  }
+
+  const workspaceRoot = resolve(requestedWorkspace);
+  const source = ctx.workspaces.find(
+    (workspace) => resolve(workspace.root) === workspaceRoot,
+  );
+  if (!source) {
+    sendJson(res, 404, { error: `unknown workspace: ${requestedWorkspace}` });
+    return true;
+  }
+  const repo = ctx.ws.repos.find(
+    (candidate) =>
+      candidate.name === repoName &&
+      candidate.workspacePath !== undefined &&
+      resolve(candidate.workspacePath) === workspaceRoot,
+  );
+  if (!repo) {
+    sendJson(res, 404, { error: `unknown repo in workspace: ${repoName}` });
+    return true;
+  }
+
+  const sourceRepo = source.repos.find(
+    (candidate) => resolve(candidate.root) === resolve(repo.root),
+  );
+  const storedRepoNames = new Set([repo.name]);
+  if (sourceRepo) storedRepoNames.add(sourceRepo.name);
+  sendJson(
+    res,
+    200,
+    await discoverOpenReviews({
+      workspaceRoot,
+      repo,
+      storedRepoNames,
+    }),
+  );
+  return true;
 }
 
 async function mutateWorkspaceRoute(

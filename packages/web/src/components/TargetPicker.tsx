@@ -54,7 +54,11 @@ export function TargetPicker({
   refThreadCounts,
 }: Props) {
   const fallbackBase = useMemo(
-    () => defaultBranch ?? refs?.branches.find((branch) => branch === "main") ?? refs?.branches[0] ?? "",
+    () =>
+      defaultBranch ??
+      refs?.branches.find((branch) => branch.label === "main")?.value ??
+      refs?.branches[0]?.value ??
+      "",
     [defaultBranch, refs],
   );
   const fallbackResults = useMemo(() => refsToSearchResults(refs), [refs]);
@@ -865,27 +869,14 @@ function usePopoverPosition(
 function refsToSearchResults(refs: RefList | null): RefSearchResults {
   return {
     query: "",
-    branches: (refs?.branches ?? []).map((name) => ({
-      kind: "branch",
-      value: name,
-      label: name,
-    })),
-    remotes: (refs?.remotes ?? []).map((name) => ({
-      kind: "remote",
-      value: name,
-      label: name,
-    })),
-    tags: (refs?.tags ?? []).map((name) => ({
-      kind: "tag",
-      value: `tags/${name}`,
-      label: name,
-    })),
+    branches: refs?.branches ?? [],
+    remotes: refs?.remotes ?? [],
+    tags: refs?.tags ?? [],
     commits: (refs?.commits ?? []).map((commit) => ({
       kind: "commit",
       value: commit.sha,
-      label: commit.sha,
-      subject: commit.subject,
-      sha: commit.sha,
+      label: commit.shortSha,
+      ...commit,
     })),
   };
 }
@@ -903,7 +894,8 @@ function groupedOptions(
     allowed(option.kind) &&
     (needle === "" ||
       option.label.toLowerCase().includes(needle) ||
-      option.subject?.toLowerCase().includes(needle) === true);
+      (option.kind === "commit" &&
+        option.subject?.toLowerCase().includes(needle) === true));
   const head: RefSearchOption[] =
     includeHead && matches({ kind: "branch", value: "HEAD", label: "HEAD" })
       ? [{ kind: "branch", value: "HEAD", label: "HEAD", subject: "current checkout" }]

@@ -99,12 +99,7 @@ export function sessionIdForScope(
   scope: ReviewScope,
   worktree: string | null,
 ): string {
-  const rangeSemantics =
-    scope.kind !== "range"
-      ? "not-range"
-      : normalizeTarget(scope.target).threeDot === true
-        ? "merge-base"
-        : "direct";
+  const rangeSemantics = rangeSemanticsForScope(scope) ?? "not-range";
   const normalizedWorktree = worktree === "" ? null : worktree;
   return hashSessionIdentity([
     "v2",
@@ -115,6 +110,16 @@ export function sessionIdForScope(
     normalizedWorktree === null ? "primary" : "linked",
     normalizedWorktree ?? "",
   ]);
+}
+
+/** Normalized range behavior carried separately from the raw persisted target. */
+export function rangeSemanticsForScope(
+  scope: ReviewScope,
+): "direct" | "merge-base" | null {
+  if (scope.kind !== "range") return null;
+  return normalizeTarget(scope.target).threeDot === true
+    ? "merge-base"
+    : "direct";
 }
 
 /**

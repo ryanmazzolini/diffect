@@ -219,13 +219,55 @@ export interface ReviewSession {
   worktree: string | null;
 }
 
+export interface CommitSummary {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  committer: string;
+  /** ISO 8601 Git committer timestamp. */
+  committedAt: string;
+}
+
+export type ReviewEndpointKind = "ref" | "commit" | "local";
+
+export interface ReviewEndpointSummary {
+  kind: ReviewEndpointKind;
+  /** Persisted symbolic endpoint, normalized only for human-facing local labels. */
+  label: string;
+  sha: string | null;
+  shortSha: string | null;
+  subject: string | null;
+  committer: string | null;
+  committedAt: string | null;
+}
+
+export type OpenReviewAvailability =
+  | { state: "available" }
+  | { state: "missing-checkout"; worktree: string }
+  | { state: "missing-ref"; endpoints: ("from" | "to")[] }
+  | { state: "scope-changed" };
+
+export interface OpenReviewSummary {
+  /** Canonical checkout- and range-aware review identity. */
+  sessionId: string;
+  /** Exact persisted selection; the browser must not reconstruct it from labels. */
+  scope: ReviewScope;
+  worktree: string | null;
+  rangeSemantics: "direct" | "merge-base" | null;
+  availability: OpenReviewAvailability;
+  openThreadCount: number;
+  latestActivity: string;
+  from: ReviewEndpointSummary;
+  to: ReviewEndpointSummary;
+}
+
 /** Branches, tags, remote-tracking branches, and recent commits for the compare picker (GET /repos/:repo/refs). */
 export interface RefList {
-  branches: string[];
-  tags: string[];
-  /** Remote-tracking branches by short name (e.g. "origin/main"); excludes each remote's symbolic HEAD alias. */
-  remotes: string[];
-  commits: { sha: string; subject: string }[];
+  branches: RefSearchOption[];
+  tags: RefSearchOption[];
+  /** Remote-tracking branches; excludes each remote's symbolic HEAD alias. */
+  remotes: RefSearchOption[];
+  commits: CommitSummary[];
   /** True when `commits` contains the complete reachable history rather than only its recent tail. */
   commitsReachRoot: boolean;
   /** Git's empty tree for this repository's object format, used by the synthetic empty-repo base. */
@@ -241,10 +283,12 @@ export interface RefSearchOption {
   value: string;
   /** Primary label. For commits this is the short SHA. */
   label: string;
-  /** Commit subject, when known. */
+  /** Commit metadata for the ref tip or commit result, when resolvable. */
   subject?: string;
-  /** Full commit SHA for commit results. */
   sha?: string;
+  shortSha?: string;
+  committer?: string;
+  committedAt?: string;
 }
 
 export interface RefSearchResults {
