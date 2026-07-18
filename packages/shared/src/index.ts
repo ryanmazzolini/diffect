@@ -198,8 +198,8 @@ export interface WorktreeSummary {
  * A review session surfaced as a primary sidebar entry: a (repo, checkout,
  * target) resolved into a stable session identity. The whole `scope` is carried
  * so the UI can label the entry (branch / range / local) and re-select it
- * without resolving any git refs itself; `id` equals `sessionIdForScope(scope)`,
- * the join key against `Thread.sessionId`.
+ * without resolving any git refs itself; `id` equals
+ * `sessionIdForScope(scope, worktree)`, the join key against `Thread.sessionId`.
  *
  * Server-derived sessions — one `work` session per checked-out worktree — ride
  * on `RepoSummary.sessions`. The client also reconstructs sessions from existing
@@ -207,14 +207,14 @@ export interface WorktreeSummary {
  * entry) and from the active diff; all three share this one shape, deduped by `id`.
  */
 export interface ReviewSession {
-  /** Stable id; equals `sessionIdForScope(scope)` and `Thread.sessionId`. */
+  /** Stable id; equals `sessionIdForScope(scope, worktree)` and `Thread.sessionId`. */
   id: string;
   /** The scope this session reviews — its target spec, base/head, and branch. */
   scope: ReviewScope;
   /**
    * Checkout to select with this session: null for the primary worktree, else
-   * the URL-safe worktree name. MUST match how `id` was derived (the daemon
-   * resolves the primary as worktree=null) so the diff route re-stamps the same id.
+   * the URL-safe worktree name. It is part of `id`; the daemon resolves the
+   * primary as worktree=null so every writer and diff route re-stamps the same id.
    */
   worktree: string | null;
 }
@@ -486,7 +486,8 @@ export interface Thread {
   scope: ReviewScope | null;
   /**
    * Stable id of the review session this thread belongs to, derived from the
-   * scope's symbolic identity. null for legacy threads.
+   * scope's symbolic identity, range semantics, and checkout. null for truly
+   * unscoped legacy threads.
    */
   sessionId: string | null;
   /**

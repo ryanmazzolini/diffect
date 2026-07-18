@@ -224,8 +224,8 @@ export function resolveRepoRoot(
  * primary review entries. Each is resolved with the SAME inputs the diff route
  * uses (the primary worktree as `worktree=null`, never its basename) so the
  * session id equals the one the daemon stamps onto the diff, and thus the
- * `Thread.sessionId` of comments filed under it. Deduped by id: distinct
- * checkouts on the same branch collapse to one session.
+ * `Thread.sessionId` of comments filed under it. Deduped by canonical id;
+ * checkout identity keeps same-ref reviews in different worktrees distinct.
  */
 async function deriveWorktreeSessions(
   repo: DiscoveredRepo,
@@ -235,7 +235,7 @@ async function deriveWorktreeSessions(
     repo.worktrees.map(async (w) => {
       const worktree = w.root === repo.root ? null : w.name;
       const scope = await resolveScope(w.root, work, worktree);
-      return { id: sessionIdForScope(scope), scope, worktree };
+      return { id: sessionIdForScope(scope, worktree), scope, worktree };
     }),
   );
   const seen = new Set<string>();

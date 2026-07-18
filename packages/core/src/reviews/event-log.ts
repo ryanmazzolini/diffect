@@ -19,6 +19,7 @@ import {
   threadsLogPath as repoThreadsLogPath,
 } from "../store/paths.js";
 import { migrateLegacyStore } from "../store/migrate.js";
+import { sessionIdForScope } from "./scope.js";
 
 // The canonical review store now lives in a central per-user location keyed by
 // repo root (see ../store/paths.ts), not in an in-tree `.reviews/`.
@@ -80,11 +81,13 @@ export async function createThread(
     endLine: req.endLine ?? null,
     anchor: req.anchor ?? null,
     severity: req.severity ?? null,
-    // Bind sessionId to scope: a sessionId with no scope matches neither a session
-    // view nor the unscoped bucket (which keys on sessionId === null), so it would
-    // be invisible everywhere. Coerce that bad combo to fully unscoped.
+    // Bind sessionId to scope at the store boundary. Scoped writes always carry
+    // the canonical checkout-aware id; an unscoped id would be invisible in both
+    // session and legacy views, so discard it.
     scope: req.scope ?? null,
-    sessionId: req.scope ? (req.sessionId ?? null) : null,
+    sessionId: req.scope
+      ? sessionIdForScope(req.scope, req.worktree ?? null)
+      : null,
     // The snapshot is meaningful only within a scope, so bind it the same way:
     // no scope ⇒ no snapshot (a snapshot id with no scope is invisible everywhere).
     snapshotId: req.scope ? (req.snapshotId ?? null) : null,
@@ -282,10 +285,13 @@ export function replay(events: ThreadEvent[]): Thread[] {
       anchorState: "active",
       // Legacy (v1) created events carry no scope/session — default to the
       // unscoped bucket rather than dropping the thread (ADR migration rule).
-      // A sessionId with no scope is invisible in every view, so bind them: no
-      // scope ⇒ unscoped, regardless of any stored sessionId.
+      // Scoped old/new events are projected to one canonical checkout-aware id;
+      // the stored id remains untouched in the append-only source log and is
+      // accepted separately as a legacy lookup alias.
       scope: e.scope ?? null,
-      sessionId: e.scope ? (e.sessionId ?? null) : null,
+      sessionId: e.scope
+        ? sessionIdForScope(e.scope, e.worktree ?? null)
+        : null,
       // Pre-Slice-3 (and unscoped) events carry no snapshot — default to null,
       // bound to scope exactly like sessionId so an orphaned id can't survive.
       snapshotId: e.scope ? (e.snapshotId ?? null) : null,

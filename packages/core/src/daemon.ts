@@ -24,6 +24,7 @@ import { computeTargetDiff, normalizeTarget } from "./git/target.js";
 import { buildAnchor, computeAnchor, readSideLines } from "./reviews/anchors.js";
 import {
   resolveScope,
+  legacySessionIdForScope,
   sessionIdForScope,
   snapshotIdForState,
 } from "./reviews/scope.js";
@@ -38,8 +39,10 @@ import {
 } from "./reviews/event-log.js";
 import {
   findStoreForThread,
+  findThreadKeysByStoredSession,
   loadAllThreads,
   loadRefreshedThreads,
+  threadMatchesStoredSession,
   workspacePaths,
 } from "./reviews/refresh.js";
 import { EventHub } from "./events.js";
@@ -359,8 +362,26 @@ async function threadCollectionRoutes(
     if (spaceFilter) threads = threads.filter((t) => t.spacePath === resolve(spaceFilter));
     if (worktreeFilter)
       threads = threads.filter((t) => t.worktree === worktreeFilter);
-    if (sessionFilter)
-      threads = threads.filter((t) => t.sessionId === sessionFilter);
+    if (sessionFilter) {
+      // Canonical ids are exact. Only fall back to the old kind/base/head alias
+      // when no canonical group matches; that alias may intentionally span the
+      // checkouts or range modes that the old identity used to collapse.
+      const exact = threads.filter((t) => t.sessionId === sessionFilter);
+      if (exact.length > 0) {
+        threads = exact;
+      } else {
+        const storedAliases = await findThreadKeysByStoredSession(
+          ctx.ws,
+          sessionFilter,
+        );
+        threads = threads.filter(
+          (t) =>
+            threadMatchesStoredSession(t, storedAliases) ||
+            (t.scope !== null &&
+              legacySessionIdForScope(t.scope) === sessionFilter),
+        );
+      }
+    }
     sendJson(res, 200, threads);
     return true;
   }
@@ -466,7 +487,15 @@ async function createThreadRoute(
   const store = spacePath ? spaceThreadStore(spacePath) : repo.root;
   const thread = await createThread(
     store,
-    { ...body, repo: repo.name, targetLevel, anchor, scope, sessionId: sessionIdForScope(scope), snapshotId },
+    {
+      ...body,
+      repo: repo.name,
+      targetLevel,
+      anchor,
+      scope,
+      sessionId: sessionIdForScope(scope, body.worktree ?? null),
+      snapshotId,
+    },
     ctx.now(),
   );
   if (spacePath) {
@@ -646,7 +675,7 @@ async function repoRoutes(
       repo: repoName,
       worktree,
       scope,
-      sessionId: sessionIdForScope(scope),
+      sessionId: sessionIdForScope(scope, worktree),
       // The live snapshot the client compares each thread's snapshotId against to
       // flag threads filed in an earlier iteration of this scope. Omit (not null)
       // when none can be computed (unborn HEAD), matching the optional field.

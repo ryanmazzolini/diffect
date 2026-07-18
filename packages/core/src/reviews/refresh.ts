@@ -1,4 +1,4 @@
-import type { Thread } from "@diffect/shared";
+import type { Thread, ThreadCreatedEvent, ThreadEvent } from "@diffect/shared";
 import { resolveWorkBase } from "../git/diff.js";
 import type { DiscoveredRepo, Workspace } from "../workspace.js";
 import {
@@ -21,6 +21,63 @@ export async function loadAllThreads(ws: Workspace): Promise<Thread[]> {
 
 export function workspacePaths(ws: Workspace): string[] {
   return [...new Set([ws.root, ...ws.repos.map((r) => r.workspacePath ?? ws.root)])];
+}
+
+/**
+ * Find scoped threads whose immutable creation event stored `sessionId`.
+ * Canonical replay intentionally replaces that API-visible id, so legacy lookup
+ * consults the source events without rewriting or exposing migration metadata.
+ */
+export async function findThreadKeysByStoredSession(
+  ws: Workspace,
+  sessionId: string,
+): Promise<Set<string>> {
+  const keys = new Set<string>();
+  for (const path of workspacePaths(ws)) {
+    for (const event of await readEvents(spaceThreadStore(path))) {
+      if (isStoredSessionMatch(event, sessionId)) {
+        keys.add(storedSessionThreadKey("space", path, event.id));
+      }
+    }
+  }
+  for (const repo of ws.repos) {
+    for (const event of await readEvents(repoThreadStore(repo.root))) {
+      if (isStoredSessionMatch(event, sessionId)) {
+        keys.add(storedSessionThreadKey("repo", repo.name, event.id));
+      }
+    }
+  }
+  return keys;
+}
+
+/** Match a flattened API thread back to the exact store that supplied it. */
+export function threadMatchesStoredSession(
+  thread: Thread,
+  keys: Set<string>,
+): boolean {
+  return thread.spacePath
+    ? keys.has(storedSessionThreadKey("space", thread.spacePath, thread.id))
+    : thread.repo !== null &&
+        keys.has(storedSessionThreadKey("repo", thread.repo, thread.id));
+}
+
+function isStoredSessionMatch(
+  event: ThreadEvent,
+  sessionId: string,
+): event is ThreadCreatedEvent {
+  return (
+    event.type === "thread.created" &&
+    !!event.scope &&
+    event.sessionId === sessionId
+  );
+}
+
+function storedSessionThreadKey(
+  storeKind: "repo" | "space",
+  storeIdentity: string,
+  threadId: string,
+): string {
+  return JSON.stringify([storeKind, storeIdentity, threadId]);
 }
 
 /**

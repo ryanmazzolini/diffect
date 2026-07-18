@@ -53,6 +53,7 @@ describe("summarizeRepos session derivation", () => {
 
     const expected = sessionIdForScope(
       await resolveScope(root, normalizeTarget("work"), null),
+      null,
     );
     expect(session.id).toBe(expected);
   });
@@ -93,6 +94,7 @@ describe("summarizeRepos session derivation", () => {
         : primary;
       const expected = sessionIdForScope(
         await resolveScope(treeRoot, normalizeTarget("work"), session.worktree),
+        session.worktree,
       );
       expect(session.id).toBe(expected);
     }
