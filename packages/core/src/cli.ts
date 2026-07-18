@@ -189,8 +189,20 @@ async function cmdDiff(argv: string[]): Promise<number> {
   const diff = await computeTargetDiff(treeRoot, target);
 
   if (flags.bools.has("json")) {
+    const scope = await resolveScope(treeRoot, target, worktree);
     process.stdout.write(
-      JSON.stringify({ ...diff, repo: repo.name, worktree }, null, 2) + "\n",
+      JSON.stringify(
+        {
+          ...diff,
+          repo: repo.name,
+          worktree,
+          scope,
+          sessionId: sessionIdForScope(scope, worktree),
+          currentSnapshotId: (await snapshotIdForState(treeRoot, scope)) ?? undefined,
+        },
+        null,
+        2,
+      ) + "\n",
     );
     return 0;
   }
@@ -238,7 +250,7 @@ async function cmdComment(argv: string[]): Promise<number> {
       severity: (flags.options.get("severity") as Severity) ?? null,
       anchor,
       scope,
-      sessionId: sessionIdForScope(scope),
+      sessionId: sessionIdForScope(scope, worktree),
       snapshotId: await snapshotIdForState(treeRoot, scope),
       author: authorFrom(flags),
       body,
@@ -269,7 +281,7 @@ async function cmdGeneral(argv: string[]): Promise<number> {
       side: null,
       line: null,
       scope,
-      sessionId: sessionIdForScope(scope),
+      sessionId: sessionIdForScope(scope, worktree),
       snapshotId: await snapshotIdForState(treeRoot, scope),
       author: authorFrom(flags),
       body,

@@ -13,6 +13,7 @@ import {
   spaceThreadStore,
   UnknownThreadError,
 } from "../src/reviews/event-log.js";
+import { sessionIdForScope } from "../src/reviews/scope.js";
 import { threadsLogPath } from "../src/store/paths.js";
 import {
   THREAD_SCHEMA_VERSION,
@@ -281,7 +282,7 @@ describe("event log", () => {
     expect(loaded[0]!.sessionId).toBeNull();
   });
 
-  it("stamps scope/sessionId on a v2 thread and round-trips them", async () => {
+  it("stamps the canonical scope/sessionId on a v2 thread and round-trips them", async () => {
     const scope = {
       target: "main..feature",
       kind: "range" as const,
@@ -290,26 +291,31 @@ describe("event log", () => {
       baseSha: "deadbeef",
       branch: "feature",
     };
+    const canonical = sessionIdForScope(scope, "feature-checkout");
     const created = await createThread(
       dir,
       {
         repo: "r",
+        worktree: "feature-checkout",
         file: "a",
         line: 1,
         body: "scoped",
         scope,
-        sessionId: "sess_abc",
+        sessionId: "sess_legacy_or_invalid",
         snapshotId: "snap_abc",
       },
       T0,
     );
     expect(created.scope).toEqual(scope);
-    expect(created.sessionId).toBe("sess_abc");
+    expect(created.sessionId).toBe(canonical);
     expect(created.snapshotId).toBe("snap_abc");
+
+    const raw = JSON.parse((await readFile(threadsLogPath(dir), "utf8")).trim());
+    expect(raw.sessionId).toBe(canonical);
 
     const [loaded] = await loadThreads(dir);
     expect(loaded!.scope).toEqual(scope);
-    expect(loaded!.sessionId).toBe("sess_abc");
+    expect(loaded!.sessionId).toBe(canonical);
     expect(loaded!.snapshotId).toBe("snap_abc");
   });
 

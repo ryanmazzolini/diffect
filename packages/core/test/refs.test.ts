@@ -101,8 +101,8 @@ describe("Repo Start", () => {
       headRef: "HEAD",
       baseSha: refs.repoStartSha,
     });
-    expect(sessionIdForScope(await resolveScope(dir, target, null))).toBe(
-      sessionIdForScope(scope),
+    expect(sessionIdForScope(await resolveScope(dir, target, null), null)).toBe(
+      sessionIdForScope(scope, null),
     );
   });
 

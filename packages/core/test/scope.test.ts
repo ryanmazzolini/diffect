@@ -55,10 +55,16 @@ describe("resolveScope", () => {
     await initRepo(dir);
     await git(dir, ["checkout", "-b", "feature"]);
     await commit(dir, "one\n");
-    const first = sessionIdForScope(await resolveScope(dir, normalizeTarget("work"), null));
+    const first = sessionIdForScope(
+      await resolveScope(dir, normalizeTarget("work"), null),
+      null,
+    );
 
     await commit(dir, "two\n"); // HEAD moves; the session identity must not.
-    const second = sessionIdForScope(await resolveScope(dir, normalizeTarget("work"), null));
+    const second = sessionIdForScope(
+      await resolveScope(dir, normalizeTarget("work"), null),
+      null,
+    );
 
     expect(second).toBe(first);
   });
@@ -115,22 +121,50 @@ describe("sessionIdForScope", () => {
   };
 
   it("is deterministic for the same symbolic identity", () => {
-    const a = sessionIdForScope({ ...base, kind: "range" });
-    const b = sessionIdForScope({ ...base, kind: "range" });
+    const a = sessionIdForScope({ ...base, kind: "range" }, null);
+    const b = sessionIdForScope({ ...base, kind: "range" }, null);
     expect(a).toBe(b);
     expect(a).toMatch(/^sess_[0-9a-f]{16}$/);
   });
 
   it("distinguishes kinds that share a base/head pair", () => {
     // work vs range with identical refs must not collapse into one session.
-    const work = sessionIdForScope({ ...base, kind: "work" });
-    const range = sessionIdForScope({ ...base, kind: "range" });
+    const work = sessionIdForScope({ ...base, kind: "work" }, null);
+    const range = sessionIdForScope({ ...base, kind: "range" }, null);
     expect(work).not.toBe(range);
   });
 
+  it("distinguishes two-dot and three-dot ranges with identical endpoints", () => {
+    const direct = sessionIdForScope(
+      { ...base, target: "main..feature", kind: "range" },
+      null,
+    );
+    const mergeBase = sessionIdForScope(
+      { ...base, target: "main...feature", kind: "range" },
+      null,
+    );
+    expect(direct).not.toBe(mergeBase);
+  });
+
+  it("distinguishes the same symbolic scope in different checkouts", () => {
+    const primary = sessionIdForScope({ ...base, kind: "range" }, null);
+    const linked = sessionIdForScope(
+      { ...base, kind: "range" },
+      "feature-checkout",
+    );
+    expect(primary).not.toBe(linked);
+    expect(sessionIdForScope({ ...base, kind: "range" }, "")).toBe(primary);
+  });
+
   it("ignores resolved sha/branch (symbolic identity only)", () => {
-    const a = sessionIdForScope({ ...base, kind: "work", baseSha: "aaaa", branch: "x" });
-    const b = sessionIdForScope({ ...base, kind: "work", baseSha: "bbbb", branch: "y" });
+    const a = sessionIdForScope(
+      { ...base, kind: "work", baseSha: "aaaa", branch: "x" },
+      null,
+    );
+    const b = sessionIdForScope(
+      { ...base, kind: "work", baseSha: "bbbb", branch: "y" },
+      null,
+    );
     expect(a).toBe(b);
   });
 });

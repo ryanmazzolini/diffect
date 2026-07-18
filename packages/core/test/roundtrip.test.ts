@@ -102,10 +102,13 @@ describe("daemon → file store round trip", () => {
       }),
     });
     expect(postRes.status).toBe(201);
+    const created = await postRes.json();
+    expect(created.sessionId).toBe(diff.sessionId);
 
-    // GET /threads sees it.
+    // GET /threads sees the same canonical session emitted by the diff route.
     const open = await (await fetch(`${base}/threads?status=open`)).json();
     expect(open).toHaveLength(1);
+    expect(open[0].sessionId).toBe(diff.sessionId);
 
     await new Promise<void>((r) => server.close(() => r()));
 
@@ -114,6 +117,7 @@ describe("daemon → file store round trip", () => {
     expect(threads).toHaveLength(1);
     expect(threads[0]!.comments[0]!.body).toBe("should this be uppercase?");
     expect(threads[0]!.file).toBe("a.txt");
+    expect(threads[0]!.sessionId).toBe(diff.sessionId);
   });
 });
 
