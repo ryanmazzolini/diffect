@@ -9,6 +9,7 @@ import type {
   FileRange,
   FsListing,
   OpenRequest,
+  OpenReviewSummary,
   OpenUrlRequest,
   PrDraft,
   PrDraftUpdateRequest,
@@ -51,6 +52,11 @@ export const api = {
   workspace: (workspacePath?: string | null) => {
     const q = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : "";
     return fetch(`/workspace${q}`).then((r) => json<WorkspaceInfo>(r));
+  },
+
+  openReviews: (workspacePath: string, repo: string) => {
+    const q = new URLSearchParams({ workspace: workspacePath, repo });
+    return fetch(`/open-reviews?${q}`).then((r) => json<OpenReviewSummary[]>(r));
   },
 
   uiState: () => fetch("/ui-state").then((r) => json<UiState>(r)),

@@ -28,13 +28,31 @@ afterEach(async () => {
 describe("listRefs", () => {
   it("lists branches, tags, and recent commits", async () => {
     const refs = await listRefs(dir);
-    expect(refs.branches.sort()).toEqual(["feature", "main"]);
-    expect(refs.tags).toEqual(["v1"]);
+    expect(refs.branches.map((ref) => ref.label).sort()).toEqual(["feature", "main"]);
+    expect(refs.tags.map((ref) => ref.label)).toEqual(["v1"]);
     expect(refs.remotes).toEqual([]);
     expect(refs.commits).toHaveLength(1);
     expect(refs.commitsReachRoot).toBe(true);
-    expect(refs.commits[0]!.subject).toBe("first commit");
+    expect(refs.commits[0]).toMatchObject({
+      subject: "first commit",
+      committer: "T",
+    });
     expect(refs.commits[0]!.sha).toMatch(/^[0-9a-f]+$/);
+    expect(refs.commits[0]!.shortSha).toMatch(/^[0-9a-f]+$/);
+    expect(refs.commits[0]!.committedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("uses peeled commit metadata for annotated tags", async () => {
+    await git(dir, ["tag", "-a", "v2", "-m", "release tag"]);
+    const refs = await listRefs(dir);
+    const tag = refs.tags.find((candidate) => candidate.label === "v2");
+    expect(tag).toMatchObject({
+      kind: "tag",
+      value: "tags/v2",
+      subject: "first commit",
+      committer: "T",
+    });
+    expect(tag?.sha).toBe((await git(dir, ["rev-parse", "HEAD"])).stdout.trim());
   });
 
   it("hides the root boundary when recent commits do not reach it", async () => {
@@ -56,7 +74,13 @@ describe("listRefs", () => {
     const fullSha = stdout.trim();
 
     const branchMatches = await searchRefs(dir, "feat", 5);
-    expect(branchMatches.branches.map((r) => r.label)).toContain("feature");
+    expect(branchMatches.branches[0]).toMatchObject({
+      label: "feature",
+      subject: "first commit",
+      committer: "T",
+      sha: expect.stringMatching(/^[0-9a-f]+$/),
+    });
+    expect(branchMatches.branches[0]!.committedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     const tagMatches = await searchRefs(dir, "v1", 5);
     expect(tagMatches.tags[0]).toMatchObject({ label: "v1", value: "tags/v1" });
@@ -142,8 +166,11 @@ describe("remote-tracking refs", () => {
   it("lists remote-tracking branches and drops the symbolic origin/HEAD", async () => {
     await fabricateOrigin();
     const refs = await listRefs(dir);
-    expect(refs.remotes.sort()).toEqual(["origin/feature", "origin/main"]);
-    expect(refs.remotes).not.toContain("origin/HEAD");
+    expect(refs.remotes.map((ref) => ref.label).sort()).toEqual([
+      "origin/feature",
+      "origin/main",
+    ]);
+    expect(refs.remotes.some((ref) => ref.label === "origin/HEAD")).toBe(false);
   });
 
   it("searches remotes under their own group, keeping bare names as values", async () => {
