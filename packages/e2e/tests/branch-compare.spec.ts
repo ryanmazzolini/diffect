@@ -32,6 +32,7 @@ test("local target switches keep the current diff mounted while content loads", 
   }
   await expect(editor).toContainText("TODO: overflow?");
   await expect(editor).toHaveAttribute("data-target-sentinel", "stable");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
 });
 
 test("branch picker compares a selected branch to the working tree", async ({ page }) => {
@@ -53,13 +54,14 @@ test("branch picker compares a selected branch to the working tree", async ({ pa
   const compareControl = dialog.getByRole("button", { name: "Compare: HEAD" });
   await expect(branch).toBeFocused();
   await expect(dialog).not.toContainText("current checkout");
-  await expect(dialog).not.toContainText("Working tree");
+  await expect(dialog).toContainText("Working tree");
 
-  // The compact dialog remains a single keyboard scope.
+  // The approved anchored panel is non-modal: Tab can leave it in either direction.
   await branch.press("Shift+Tab");
-  await expect(compareControl).toBeFocused();
+  await expect.poll(() => dialog.evaluate((element) => !element.contains(document.activeElement))).toBe(true);
+  await compareControl.focus();
   await compareControl.press("Tab");
-  await expect(branch).toBeFocused();
+  await expect.poll(() => dialog.evaluate((element) => !element.contains(document.activeElement))).toBe(true);
 
   await branch.click();
   const search = page.getByPlaceholder("Find a branch…");
@@ -75,6 +77,40 @@ test("branch picker compares a selected branch to the working tree", async ({ pa
   await dialog.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test("failed branch navigation restores the loaded control and retries", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
+  await page.route("**/repos/*/diff?**", async (route) => {
+    const target = new URL(route.request().url()).searchParams.get("target");
+    if (target === "feature") {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "simulated branch failure" }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  const trigger = page.locator(".target-picker .review-target-trigger");
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  await dialog.getByRole("button", { name: "Branch: main" }).click();
+  const search = page.getByPlaceholder("Find a branch…");
+  await search.fill("feature");
+  await page.getByRole("option", { name: "feature", exact: true }).click();
+
+  await expect(dialog.getByRole("alert")).toContainText("simulated branch failure");
+  await expect(trigger).toHaveText("main▾");
+  await expect(dialog.getByRole("button", { name: "Branch: main" })).toBeVisible();
+
+  await page.unroute("**/repos/*/diff?**");
+  await dialog.getByRole("button", { name: "Retry" }).click();
+  await expect(trigger).toHaveText("feature▾");
+  await expect(dialog.getByRole("button", { name: "Branch: feature" })).toBeVisible();
 });
 
 test("empty repo follows commits and appears only in the base picker", async ({ page }) => {
@@ -264,7 +300,10 @@ test("external local target changes cancel a pending live comparison", async ({ 
 
   const picker = page.locator(".target-picker");
   const trigger = picker.locator(".review-target-trigger");
-  const staged = picker.getByRole("button", { name: "Staged changes", exact: true });
+  const staged = picker.locator(".local-targets").getByRole("button", {
+    name: "Staged changes",
+    exact: true,
+  });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Review changes" });
 
@@ -275,7 +314,7 @@ test("external local target changes cancel a pending live comparison", async ({ 
   await staged.evaluate((button: HTMLButtonElement) => button.click());
 
   await expect(staged).toHaveAttribute("aria-pressed", "true");
-  await expect(trigger).toHaveText("main▾");
+  await expect(trigger).toHaveText("Staged changes▾");
   await page.waitForTimeout(400);
   await expect(staged).toHaveAttribute("aria-pressed", "true");
 });

@@ -222,15 +222,18 @@ test("a comment posted in a module is scoped to that repo", async ({ page }) => 
   await form.locator("textarea").fill("scoped to beta only");
   await form.getByRole("button", { name: "Comment" }).click();
 
-  // It shows inline under beta, and in the union inbox tagged with the beta chip.
-  await expect(
-    beta.locator(".inline-thread .c-text", { hasText: "scoped to beta only" }).first(),
-  ).toBeVisible();
+  // It appears in the union inbox tagged with beta. Discovery refreshes may
+  // re-window an off-screen module, so bring beta back before asserting its
+  // inline rendering rather than assuming its CodeMirror body stayed mounted.
   const card = page
     .locator(".thread-pane .thread-card", { hasText: "scoped to beta only" })
     .first();
   await expect(card).toBeVisible();
   await expect(card.locator(".repo-chip")).toHaveText("beta");
+  await beta.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await expect(
+    beta.locator(".inline-thread .c-text", { hasText: "scoped to beta only" }).first(),
+  ).toBeVisible();
 });
 
 test("collapsing a module hides its diff body but not its sibling", async ({ page }) => {

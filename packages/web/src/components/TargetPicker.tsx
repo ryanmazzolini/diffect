@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -9,15 +10,25 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type {
+  OpenReviewSummary,
   RefList,
   RefSearchKind,
   RefSearchOption,
   RefSearchResults,
+  ReviewEndpointSummary,
   ReviewTargetPresentation,
 } from "@diffect/shared";
 import { api } from "../api.js";
+import { relativeTime } from "../relativeTime.js";
+import type {
+  OpenReviewsState,
+  ReviewRequestContext,
+  ReviewRequestState,
+  ReviewSelection,
+} from "../reviewTarget.js";
 
 const EMPTY_REPO_LABEL = "empty repo";
+const EMPTY_OPEN_REVIEWS_STATE: OpenReviewsState = { status: "loading", reviews: [] };
 
 const STATIC_LOCAL_TARGETS = [
   { target: "staged", label: "Staged changes", short: "Staged" },
@@ -36,9 +47,16 @@ interface Props {
   currentBranch?: string | null;
   target: string;
   presentation?: ReviewTargetPresentation;
-  onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
+  loadedSessionId: string | null;
+  onSelection: (
+    selection: ReviewSelection,
+    context: ReviewRequestContext,
+  ) => Promise<boolean>;
   refs: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
+  openReviews?: OpenReviewsState;
+  reviewRequest: ReviewRequestState | null;
+  onRefreshOpenReviews: () => void;
 }
 
 /** A task-first review selector with staged/unstaged kept one click away. */
@@ -49,9 +67,13 @@ export function TargetPicker({
   currentBranch = null,
   target,
   presentation,
-  onTarget,
+  loadedSessionId,
+  onSelection,
   refs,
   refThreadCounts,
+  openReviews = EMPTY_OPEN_REVIEWS_STATE,
+  reviewRequest,
+  onRefreshOpenReviews,
 }: Props) {
   const fallbackBase = useMemo(
     () =>
@@ -74,12 +96,24 @@ export function TargetPicker({
     [refs],
   );
 
-  useEffect(() => {
-    // `work` uses merge-base semantics, but this control promises the selected
-    // branch tip → working tree. Normalize the legacy/default target as soon as
-    // the repository's default branch is known so the label and diff agree.
-    if (target === "work" && fallbackBase) onTarget(fallbackBase);
-  }, [fallbackBase, onTarget, target]);
+  const requestTarget = useCallback(
+    (nextTarget: string, nextPresentation?: ReviewTargetPresentation) => {
+      const selection: ReviewSelection = {
+        worktree,
+        target: nextTarget,
+        ...(nextPresentation ? { presentation: nextPresentation } : {}),
+      };
+      const label = reviewTargetLabel(
+        nextTarget,
+        nextPresentation,
+        currentBranch,
+        fallbackBase,
+        repoStartOption,
+      );
+      void onSelection(selection, { label });
+    },
+    [currentBranch, fallbackBase, onSelection, repoStartOption, worktree],
+  );
 
   return (
     <span className="target-picker">
@@ -89,20 +123,30 @@ export function TargetPicker({
         currentBranch={currentBranch}
         target={target}
         presentation={presentation}
+        loadedSessionId={loadedSessionId}
         fallbackBase={fallbackBase}
         fallbackResults={fallbackResults}
         repoStartOption={repoStartOption}
         showEmptyRepoOption={refs?.commitsReachRoot === true}
         refThreadCounts={refThreadCounts}
-        onTarget={onTarget}
+        openReviews={openReviews}
+        reviewRequest={reviewRequest}
+        onSelection={onSelection}
+        onRefreshOpenReviews={onRefreshOpenReviews}
+        onTarget={requestTarget}
       />
+      {reviewRequest?.status === "loading" && (
+        <span className="target-request-status" role="status" title={`Loading ${reviewRequest.context.label}`}>
+          Loading {reviewRequest.context.label}…
+        </span>
+      )}
       <span className="local-targets" aria-label="Local review modes">
         {STATIC_LOCAL_TARGETS.map((mode) => (
           <button
             key={mode.target}
             type="button"
             className={`target-mode ${target === mode.target ? "active" : ""}`}
-            onClick={() => onTarget(mode.target)}
+            onClick={() => requestTarget(mode.target)}
             title={mode.label}
             aria-label={mode.label}
             aria-pressed={target === mode.target}
@@ -115,19 +159,25 @@ export function TargetPicker({
   );
 }
 
-type ReviewScopeMode = "branch" | "compare" | "none";
-
 interface ReviewTargetMenuProps {
   repo: string;
   worktree: string | null;
   currentBranch: string | null;
   target: string;
   presentation?: ReviewTargetPresentation;
+  loadedSessionId: string | null;
   fallbackBase: string;
   fallbackResults: RefSearchResults;
   repoStartOption: RefSearchOption | null;
   showEmptyRepoOption: boolean;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
+  openReviews: OpenReviewsState;
+  reviewRequest: ReviewRequestState | null;
+  onSelection: (
+    selection: ReviewSelection,
+    context: ReviewRequestContext,
+  ) => Promise<boolean>;
+  onRefreshOpenReviews: () => void;
   onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
 }
 
@@ -137,14 +187,20 @@ function ReviewTargetMenu({
   currentBranch,
   target,
   presentation,
+  loadedSessionId,
   fallbackBase,
   fallbackResults,
   repoStartOption,
   showEmptyRepoOption,
   refThreadCounts,
+  openReviews,
+  reviewRequest,
+  onSelection,
+  onRefreshOpenReviews,
   onTarget,
 }: ReviewTargetMenuProps) {
   const headingId = useId();
+  const panelId = useId();
   const rootRef = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -188,8 +244,23 @@ function ReviewTargetMenu({
     if (restoreFocus) triggerRef.current?.focus();
   };
 
+  const requestOpenReview = async (review: OpenReviewSummary) => {
+    const installed = await onSelection(reviewSelectionFor(review), {
+      label: openReviewLabel(review),
+      sessionId: review.sessionId,
+    });
+    if (installed) close(true);
+  };
+
+  const retryRequest = async () => {
+    if (!reviewRequest) return;
+    const installed = await onSelection(reviewRequest.selection, reviewRequest.context);
+    if (installed && reviewRequest.context.sessionId) close(true);
+  };
+
   const popover = open ? (
     <div
+      id={panelId}
       ref={popoverRef}
       className={`review-target-popover${refPickerOpen ? " ref-picker-open" : ""}`}
       role="dialog"
@@ -201,29 +272,29 @@ function ReviewTargetMenu({
         visibility: coords ? "visible" : "hidden",
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          close(true);
-          return;
-        }
-        if (event.key !== "Tab") return;
-        const controls = Array.from(
-          event.currentTarget.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
-          ),
-        );
-        const first = controls[0];
-        const last = controls.at(-1);
-        if (event.shiftKey && document.activeElement === first && last) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last && first) {
-          event.preventDefault();
-          first.focus();
-        }
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        close(true);
       }}
     >
-      <strong id={headingId} className="review-target-heading">Review changes</strong>
+      <header className="review-target-heading-row">
+        <strong id={headingId} className="review-target-heading">Review changes</strong>
+        <span className="review-target-current" title={triggerLabel}>{triggerLabel}</span>
+      </header>
+      <OpenReviewsTable
+        state={openReviews}
+        loadedSessionId={loadedSessionId}
+        pendingSessionId={reviewRequest?.status === "loading" ? reviewRequest.context.sessionId : undefined}
+        onRequest={requestOpenReview}
+        onRefresh={onRefreshOpenReviews}
+      />
+      {reviewRequest && (
+        <ReviewRequestNotice
+          request={reviewRequest}
+          onRetry={retryRequest}
+          onRefresh={onRefreshOpenReviews}
+        />
+      )}
       <LiveReviewScopePicker
         repo={repo}
         worktree={worktree}
@@ -237,6 +308,7 @@ function ReviewTargetMenu({
         menuRef={popoverRef}
         onPickerOpenChange={setRefPickerOpen}
         refThreadCounts={refThreadCounts}
+        reviewRequest={reviewRequest}
         onTarget={onTarget}
       />
     </div>
@@ -250,14 +322,254 @@ function ReviewTargetMenu({
         className="selector review-target-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        aria-label={`Loaded review: ${triggerLabel}`}
         title={triggerLabel}
         onClick={() => (open ? close(false) : setOpen(true))}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown") return;
+          event.preventDefault();
+          setOpen(true);
+        }}
       >
         <span className="review-target-trigger-label">{triggerLabel}</span>
         <span aria-hidden="true">▾</span>
       </button>
       {popover ? createPortal(popover, document.body) : null}
     </span>
+  );
+}
+
+function OpenReviewsTable({
+  state,
+  loadedSessionId,
+  pendingSessionId,
+  onRequest,
+  onRefresh,
+}: {
+  state: OpenReviewsState;
+  loadedSessionId: string | null;
+  pendingSessionId?: string;
+  onRequest: (review: OpenReviewSummary) => Promise<void>;
+  onRefresh: () => void;
+}) {
+  const headingId = useId();
+  const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [blockedSessionId, setBlockedSessionId] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
+  const reviews = state.reviews;
+
+  useEffect(() => {
+    const loadedIndex = reviews.findIndex((review) => review.sessionId === loadedSessionId);
+    setActiveIndex((current) => {
+      if (loadedIndex >= 0) return loadedIndex;
+      return Math.min(current, Math.max(0, reviews.length - 1));
+    });
+  }, [loadedSessionId, reviews]);
+
+  const activeReview = reviews[activeIndex] ?? null;
+  const blockedReview = reviews.find((review) => review.sessionId === blockedSessionId) ?? null;
+  const openCount = reviews.reduce((total, review) => total + review.openThreadCount, 0);
+
+  const activate = (index: number) => {
+    const nextIndex = Math.max(0, Math.min(reviews.length - 1, index));
+    setActiveIndex(nextIndex);
+    rowRefs.current[nextIndex]?.focus();
+  };
+
+  const choose = (review: OpenReviewSummary) => {
+    const unavailable = unavailableReviewMessage(review);
+    if (unavailable) {
+      setBlockedSessionId(review.sessionId);
+      return;
+    }
+    setBlockedSessionId(null);
+    void onRequest(review);
+  };
+
+  const copyDetails = async (review: OpenReviewSummary) => {
+    const text = reviewDetailsText(review);
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Review details copied");
+    } catch {
+      setCopyStatus("Could not copy review details");
+    }
+  };
+
+  return (
+    <section
+      className="open-reviews-section"
+      aria-labelledby={headingId}
+      aria-busy={state.status === "loading" || undefined}
+    >
+      <div className="review-section-head">
+        <strong id={headingId}>Open reviews</strong>
+        <span>{reviews.length} scope{reviews.length === 1 ? "" : "s"} · {openCount} open</span>
+      </div>
+
+      {reviews.length > 0 ? (
+        <div className="open-review-table-scroll">
+          <table className="open-review-table" role="grid" aria-label="Open reviews">
+            <colgroup>
+              <col className="review-ref-col" />
+              <col className="review-who-col" />
+              <col className="review-subject-col" />
+              <col className="review-ref-col" />
+              <col className="review-who-col" />
+              <col className="review-subject-col" />
+              <col className="review-open-col" />
+            </colgroup>
+            <thead>
+              <tr className="review-group-head">
+                <th colSpan={3} scope="colgroup">From</th>
+                <th colSpan={3} scope="colgroup" className="review-to-group">To</th>
+                <th scope="col" rowSpan={2} className="review-open-head">Open</th>
+              </tr>
+              <tr className="review-column-head">
+                <th scope="col">Ref</th>
+                <th scope="col">Committer</th>
+                <th scope="col">Subject</th>
+                <th scope="col" className="review-to-ref">Ref</th>
+                <th scope="col">Committer</th>
+                <th scope="col">Subject</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviews.map((review, index) => {
+                const unavailable = unavailableReviewMessage(review);
+                const selected = review.sessionId === loadedSessionId;
+                const pending = review.sessionId === pendingSessionId;
+                return (
+                  <tr
+                    key={review.sessionId}
+                    ref={(node) => { rowRefs.current[index] = node; }}
+                    className={`open-review-row${selected ? " selected" : ""}${pending ? " pending" : ""}${unavailable ? " unavailable" : ""}`}
+                    tabIndex={index === activeIndex ? 0 : -1}
+                    data-autofocus={index === activeIndex ? "" : undefined}
+                    aria-selected={selected}
+                    aria-disabled={unavailable ? "true" : undefined}
+                    aria-busy={pending || undefined}
+                    aria-label={openReviewAccessibleLabel(review)}
+                    onFocus={() => setActiveIndex(index)}
+                    onClick={() => choose(review)}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        activate(index + 1);
+                      } else if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        activate(index - 1);
+                      } else if (event.key === "Enter") {
+                        event.preventDefault();
+                        choose(review);
+                      }
+                    }}
+                  >
+                    <EndpointCells endpoint={review.from} />
+                    <EndpointCells endpoint={review.to} to checkout={review.worktree} />
+                    <td className="open-review-count">{pending ? "Loading…" : `${review.openThreadCount} open`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : state.status !== "error" ? (
+        <div className="open-reviews-empty">
+          {state.status === "loading" ? "Loading open reviews…" : "No reviews have open comments."}
+        </div>
+      ) : null}
+
+      {state.status === "loading" && reviews.length > 0 && (
+        <div className="open-reviews-status" role="status">Refreshing Open reviews…</div>
+      )}
+      {state.status === "error" && (
+        <div className="open-reviews-error" role="alert">
+          <span>Open reviews could not be refreshed. {state.message}</span>
+          <button type="button" className="ghost mini" onClick={onRefresh}>Refresh</button>
+        </div>
+      )}
+      {blockedReview && (
+        <div className="open-reviews-error" role="alert">
+          <span>{unavailableReviewMessage(blockedReview)}</span>
+          <button type="button" className="ghost mini" onClick={onRefresh}>Refresh</button>
+        </div>
+      )}
+
+      {activeReview && (
+        <details className="open-review-details" onToggle={() => setCopyStatus("")}>
+          <summary>Review details</summary>
+          <div className="open-review-details-body">
+            <span><b>From</b> <code>{activeReview.from.sha ?? activeReview.from.label}</code></span>
+            <span><b>To</b> <code>{activeReview.to.sha ?? activeReview.to.label}</code></span>
+            <span><b>Target</b> <code>{activeReview.scope.target}</code></span>
+            <button type="button" className="ghost mini" onClick={() => void copyDetails(activeReview)}>
+              Copy details
+            </button>
+            <span className="open-review-copy-status" role="status" aria-live="polite">{copyStatus}</span>
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function EndpointCells({
+  endpoint,
+  to = false,
+  checkout = null,
+}: {
+  endpoint: ReviewEndpointSummary;
+  to?: boolean;
+  checkout?: string | null;
+}) {
+  const displayRef = endpoint.kind === "commit"
+    ? endpoint.shortSha ?? endpoint.label.slice(0, 7)
+    : endpoint.label;
+  const time = endpoint.committedAt ? relativeTime(endpoint.committedAt) : "";
+  const byline = [endpoint.committer, time].filter(Boolean).join(" · ");
+  return (
+    <>
+      <td className={`open-review-ref${to ? " review-to-ref" : ""}`} title={endpoint.label}>
+        {displayRef}
+      </td>
+      <td className="open-review-who" title={endpoint.committedAt ?? undefined}>{byline}</td>
+      <td
+        className="open-review-subject"
+        title={[endpoint.subject, checkout ? `${checkout} checkout` : null].filter(Boolean).join(" · ") || undefined}
+      >
+        {checkout && <span className="open-review-checkout">{checkout} · </span>}
+        {endpoint.subject ?? "—"}
+      </td>
+    </>
+  );
+}
+
+function ReviewRequestNotice({
+  request,
+  onRetry,
+  onRefresh,
+}: {
+  request: ReviewRequestState;
+  onRetry: () => Promise<void>;
+  onRefresh: () => void;
+}) {
+  if (request.status === "loading") {
+    return <div className="review-request-notice" role="status">Loading {request.context.label}…</div>;
+  }
+  return (
+    <div className="review-request-notice error" role="alert">
+      <span>Could not load {request.context.label}. {request.message}</span>
+      <span className="review-request-actions">
+        <button type="button" className="ghost mini" onClick={() => void onRetry()}>Retry</button>
+        {request.context.sessionId && (
+          <button type="button" className="ghost mini" onClick={onRefresh}>Refresh</button>
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -273,6 +585,7 @@ function LiveReviewScopePicker({
   menuRef,
   onPickerOpenChange,
   refThreadCounts,
+  reviewRequest,
   onTarget,
 }: {
   repo: string;
@@ -287,11 +600,11 @@ function LiveReviewScopePicker({
   menuRef: RefObject<HTMLElement>;
   onPickerOpenChange: (open: boolean) => void;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
+  reviewRequest: ReviewRequestState | null;
   onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
 }) {
   const initialParsedTarget = presentation ? null : parseCompareTarget(target);
   const initialBranchRef = branchRefForTarget(target, fallbackBase);
-  const [mode, setMode] = useState<ReviewScopeMode>(appliedScopeMode(target, presentation));
   const [branchRef, setBranchRef] = useState(initialBranchRef);
   const [branchLabel, setBranchLabel] = useState(displayRefValue(initialBranchRef));
   const [baseRef, setBaseRef] = useState(
@@ -313,8 +626,7 @@ function LiveReviewScopePicker({
     presentation?.compareLabel ?? displayRefValue(initialParsedTarget?.compare ?? "HEAD"),
   );
 
-  useEffect(() => {
-    setMode(appliedScopeMode(target, presentation));
+  const syncControlsToLoaded = useCallback(() => {
     const parsed = presentation ? null : parseCompareTarget(target);
     if (presentation) {
       setBaseRef(presentation.baseRef);
@@ -340,78 +652,77 @@ function LiveReviewScopePicker({
     }
   }, [fallbackBase, presentation, repoStartOption?.value, target]);
 
+  useEffect(() => syncControlsToLoaded(), [syncControlsToLoaded]);
   useEffect(() => {
-    if (mode !== "compare" || !baseRef || !compareRef) return;
+    if (reviewRequest?.status === "error") syncControlsToLoaded();
+  }, [reviewRequest?.status, syncControlsToLoaded]);
+
+  const requestCompare = (
+    nextBaseRef: string,
+    nextBaseLabel: string,
+    nextBaseIsRepoStart: boolean,
+    nextCompareRef: string,
+    nextCompareLabel: string,
+  ) => {
     const parsedTarget = parseCompareTarget(target);
     const preservesTwoDotTarget =
       parsedTarget?.op === ".." &&
-      parsedTarget.base === baseRef &&
-      parsedTarget.compare === compareRef;
-    const operator = baseIsRepoStart || preservesTwoDotTarget ? ".." : "...";
-    const nextTarget = `${baseRef}${operator}${compareRef}`;
-    const presentationMatches =
-      !presentation ||
-      (presentation.baseRef === baseRef &&
-        presentation.baseLabel === baseLabel &&
-        presentation.baseIsRepoStart === (baseIsRepoStart || undefined) &&
-        presentation.compareRef === compareRef &&
-        presentation.compareLabel === compareLabel);
-    if (target === nextTarget && presentationMatches) return;
-    const timer = window.setTimeout(() => {
-      onTarget(nextTarget, {
-        kind: "compare",
-        baseRef,
-        baseLabel,
-        ...(baseIsRepoStart ? { baseIsRepoStart: true } : {}),
-        compareRef,
-        compareLabel,
-      });
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [
-    baseIsRepoStart,
-    baseLabel,
-    baseRef,
-    compareLabel,
-    compareRef,
-    mode,
-    onTarget,
-    presentation,
-    target,
-  ]);
+      parsedTarget.base === nextBaseRef &&
+      parsedTarget.compare === nextCompareRef;
+    const operator = nextBaseIsRepoStart || preservesTwoDotTarget ? ".." : "...";
+    onTarget(`${nextBaseRef}${operator}${nextCompareRef}`, {
+      kind: "compare",
+      baseRef: nextBaseRef,
+      baseLabel: nextBaseLabel,
+      ...(nextBaseIsRepoStart ? { baseIsRepoStart: true } : {}),
+      compareRef: nextCompareRef,
+      compareLabel: nextCompareLabel,
+    });
+  };
 
   return (
     <div className="review-scope-options">
+      <div className="review-section-head">
+        <strong>Choose comparison</strong>
+        <span>Loads automatically</span>
+      </div>
       <section className="review-scope-section">
-        <span className="review-scope-label">Branch</span>
-        <RefSearchPicker
-          label="Branch"
-          repo={repo}
-          worktree={worktree}
-          selectedValue={branchRef}
-          selectedLabel={branchLabel}
-          fallbackResults={fallbackResults}
-          allowedKinds={["branch", "remote"]}
-          includeHead={false}
-          placeholder="Find a branch…"
-          autoFocus
-          portalPopover
-          positionAnchorRef={menuRef}
-          stayOutsideAnchor
-          onOpenChange={onPickerOpenChange}
-          onSelect={(option) => {
-            setMode("branch");
-            setBranchRef(option.value);
-            setBranchLabel(option.label);
-            onTarget(option.value);
-          }}
-        />
+        <div className="review-scope-title">
+          <strong>Branch</strong>
+          <span>Checkout</span>
+        </div>
+        <span className="compare-inline-controls branch-inline-controls">
+          <RefSearchPicker
+            label="Branch"
+            repo={repo}
+            worktree={worktree}
+            selectedValue={branchRef}
+            selectedLabel={branchLabel}
+            fallbackResults={fallbackResults}
+            allowedKinds={["branch", "remote"]}
+            includeHead={false}
+            placeholder="Find a branch…"
+            autoFocus
+            portalPopover
+            positionAnchorRef={menuRef}
+            stayOutsideAnchor
+            onOpenChange={onPickerOpenChange}
+            onSelect={(option) => {
+              setBranchRef(option.value);
+              setBranchLabel(option.label);
+              onTarget(option.value);
+            }}
+          />
+          <span className="review-scope-arrow" aria-hidden="true">→</span>
+          <span className="review-local-endpoint">Working tree</span>
+        </span>
       </section>
 
-      <div className="review-scope-divider" aria-hidden="true"><span>or</span></div>
-
       <section className="review-scope-section">
-        <span className="review-scope-label">Compare</span>
+        <div className="review-scope-title">
+          <strong>Compare</strong>
+          <span>Commits &amp; refs</span>
+        </div>
         <span className="compare-inline-controls">
           <RefSearchPicker
             label="Base"
@@ -426,10 +737,17 @@ function LiveReviewScopePicker({
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
-              setMode("compare");
+              const nextIsRepoStart = option.value === repoStartOption?.value;
               setBaseRef(option.value);
               setBaseLabel(option.label);
-              setBaseIsRepoStart(option.value === repoStartOption?.value);
+              setBaseIsRepoStart(nextIsRepoStart);
+              requestCompare(
+                option.value,
+                option.label,
+                nextIsRepoStart,
+                compareRef,
+                compareLabel,
+              );
             }}
           />
           <span className="review-scope-arrow" aria-hidden="true">→</span>
@@ -446,24 +764,15 @@ function LiveReviewScopePicker({
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
-              setMode("compare");
               setCompareRef(option.value);
               setCompareLabel(option.label);
+              requestCompare(baseRef, baseLabel, baseIsRepoStart, option.value, option.label);
             }}
           />
         </span>
       </section>
     </div>
   );
-}
-
-function appliedScopeMode(
-  target: string,
-  presentation: ReviewTargetPresentation | undefined,
-): ReviewScopeMode {
-  if (presentation || parseCompareTarget(target)) return "compare";
-  if (isBranchTarget(target)) return "branch";
-  return "none";
 }
 
 function isBranchTarget(target: string): boolean {
@@ -929,6 +1238,79 @@ function parseCompareTarget(
   return base && compare ? { base, compare, op } : null;
 }
 
+function reviewSelectionFor(review: OpenReviewSummary): ReviewSelection {
+  const presentation: ReviewTargetPresentation | undefined =
+    review.scope.kind === "range"
+      ? {
+          kind: "compare",
+          baseRef: review.scope.baseRef,
+          baseLabel: review.from.label,
+          compareRef: review.scope.headRef,
+          compareLabel: review.to.label,
+        }
+      : undefined;
+  return {
+    worktree: review.worktree,
+    target: review.scope.target,
+    ...(presentation ? { presentation } : {}),
+  };
+}
+
+function openReviewLabel(review: OpenReviewSummary): string {
+  return `${endpointDisplayLabel(review.from)} → ${endpointDisplayLabel(review.to)}`;
+}
+
+function endpointDisplayLabel(endpoint: ReviewEndpointSummary): string {
+  return endpoint.kind === "commit"
+    ? endpoint.shortSha ?? endpoint.label.slice(0, 7)
+    : endpoint.label;
+}
+
+function openReviewAccessibleLabel(review: OpenReviewSummary): string {
+  const endpoint = (side: "From" | "To", summary: ReviewEndpointSummary) => {
+    const parts = [
+      `${side} ${endpointDisplayLabel(summary)}`,
+      summary.committer,
+      summary.committedAt,
+      summary.subject,
+    ].filter(Boolean);
+    return parts.join(", ");
+  };
+  const checkout = review.worktree ? `${review.worktree} checkout` : "primary checkout";
+  const availability = unavailableReviewMessage(review);
+  return [
+    endpoint("From", review.from),
+    endpoint("To", review.to),
+    checkout,
+    `${review.openThreadCount} open comment${review.openThreadCount === 1 ? "" : "s"}`,
+    availability,
+  ].filter(Boolean).join("; ");
+}
+
+function unavailableReviewMessage(review: OpenReviewSummary): string | null {
+  const availability = review.availability;
+  if (availability.state === "available") return null;
+  if (availability.state === "missing-checkout") {
+    return `Checkout “${availability.worktree}” is no longer available.`;
+  }
+  if (availability.state === "missing-ref") {
+    const endpoint = availability.endpoints.length === 2
+      ? "From and To refs are"
+      : `${availability.endpoints[0] === "from" ? "From" : "To"} ref is`;
+    return `${endpoint} no longer available.`;
+  }
+  return "The persisted review scope no longer matches this checkout.";
+}
+
+function reviewDetailsText(review: OpenReviewSummary): string {
+  return [
+    `From: ${review.from.sha ?? review.from.label}`,
+    `To: ${review.to.sha ?? review.to.label}`,
+    `Target: ${review.scope.target}`,
+    `Checkout: ${review.worktree ?? "primary"}`,
+  ].join("\n");
+}
+
 function reviewTargetLabel(
   target: string,
   presentation: ReviewTargetPresentation | undefined,
@@ -947,9 +1329,9 @@ function reviewTargetLabel(
       : displayRefValue(parsed.base);
     return `${baseLabel} → ${displayRefValue(parsed.compare)}`;
   }
-  if (target !== "work" && target !== "staged" && target !== "unstaged") {
-    return displayRefValue(target);
-  }
+  if (target === "staged") return "Staged changes";
+  if (target === "unstaged") return "Unstaged changes";
+  if (target !== "work") return displayRefValue(target);
   return fallbackBase || currentBranch || "Current checkout";
 }
 

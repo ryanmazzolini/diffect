@@ -25,7 +25,13 @@ import {
   savePreferredEditor,
 } from "./editorPreference.js";
 import { getSessionStored, getStored, setSessionStored, setStored } from "./storage.js";
-import { hasWorkingTreeSide } from "./reviewTarget.js";
+import {
+  hasWorkingTreeSide,
+  type OpenReviewsState,
+  type ReviewRequestContext,
+  type ReviewRequestState,
+  type ReviewSelection,
+} from "./reviewTarget.js";
 import { fileElementId, orderedDiffFiles } from "./fileTree.js";
 import { CurrentSnapshotContext } from "./currentSnapshot.js";
 import { usePaneLayout } from "./usePaneLayout.js";
@@ -76,11 +82,7 @@ function reconcileRepoDiff(previous: RepoDiff | undefined, next: RepoDiff): Repo
   return { ...next, files };
 }
 
-interface StoredSelection {
-  worktree: string | null;
-  target: string;
-  presentation?: ReviewTargetPresentation;
-}
+type StoredSelection = ReviewSelection;
 type PendingFollow = DiffChangedPayload & {
   repo: string;
   path: string;
@@ -90,6 +92,9 @@ interface ReadyFollow {
   request: PendingFollow;
   diff: RepoDiff;
 }
+type DiffLoadOutcome =
+  | { seq: number; diff: RepoDiff }
+  | { seq: number; error: unknown };
 interface DeepLinkSelection extends StoredSelection {
   workspacePath: string | null;
   repo: string | null;
@@ -270,6 +275,8 @@ const LEGACY_KEY = "__legacy__";
 // whose selection is already loaded.
 const selSig = (worktree: string | null, target: string) =>
   `${worktree ?? ""}::${target}`;
+const reviewRepoKey = (workspacePath: string, repo: string) =>
+  JSON.stringify([workspacePath, repo]);
 const FIRST_DIFF_CHANGE_SELECTOR = [
   ".cm-insertedLine",
   ".cm-changedLine",
@@ -425,6 +432,14 @@ export function App() {
     }
     return m;
   });
+  // Requested navigation is deliberately separate from `selections`: the latter
+  // names the diff and comments already on screen until a matching request wins.
+  const [reviewRequestsByRepo, setReviewRequestsByRepo] = useState<
+    Map<string, ReviewRequestState>
+  >(() => new Map());
+  const [openReviewsByRepo, setOpenReviewsByRepo] = useState<
+    Map<string, OpenReviewsState>
+  >(() => new Map());
   // Per-repo: which repos have their unscoped/legacy bucket open (the thread pane
   // shows pre-scope, sessionId === null threads instead of the active session's). A
   // flag-set keyed by repo, not a magic target, so it never collides with a real
@@ -592,6 +607,10 @@ export function App() {
     [activeEntry?.path, activeWorkspacePath, visibleRepos, workspace],
   );
   const activeSpacePath = visibleWorkspace?.root ?? null;
+  const activeSpacePathRef = useRef(activeSpacePath);
+  activeSpacePathRef.current = activeSpacePath;
+  const visibleReposRef = useRef(visibleRepos);
+  visibleReposRef.current = visibleRepos;
   const prDraftTargets = useMemo(
     () => visibleRepos.map((r) => ({ repo: r.name, worktree: selections.get(r.name)?.worktree ?? null })),
     [selections, visibleRepos],
@@ -1057,6 +1076,8 @@ export function App() {
   // Per-repo monotonic diff tokens (last-issued-wins per module, so a slow repo
   // can't clobber a fast one) now that N repos fetch in parallel.
   const diffSeqs = useRef<Map<string, number>>(new Map());
+  const reviewRequestSeqs = useRef<Map<string, number>>(new Map());
+  const workspaceRequestGeneration = useRef(0);
   // Per-repo signature of the last *successfully loaded* selection, so the fan-out
   // effect skips a module whose (worktree, target) is unchanged — scroll-focus
   // promoting a repo to active must not refetch it.
@@ -1071,6 +1092,74 @@ export function App() {
   // load retries on the next fan-out pass instead of being skipped as loaded.
   const refsSeqs = useRef<Map<string, number>>(new Map());
   const loadedRefsRef = useRef<Map<string, string>>(new Map());
+  const openReviewSeqs = useRef<Map<string, number>>(new Map());
+
+  const refreshOpenReviewsFor = useCallback(async (
+    workspacePath: string,
+    forRepo: string,
+    announce = false,
+  ) => {
+    const key = reviewRepoKey(workspacePath, forRepo);
+    const seq = (openReviewSeqs.current.get(key) ?? 0) + 1;
+    openReviewSeqs.current.set(key, seq);
+    setOpenReviewsByRepo((prev) => {
+      const current = prev.get(key);
+      if (current?.status === "loading" || (current && !announce)) return prev;
+      const reviews = current?.reviews ?? [];
+      return new Map(prev).set(key, { status: "loading", reviews });
+    });
+    try {
+      const reviews = await api.openReviews(workspacePath, forRepo);
+      if (seq !== openReviewSeqs.current.get(key)) return;
+      setOpenReviewsByRepo((prev) => {
+        const current = prev.get(key);
+        if (
+          current?.status === "ready" &&
+          JSON.stringify(current.reviews) === JSON.stringify(reviews)
+        ) {
+          return prev;
+        }
+        return new Map(prev).set(key, { status: "ready", reviews });
+      });
+    } catch (cause) {
+      if (seq !== openReviewSeqs.current.get(key)) return;
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setOpenReviewsByRepo((prev) => {
+        const reviews = prev.get(key)?.reviews ?? [];
+        return new Map(prev).set(key, { status: "error", reviews, message });
+      });
+    }
+  }, []);
+
+  const refreshOpenReviewsForRepo = useCallback(
+    (forRepo: string) => {
+      const workspacePath = activeSpacePathRef.current;
+      if (workspacePath) void refreshOpenReviewsFor(workspacePath, forRepo, true);
+    },
+    [refreshOpenReviewsFor],
+  );
+
+  const refreshVisibleOpenReviews = useCallback(() => {
+    const workspacePath = activeSpacePathRef.current;
+    if (!workspacePath) return;
+    for (const visibleRepo of visibleReposRef.current) {
+      void refreshOpenReviewsFor(workspacePath, visibleRepo.name);
+    }
+  }, [refreshOpenReviewsFor]);
+
+  const refreshOpenReviewsForEvent = useCallback(
+    (payload: DiffChangedPayload) => {
+      const workspacePath = activeSpacePathRef.current;
+      if (!workspacePath) return;
+      const affected = payload.repo
+        ? visibleReposRef.current.filter((candidate) => candidate.name === payload.repo)
+        : visibleReposRef.current;
+      for (const visibleRepo of affected) {
+        void refreshOpenReviewsFor(workspacePath, visibleRepo.name);
+      }
+    },
+    [refreshOpenReviewsFor],
+  );
 
   const refreshThreads = useCallback(async () => {
     const seq = ++threadSeq.current;
@@ -1085,61 +1174,141 @@ export function App() {
     }
   }, []);
 
-  // Refresh ONE repo's diff for an explicit selection. A per-repo seq token guards
-  // against a stale response landing after a newer one; on settle (success OR
-  // error) it retires that repo's optimistic highlight, and on success records the
-  // loaded selection signature so the fan-out won't refetch it on scroll.
-  const refreshDiffFor = useCallback(
-    async (
-      forRepo: string,
-      sel: { worktree: string | null; target: string },
-    ) => {
+  const loadDiffFor = useCallback(
+    async (forRepo: string, sel: ReviewSelection): Promise<DiffLoadOutcome> => {
       const seq = (diffSeqs.current.get(forRepo) ?? 0) + 1;
       diffSeqs.current.set(forRepo, seq);
       try {
-        const next = await api.diff(forRepo, {
+        const diff = await api.diff(forRepo, {
           worktree: sel.worktree,
           target: sel.target,
           includeIgnored: showIgnoredFiles,
         });
-        if (seq === diffSeqs.current.get(forRepo)) {
-          setDiffs((prev) => {
-            const reconciled = reconcileRepoDiff(prev.get(forRepo), next);
-            return reconciled === prev.get(forRepo)
-              ? prev
-              : new Map(prev).set(forRepo, reconciled);
-          });
-          setError(null);
-          const pendingFollow = pendingFollowRef.current;
-          if (
-            pendingFollow?.repo === forRepo &&
-            seq >= pendingFollow.minRefreshSeq
-          ) {
-            pendingFollowRef.current = null;
-            setReadyFollow({ request: pendingFollow, diff: next });
-          }
-          loadedSelRef.current.set(
-            forRepo,
-            `${selSig(sel.worktree, sel.target)}::ignored=${showIgnoredFiles ? "1" : "0"}`,
-          );
-          setPendingFor(forRepo, null);
-        }
-      } catch (e) {
-        if (seq === diffSeqs.current.get(forRepo)) {
-          setError(String(e));
-          // Settled with an error (deleted base ref → 500, removed worktree → 404).
-          // Retire the optimistic highlight so it can't pin the sidebar/filter to a
-          // session whose diff never loads; leave loadedSelRef unset so a re-click
-          // (reselectTick) retries instead of being skipped as already-loaded.
-          const pendingFollow = pendingFollowRef.current;
-          if (pendingFollow?.repo === forRepo && seq >= pendingFollow.minRefreshSeq) {
-            pendingFollowRef.current = null;
-          }
-          setPendingFor(forRepo, null);
-        }
+        return { seq, diff };
+      } catch (error) {
+        return { seq, error };
       }
     },
+    [showIgnoredFiles],
+  );
+
+  const commitLoadedDiffFor = useCallback(
+    (forRepo: string, sel: ReviewSelection, next: RepoDiff, seq: number) => {
+      setDiffs((prev) => {
+        const reconciled = reconcileRepoDiff(prev.get(forRepo), next);
+        return reconciled === prev.get(forRepo)
+          ? prev
+          : new Map(prev).set(forRepo, reconciled);
+      });
+      setError(null);
+      const pendingFollow = pendingFollowRef.current;
+      if (pendingFollow?.repo === forRepo && seq >= pendingFollow.minRefreshSeq) {
+        pendingFollowRef.current = null;
+        setReadyFollow({ request: pendingFollow, diff: next });
+      }
+      loadedSelRef.current.set(
+        forRepo,
+        `${selSig(sel.worktree, sel.target)}::ignored=${showIgnoredFiles ? "1" : "0"}`,
+      );
+      setPendingFor(forRepo, null);
+    },
     [setPendingFor, showIgnoredFiles],
+  );
+
+  // Source-of-truth refreshes reload the already-selected review. They share the
+  // same sequence as navigation, so whichever request was issued last is the only
+  // one allowed to install a diff.
+  const refreshDiffFor = useCallback(
+    async (forRepo: string, sel: ReviewSelection) => {
+      const outcome = await loadDiffFor(forRepo, sel);
+      if (outcome.seq !== diffSeqs.current.get(forRepo)) return;
+      if ("error" in outcome) {
+        setError(String(outcome.error));
+        const pendingFollow = pendingFollowRef.current;
+        if (pendingFollow?.repo === forRepo && outcome.seq >= pendingFollow.minRefreshSeq) {
+          pendingFollowRef.current = null;
+        }
+        setPendingFor(forRepo, null);
+        return;
+      }
+      commitLoadedDiffFor(forRepo, sel, outcome.diff, outcome.seq);
+    },
+    [commitLoadedDiffFor, loadDiffFor, setPendingFor],
+  );
+
+  const requestSelectionFor = useCallback(
+    async (
+      forRepo: string,
+      selection: ReviewSelection,
+      context: ReviewRequestContext,
+    ): Promise<boolean> => {
+      const requestWorkspace = activeSpacePathRef.current;
+      const requestWorkspaceGeneration = workspaceRequestGeneration.current;
+      const requestSeq = (reviewRequestSeqs.current.get(forRepo) ?? 0) + 1;
+      reviewRequestSeqs.current.set(forRepo, requestSeq);
+      setReviewRequestsByRepo((prev) =>
+        new Map(prev).set(forRepo, { status: "loading", selection, context }),
+      );
+
+      const outcome = await loadDiffFor(forRepo, selection);
+      if (
+        requestWorkspace !== activeSpacePathRef.current ||
+        requestWorkspaceGeneration !== workspaceRequestGeneration.current
+      ) {
+        return false;
+      }
+      if (requestSeq !== reviewRequestSeqs.current.get(forRepo)) return false;
+      if (outcome.seq !== diffSeqs.current.get(forRepo)) {
+        setReviewRequestsByRepo((prev) =>
+          new Map(prev).set(forRepo, {
+            status: "error",
+            selection,
+            context,
+            message: "The review changed while loading. Retry the request.",
+          }),
+        );
+        return false;
+      }
+      if ("error" in outcome) {
+        const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+        setReviewRequestsByRepo((prev) =>
+          new Map(prev).set(forRepo, {
+            status: "error",
+            selection,
+            context,
+            message,
+          }),
+        );
+        return false;
+      }
+      if (context.sessionId && outcome.diff.sessionId !== context.sessionId) {
+        setReviewRequestsByRepo((prev) =>
+          new Map(prev).set(forRepo, {
+            status: "error",
+            selection,
+            context,
+            message: "This review scope changed. Refresh Open reviews and try again.",
+          }),
+        );
+        return false;
+      }
+
+      commitLoadedDiffFor(forRepo, selection, outcome.diff, outcome.seq);
+      setSelections((prev) => new Map(prev).set(forRepo, selection));
+      setPreviewFile(null);
+      setSpacePreviewFile(null);
+      setThreadSessionFor(forRepo, null);
+      setUnscopedFor(forRepo, false);
+      setReviewRequestsByRepo((prev) => {
+        if (!prev.has(forRepo)) return prev;
+        const next = new Map(prev);
+        next.delete(forRepo);
+        return next;
+      });
+      markReviewOpened(forRepo, selection);
+      return true;
+    },
+    [commitLoadedDiffFor, loadDiffFor, markReviewOpened, setThreadSessionFor, setUnscopedFor],
   );
   // Refresh only the repo/worktree invalidated by a filesystem event. Older or
   // deliberately unscoped events still fall back to all visible repos. Follow
@@ -1198,6 +1367,15 @@ export function App() {
   }, [activeWorkspacePath, refreshWorkspace]);
 
   useEffect(() => {
+    workspaceRequestGeneration.current += 1;
+    setReviewRequestsByRepo(new Map());
+    if (!activeSpacePath) return;
+    for (const visibleRepo of visibleReposRef.current) {
+      void refreshOpenReviewsFor(activeSpacePath, visibleRepo.name);
+    }
+  }, [activeSpacePath, repoNamesKey, refreshOpenReviewsFor]);
+
+  useEffect(() => {
     loadWorkspaces();
     refreshThreads();
   }, [loadWorkspaces, refreshThreads]);
@@ -1208,25 +1386,15 @@ export function App() {
   // one restores it, exactly as `selections` already does. There is no cross-repo
   // bleed left to wipe, and stacking (Lift C) needs each module's state to persist.)
 
-  // Picking a target navigates one module to a real diff/session, so it must also
-  // leave that repo's unscoped bucket (which overrides the thread filter). We can't
-  // predict the resulting session id from the target alone, so drop any optimistic
-  // highlight and let the landing diff settle it. The checkout is preserved — only
-  // the target changes. Repo-parameterized so each stacked module retargets itself.
-  const changeTargetFor = useCallback(
-    (forRepo: string, next: string, presentation?: ReviewTargetPresentation) => {
-      setUnscopedFor(forRepo, false);
-      setPendingFor(forRepo, null);
-      setThreadSessionFor(forRepo, null);
-      const sel: StoredSelection = {
-        worktree: selectionsRef.current.get(forRepo)?.worktree ?? null,
-        target: next,
-        ...(presentation ? { presentation } : {}),
-      };
-      setSelections((prev) => new Map(prev).set(forRepo, sel));
-      markReviewOpened(forRepo, sel);
-    },
-    [markReviewOpened, setUnscopedFor, setPendingFor, setThreadSessionFor],
+  // Every picker path crosses the same loaded/requested boundary. The callback
+  // resolves true only when its exact checkout + target installed successfully.
+  const changeSelectionFor = useCallback(
+    (
+      forRepo: string,
+      next: ReviewSelection,
+      context: ReviewRequestContext,
+    ) => requestSelectionFor(forRepo, next, context),
+    [requestSelectionFor],
   );
   const selectLegacy = useCallback(() => {
     if (!repo) return;
@@ -1238,7 +1406,7 @@ export function App() {
   useEffect(() => {
     setPreviewFile(null);
     setSpacePreviewFile(null);
-  }, [repo, worktree, target]);
+  }, [repo]);
 
   // Refresh ONE repo's refs (branches/tags/commits/remotes) for its compare
   // picker. A per-repo seq token guards against a stale response landing late; the
@@ -1274,6 +1442,30 @@ export function App() {
     if (loadedRefsRef.current.get(activeRepo.name) === (wt ?? "")) return;
     void refreshRefsFor(activeRepo.name, wt);
   }, [workspace, visibleRepos, repo, selections, refreshRefsFor]);
+
+  // Normalize the compatibility-only `work` default before the first diff load.
+  // Doing this in App avoids showing a merge-base diff and replacing it moments
+  // later when the picker learns the default branch.
+  useEffect(() => {
+    if (!workspace) return;
+    setSelections((prev) => {
+      let next: Map<string, StoredSelection> | null = null;
+      for (const visibleRepo of visibleRepos) {
+        if (!visibleRepo.defaultBranch) continue;
+        const current = prev.get(visibleRepo.name) ?? {
+          worktree: null,
+          target: DEFAULT_TARGET,
+        };
+        if (current.target !== DEFAULT_TARGET) continue;
+        next ??= new Map(prev);
+        next.set(visibleRepo.name, {
+          worktree: current.worktree,
+          target: visibleRepo.defaultBranch,
+        });
+      }
+      return next ?? prev;
+    });
+  }, [visibleRepos, workspace]);
 
   // The tracked-file and space-file scans are only needed for the sidebar's All
   // files mode. Avoid running them on every workspace switch while the default
@@ -1328,6 +1520,17 @@ export function App() {
   // the default work diff.
   useEffect(() => {
     if (!workspace || !uiStateLoaded) return;
+    if (
+      visibleRepos.some((visibleRepo) => {
+        const selection = selections.get(visibleRepo.name) ?? {
+          worktree: null,
+          target: DEFAULT_TARGET,
+        };
+        return selection.target === DEFAULT_TARGET && Boolean(visibleRepo.defaultBranch);
+      })
+    ) {
+      return;
+    }
     const forced = lastReselectRef.current !== reselectTick;
     lastReselectRef.current = reselectTick;
     const pending = visibleRepos.filter((r) => {
@@ -1540,8 +1743,22 @@ export function App() {
   // events to the *latest* refreshers via a ref. Re-subscribing whenever a
   // selector changed would tear the EventSource down and drop events that fire
   // during the reconnect gap.
-  const refreshers = useRef({ refreshThreads, refreshDiffsForEvent, refreshWorkspace, loadWorkspaces });
-  refreshers.current = { refreshThreads, refreshDiffsForEvent, refreshWorkspace, loadWorkspaces };
+  const refreshers = useRef({
+    refreshThreads,
+    refreshDiffsForEvent,
+    refreshWorkspace,
+    loadWorkspaces,
+    refreshVisibleOpenReviews,
+    refreshOpenReviewsForEvent,
+  });
+  refreshers.current = {
+    refreshThreads,
+    refreshDiffsForEvent,
+    refreshWorkspace,
+    loadWorkspaces,
+    refreshVisibleOpenReviews,
+    refreshOpenReviewsForEvent,
+  };
   // Filesystem events are already debounced by the daemon; coalesce once more
   // in the browser so repeated external saves produce one render per settled
   // repo/worktree rather than repainting on every intermediate write.
@@ -1587,6 +1804,7 @@ export function App() {
       const r = refreshers.current;
       if (type === DAEMON_EVENTS.threadChanged) {
         r.refreshThreads();
+        r.refreshVisibleOpenReviews();
         setPrDraftReloadKey((key) => key + 1);
         setLive("Review threads updated");
       } else if (type === DAEMON_EVENTS.diffChanged) {
@@ -1605,6 +1823,7 @@ export function App() {
           }
         }
         refreshDiffSoon(payload);
+        r.refreshOpenReviewsForEvent(payload);
         setLive("Diff updated");
       } else if (type === DAEMON_EVENTS.workspaceChanged) {
         // Git HEAD/ref changes affect branch labels, PR links, and picker refs.
@@ -1612,6 +1831,7 @@ export function App() {
         // An explicit workspace change is rarer and structural — refresh now.
         r.refreshWorkspace();
         r.loadWorkspaces();
+        r.refreshVisibleOpenReviews();
         setLive("Workspaces updated");
       }
     });
@@ -2149,8 +2369,13 @@ export function App() {
                           presentation={selections.get(r.name)?.presentation}
                           refs={refsByRepo.get(r.name) ?? null}
                           refThreadCounts={refThreadCountsByRepo.get(r.name) ?? EMPTY_REF_THREAD_COUNTS}
+                          openReviews={openReviewsByRepo.get(
+                            reviewRepoKey(activeEntry?.path ?? visibleWorkspace.root, r.name),
+                          )}
+                          reviewRequest={reviewRequestsByRepo.get(r.name) ?? null}
                           defaultBranch={r.defaultBranch}
-                          onTarget={changeTargetFor}
+                          onSelection={changeSelectionFor}
+                          onRefreshOpenReviews={refreshOpenReviewsForRepo}
                           collapsed={collapsedRepos.has(r.name)}
                           onToggleCollapse={toggleCollapseFor}
                           previewFile={r.name === repo ? previewFile : null}
@@ -2181,8 +2406,13 @@ export function App() {
                     presentation={selections.get(repo)?.presentation}
                     refs={refs}
                     refThreadCounts={refThreadCountsByRepo.get(repo) ?? EMPTY_REF_THREAD_COUNTS}
+                    openReviews={openReviewsByRepo.get(
+                      reviewRepoKey(activeEntry?.path ?? visibleWorkspace.root, repo),
+                    )}
+                    reviewRequest={reviewRequestsByRepo.get(repo) ?? null}
                     defaultBranch={activeRepo?.defaultBranch ?? null}
-                    onTarget={changeTargetFor}
+                    onSelection={changeSelectionFor}
+                    onRefreshOpenReviews={refreshOpenReviewsForRepo}
                     previewFile={previewFile}
                     onBackToDiff={backToDiff}
                     onChanged={refreshThreads}
