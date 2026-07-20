@@ -441,7 +441,7 @@ test("a module's ref picker popover escapes the module scroll clip", async ({ pa
   await expect(dialog).toBeVisible();
   await expect(page.locator(".modmain .review-target-popover")).toHaveCount(0);
 
-  const baseTrigger = dialog.getByRole("button", { name: "Base: main", exact: true });
+  const baseTrigger = dialog.getByRole("button", { name: /^Base: main,/ });
   await baseTrigger.click();
 
   // The nested ref search stays under the body-level task popover, so the module

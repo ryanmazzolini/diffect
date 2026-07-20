@@ -155,7 +155,7 @@ test("switches review target without errors", async ({ page }) => {
   const targetTrigger = page.locator(".target-picker .review-target-trigger");
   await targetTrigger.click();
   const picker = page.getByRole("dialog", { name: "Review changes" });
-  await picker.getByRole("button", { name: "Branch: main" }).click();
+  await picker.getByRole("button", { name: /^Branch: main,/ }).click();
   await page.getByRole("option", { name: /^main/ }).click();
   await expect(page.locator(".file-path", { hasText: "calc.js" })).toBeVisible();
 });
