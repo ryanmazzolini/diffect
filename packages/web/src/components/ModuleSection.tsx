@@ -17,6 +17,12 @@ import type { Theme } from "../theme.js";
 import { orderedDiffFiles } from "../fileTree.js";
 import { CurrentSnapshotContext } from "../currentSnapshot.js";
 import { Icon } from "../icons.js";
+import type {
+  OpenReviewsState,
+  ReviewRequestContext,
+  ReviewRequestState,
+  ReviewSelection,
+} from "../reviewTarget.js";
 import { DiffView } from "./DiffView.js";
 import { DiffStat } from "./DiffStat.js";
 import { TargetPicker, type RefThreadCount } from "./TargetPicker.js";
@@ -53,19 +59,20 @@ interface Props {
   split: boolean;
   wrap: boolean;
   theme: Theme;
-  /** This module's review target plus the refs/default branch backing its
-   * task-first picker. `onTarget` is repo-parameterized so a module retargets
-   * only itself. */
+  /** This module's loaded review plus discovery/request state for its picker. */
   target?: string;
   presentation?: ReviewTargetPresentation;
   refs?: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
+  openReviews?: OpenReviewsState;
+  reviewRequest?: ReviewRequestState | null;
   defaultBranch?: string | null;
-  onTarget?: (
+  onSelection?: (
     repo: string,
-    target: string,
-    presentation?: ReviewTargetPresentation,
-  ) => void;
+    selection: ReviewSelection,
+    context: ReviewRequestContext,
+  ) => Promise<boolean>;
+  onRefreshOpenReviews?: (repo: string) => void;
   /** Collapse is owned by App (so the repo rail can drive it too); this module is
    * controlled. Stacked layout only. */
   collapsed?: boolean;
@@ -109,8 +116,11 @@ export const ModuleSection = memo(function ModuleSection({
   presentation,
   refs = null,
   refThreadCounts,
+  openReviews,
+  reviewRequest = null,
   defaultBranch = null,
-  onTarget,
+  onSelection,
+  onRefreshOpenReviews,
   collapsed = false,
   onToggleCollapse,
   previewFile,
@@ -125,11 +135,15 @@ export const ModuleSection = memo(function ModuleSection({
   // own list without App looping hooks; stable per `diff` so the memoized DiffView
   // isn't churned when an unrelated sibling re-renders.
   const files = useMemo(() => orderedDiffFiles(diff?.files ?? EMPTY_FILES), [diff]);
-  // Bind the target change to THIS module's repo so it doesn't defeat the memo.
-  const handleTarget = useCallback(
-    (nextTarget: string, nextPresentation?: ReviewTargetPresentation) =>
-      onTarget?.(repo, nextTarget, nextPresentation),
-    [onTarget, repo],
+  // Bind review navigation to THIS module without altering the exact selection.
+  const handleSelection = useCallback(
+    (selection: ReviewSelection, context: ReviewRequestContext) =>
+      onSelection?.(repo, selection, context) ?? Promise.resolve(false),
+    [onSelection, repo],
+  );
+  const handleRefreshOpenReviews = useCallback(
+    () => onRefreshOpenReviews?.(repo),
+    [onRefreshOpenReviews, repo],
   );
   // Bind the collapse toggle to THIS module's repo, mirroring the others.
   const handleToggleCollapse = useCallback(
@@ -137,26 +151,48 @@ export const ModuleSection = memo(function ModuleSection({
     [onToggleCollapse, repo],
   );
 
-  const body = (
-    <CurrentSnapshotContext.Provider value={diff?.currentSnapshotId ?? null}>
-      <DiffView
-        repo={repo}
-        worktree={worktree}
-        diff={diff}
-        files={files}
-        threads={threads}
-        split={split}
-        wrap={wrap}
-        theme={theme}
-        previewFile={previewFile}
-        onBackToDiff={onBackToDiff}
-        onChanged={onChanged}
-        editors={editors}
-        editor={editor}
-        onEditor={onEditor}
-        onOpenFile={(path, line) => onOpenFile(repo, worktree, path, line)}
-      />
-    </CurrentSnapshotContext.Provider>
+  // Discovery/request updates only affect the module header. Keep the heavy diff
+  // subtree stable so refreshing Open reviews cannot disturb scroll-windowed
+  // editors or the reader's anchor.
+  const body = useMemo(
+    () => (
+      <CurrentSnapshotContext.Provider value={diff?.currentSnapshotId ?? null}>
+        <DiffView
+          repo={repo}
+          worktree={worktree}
+          diff={diff}
+          files={files}
+          threads={threads}
+          split={split}
+          wrap={wrap}
+          theme={theme}
+          previewFile={previewFile}
+          onBackToDiff={onBackToDiff}
+          onChanged={onChanged}
+          editors={editors}
+          editor={editor}
+          onEditor={onEditor}
+          onOpenFile={(path, line) => onOpenFile(repo, worktree, path, line)}
+        />
+      </CurrentSnapshotContext.Provider>
+    ),
+    [
+      diff,
+      editor,
+      editors,
+      files,
+      onBackToDiff,
+      onChanged,
+      onEditor,
+      onOpenFile,
+      previewFile,
+      repo,
+      split,
+      theme,
+      threads,
+      worktree,
+      wrap,
+    ],
   );
 
   if (!stacked) {
@@ -174,10 +210,14 @@ export const ModuleSection = memo(function ModuleSection({
           pullRequest={pullRequest}
           target={target}
           presentation={presentation}
+          loadedSessionId={diff?.sessionId ?? null}
           refs={refs}
           refThreadCounts={refThreadCounts}
+          openReviews={openReviews}
+          reviewRequest={reviewRequest}
           defaultBranch={defaultBranch}
-          onTarget={handleTarget}
+          onSelection={handleSelection}
+          onRefreshOpenReviews={handleRefreshOpenReviews}
           collapsed={false}
           onToggleCollapse={handleToggleCollapse}
         >
@@ -200,10 +240,14 @@ export const ModuleSection = memo(function ModuleSection({
       pullRequest={pullRequest}
       target={target}
       presentation={presentation}
+      loadedSessionId={diff?.sessionId ?? null}
       refs={refs}
       refThreadCounts={refThreadCounts}
+      openReviews={openReviews}
+      reviewRequest={reviewRequest}
       defaultBranch={defaultBranch}
-      onTarget={handleTarget}
+      onSelection={handleSelection}
+      onRefreshOpenReviews={handleRefreshOpenReviews}
       collapsed={collapsed}
       onToggleCollapse={handleToggleCollapse}
     >
@@ -225,10 +269,14 @@ function StackedModule({
   pullRequest,
   target,
   presentation,
+  loadedSessionId,
   refs,
   refThreadCounts,
+  openReviews,
+  reviewRequest,
   defaultBranch,
-  onTarget,
+  onSelection,
+  onRefreshOpenReviews,
   collapsed,
   onToggleCollapse,
   children,
@@ -244,10 +292,17 @@ function StackedModule({
   pullRequest: PullRequestLink | null;
   target: string;
   presentation?: ReviewTargetPresentation;
+  loadedSessionId: string | null;
   refs: RefList | null;
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
+  openReviews?: OpenReviewsState;
+  reviewRequest: ReviewRequestState | null;
   defaultBranch: string | null;
-  onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
+  onSelection: (
+    selection: ReviewSelection,
+    context: ReviewRequestContext,
+  ) => Promise<boolean>;
+  onRefreshOpenReviews: () => void;
   /** Collapse is controlled by App (so the rail can drive it too). */
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -296,9 +351,13 @@ function StackedModule({
               currentBranch={branch}
               target={target}
               presentation={presentation}
-              onTarget={onTarget}
+              loadedSessionId={loadedSessionId}
+              onSelection={onSelection}
               refs={refs}
               refThreadCounts={refThreadCounts}
+              openReviews={openReviews}
+              reviewRequest={reviewRequest}
+              onRefreshOpenReviews={onRefreshOpenReviews}
             />
           </span>
           <span className="mh-stat">
