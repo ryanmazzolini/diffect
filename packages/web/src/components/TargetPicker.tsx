@@ -28,7 +28,10 @@ import type {
 } from "../reviewTarget.js";
 
 const EMPTY_REPO_LABEL = "empty repo";
+const LIVE_SELECTION_DEBOUNCE_MS = 150;
 const EMPTY_OPEN_REVIEWS_STATE: OpenReviewsState = { status: "loading", reviews: [] };
+
+type ReviewScopeMode = "branch" | "compare" | "none";
 
 const STATIC_LOCAL_TARGETS = [
   { target: "staged", label: "Staged changes", short: "Staged" },
@@ -576,6 +579,7 @@ function ReviewRequestNotice({
 function LiveReviewScopePicker({
   repo,
   worktree,
+  currentBranch,
   target,
   presentation,
   fallbackBase,
@@ -605,6 +609,13 @@ function LiveReviewScopePicker({
 }) {
   const initialParsedTarget = presentation ? null : parseCompareTarget(target);
   const initialBranchRef = branchRefForTarget(target, fallbackBase);
+  const optionCacheRef = useRef<Map<string, RefSearchOption>>(new Map());
+  const draftTargetRef = useRef<string | null>(null);
+  const draftAgainstRequestRef = useRef<ReviewRequestState | null>(null);
+  const lastIssuedTargetRef = useRef<string | null>(null);
+  cacheRefOptions(optionCacheRef.current, fallbackResults);
+  if (repoStartOption) optionCacheRef.current.set(repoStartOption.value, repoStartOption);
+  const [mode, setMode] = useState<ReviewScopeMode>(appliedScopeMode(target, presentation));
   const [branchRef, setBranchRef] = useState(initialBranchRef);
   const [branchLabel, setBranchLabel] = useState(displayRefValue(initialBranchRef));
   const [baseRef, setBaseRef] = useState(
@@ -627,6 +638,7 @@ function LiveReviewScopePicker({
   );
 
   const syncControlsToLoaded = useCallback(() => {
+    setMode(appliedScopeMode(target, presentation));
     const parsed = presentation ? null : parseCompareTarget(target);
     if (presentation) {
       setBaseRef(presentation.baseRef);
@@ -645,40 +657,143 @@ function LiveReviewScopePicker({
       setCompareLabel(displayRefValue(parsed.compare));
       return;
     }
-    if (isBranchTarget(target)) {
-      const nextBranch = branchRefForTarget(target, fallbackBase);
-      setBranchRef(nextBranch);
-      setBranchLabel(displayRefValue(nextBranch));
-    }
+    const nextBranch = branchRefForTarget(target, fallbackBase);
+    setBranchRef(nextBranch);
+    setBranchLabel(displayRefValue(nextBranch));
+    setBaseRef(fallbackBase);
+    setBaseLabel(displayRefValue(fallbackBase));
+    setBaseIsRepoStart(false);
+    setCompareRef("HEAD");
+    setCompareLabel("HEAD");
   }, [fallbackBase, presentation, repoStartOption?.value, target]);
 
-  useEffect(() => syncControlsToLoaded(), [syncControlsToLoaded]);
   useEffect(() => {
-    if (reviewRequest?.status === "error") syncControlsToLoaded();
+    if (
+      draftTargetRef.current &&
+      target === lastIssuedTargetRef.current &&
+      target !== draftTargetRef.current
+    ) {
+      return;
+    }
+    if (target === draftTargetRef.current) {
+      draftTargetRef.current = null;
+      draftAgainstRequestRef.current = null;
+    }
+    syncControlsToLoaded();
+  }, [syncControlsToLoaded, target]);
+  useEffect(() => {
+    if (reviewRequest?.status !== "error") return;
+    draftTargetRef.current = null;
+    draftAgainstRequestRef.current = null;
+    lastIssuedTargetRef.current = null;
+    syncControlsToLoaded();
   }, [reviewRequest?.status, syncControlsToLoaded]);
 
-  const requestCompare = (
-    nextBaseRef: string,
-    nextBaseLabel: string,
-    nextBaseIsRepoStart: boolean,
-    nextCompareRef: string,
-    nextCompareLabel: string,
-  ) => {
-    const parsedTarget = parseCompareTarget(target);
-    const preservesTwoDotTarget =
-      parsedTarget?.op === ".." &&
-      parsedTarget.base === nextBaseRef &&
-      parsedTarget.compare === nextCompareRef;
-    const operator = nextBaseIsRepoStart || preservesTwoDotTarget ? ".." : "...";
-    onTarget(`${nextBaseRef}${operator}${nextCompareRef}`, {
-      kind: "compare",
-      baseRef: nextBaseRef,
-      baseLabel: nextBaseLabel,
-      ...(nextBaseIsRepoStart ? { baseIsRepoStart: true } : {}),
-      compareRef: nextCompareRef,
-      compareLabel: nextCompareLabel,
-    });
+  useEffect(() => {
+    if (
+      draftTargetRef.current &&
+      reviewRequest?.status === "loading" &&
+      reviewRequest !== draftAgainstRequestRef.current &&
+      reviewRequest.selection.target !== lastIssuedTargetRef.current
+    ) {
+      draftTargetRef.current = null;
+      draftAgainstRequestRef.current = null;
+      lastIssuedTargetRef.current = null;
+      syncControlsToLoaded();
+      return;
+    }
+
+    let nextTarget: string;
+    let nextPresentation: ReviewTargetPresentation | undefined;
+    if (mode === "branch") {
+      if (!branchRef) return;
+      nextTarget = branchRef;
+      const supersedesPending =
+        draftTargetRef.current === nextTarget &&
+        reviewRequest?.status === "loading" &&
+        reviewRequest.selection.target !== nextTarget;
+      if (target === nextTarget && !supersedesPending) return;
+    } else if (mode === "compare") {
+      if (!baseRef || !compareRef) return;
+      nextTarget = compareTargetFor(baseRef, compareRef, baseIsRepoStart, target);
+      nextPresentation = {
+        kind: "compare",
+        baseRef,
+        baseLabel,
+        ...(baseIsRepoStart ? { baseIsRepoStart: true } : {}),
+        compareRef,
+        compareLabel,
+      };
+      const supersedesPending =
+        draftTargetRef.current === nextTarget &&
+        reviewRequest?.status === "loading" &&
+        reviewRequest.selection.target !== nextTarget;
+      if (
+        target === nextTarget &&
+        presentationsMatch(presentation, nextPresentation) &&
+        !supersedesPending
+      ) {
+        return;
+      }
+    } else {
+      return;
+    }
+    if (
+      lastIssuedTargetRef.current === nextTarget &&
+      reviewRequest?.status === "loading" &&
+      reviewRequest.selection.target === nextTarget
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      lastIssuedTargetRef.current = nextTarget;
+      onTarget(nextTarget, nextPresentation);
+    }, LIVE_SELECTION_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    baseIsRepoStart,
+    baseLabel,
+    baseRef,
+    branchRef,
+    compareLabel,
+    compareRef,
+    mode,
+    onTarget,
+    presentation,
+    reviewRequest,
+    syncControlsToLoaded,
+    target,
+  ]);
+
+  const rememberOption = (option: RefSearchOption) => {
+    optionCacheRef.current.set(option.value, option);
   };
+  const branchOption = optionForValue(
+    optionCacheRef.current,
+    branchRef,
+    fallbackResults,
+    currentBranch,
+  );
+  const baseOption = optionForValue(
+    optionCacheRef.current,
+    baseRef,
+    fallbackResults,
+    currentBranch,
+  );
+  const compareOption = optionForValue(
+    optionCacheRef.current,
+    compareRef,
+    fallbackResults,
+    currentBranch,
+  );
+  const loadedDetails = manualReviewDetails(
+    target,
+    presentation,
+    fallbackBase,
+    optionCacheRef.current,
+    fallbackResults,
+    currentBranch,
+  );
 
   return (
     <div className="review-scope-options">
@@ -698,6 +813,7 @@ function LiveReviewScopePicker({
             worktree={worktree}
             selectedValue={branchRef}
             selectedLabel={branchLabel}
+            selectedOption={branchOption}
             fallbackResults={fallbackResults}
             allowedKinds={["branch", "remote"]}
             includeHead={false}
@@ -708,9 +824,12 @@ function LiveReviewScopePicker({
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
+              rememberOption(option);
+              draftTargetRef.current = option.value;
+              draftAgainstRequestRef.current = reviewRequest;
+              setMode("branch");
               setBranchRef(option.value);
               setBranchLabel(option.label);
-              onTarget(option.value);
             }}
           />
           <span className="review-scope-arrow" aria-hidden="true">→</span>
@@ -730,6 +849,7 @@ function LiveReviewScopePicker({
             worktree={worktree}
             selectedValue={baseRef}
             selectedLabel={baseLabel}
+            selectedOption={baseOption}
             fallbackResults={fallbackResults}
             trailingCommitOptions={showEmptyRepoOption && repoStartOption ? [repoStartOption] : []}
             portalPopover
@@ -737,17 +857,19 @@ function LiveReviewScopePicker({
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
+              rememberOption(option);
               const nextIsRepoStart = option.value === repoStartOption?.value;
+              draftTargetRef.current = compareTargetFor(
+                option.value,
+                compareRef,
+                nextIsRepoStart,
+                target,
+              );
+              draftAgainstRequestRef.current = reviewRequest;
+              setMode("compare");
               setBaseRef(option.value);
               setBaseLabel(option.label);
               setBaseIsRepoStart(nextIsRepoStart);
-              requestCompare(
-                option.value,
-                option.label,
-                nextIsRepoStart,
-                compareRef,
-                compareLabel,
-              );
             }}
           />
           <span className="review-scope-arrow" aria-hidden="true">→</span>
@@ -757,6 +879,7 @@ function LiveReviewScopePicker({
             worktree={worktree}
             selectedValue={compareRef}
             selectedLabel={compareLabel}
+            selectedOption={compareOption}
             fallbackResults={fallbackResults}
             refThreadCounts={refThreadCounts}
             portalPopover
@@ -764,15 +887,196 @@ function LiveReviewScopePicker({
             stayOutsideAnchor
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
+              rememberOption(option);
+              draftTargetRef.current = compareTargetFor(
+                baseRef,
+                option.value,
+                baseIsRepoStart,
+                target,
+              );
+              draftAgainstRequestRef.current = reviewRequest;
+              setMode("compare");
               setCompareRef(option.value);
               setCompareLabel(option.label);
-              requestCompare(baseRef, baseLabel, baseIsRepoStart, option.value, option.label);
             }}
           />
         </span>
       </section>
+      {loadedDetails && <ManualReviewDetails details={loadedDetails} />}
     </div>
   );
+}
+
+interface ManualReviewDetail {
+  fromLabel: string;
+  fromSha: string | null;
+  toLabel: string;
+  toSha: string | null;
+  target: string;
+}
+
+function ManualReviewDetails({ details }: { details: ManualReviewDetail }) {
+  const [copyStatus, setCopyStatus] = useState("");
+  const copy = async () => {
+    const text = [
+      `From: ${details.fromSha ?? details.fromLabel}`,
+      `To: ${details.toSha ?? details.toLabel}`,
+      `Target: ${details.target}`,
+    ].join("\n");
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Comparison details copied");
+    } catch {
+      setCopyStatus("Could not copy comparison details");
+    }
+  };
+  return (
+    <details
+      className="manual-review-details open-review-details"
+      onToggle={() => setCopyStatus("")}
+    >
+      <summary>Comparison details</summary>
+      <div className="open-review-details-body">
+        <span><b>From</b> <code>{details.fromSha ?? details.fromLabel}</code></span>
+        <span><b>To</b> <code>{details.toSha ?? details.toLabel}</code></span>
+        <span><b>Target</b> <code>{details.target}</code></span>
+        <button type="button" className="ghost mini" onClick={() => void copy()}>
+          Copy details
+        </button>
+        <span className="open-review-copy-status" role="status" aria-live="polite">{copyStatus}</span>
+      </div>
+    </details>
+  );
+}
+
+function manualReviewDetails(
+  target: string,
+  presentation: ReviewTargetPresentation | undefined,
+  fallbackBase: string,
+  cache: Map<string, RefSearchOption>,
+  results: RefSearchResults,
+  currentBranch: string | null,
+): ManualReviewDetail | null {
+  const parsed = presentation ? null : parseCompareTarget(target);
+  if (presentation || parsed) {
+    const baseRef = presentation?.baseRef ?? parsed?.base;
+    const compareRef = presentation?.compareRef ?? parsed?.compare;
+    if (!baseRef || !compareRef) return null;
+    const from = optionForValue(cache, baseRef, results, currentBranch);
+    const to = optionForValue(cache, compareRef, results, currentBranch);
+    return {
+      fromLabel: presentation?.baseIsRepoStart
+        ? EMPTY_REPO_LABEL
+        : presentation?.baseLabel ?? displayRefValue(baseRef),
+      fromSha: fullShaFor(baseRef, from),
+      toLabel: presentation?.compareLabel ?? displayRefValue(compareRef),
+      toSha: fullShaFor(compareRef, to),
+      target,
+    };
+  }
+  if (!isBranchTarget(target)) return null;
+  const branchRef = branchRefForTarget(target, fallbackBase);
+  const from = optionForValue(cache, branchRef, results, currentBranch);
+  return {
+    fromLabel: displayRefValue(branchRef),
+    fromSha: fullShaFor(branchRef, from),
+    toLabel: "Working tree",
+    toSha: null,
+    target,
+  };
+}
+
+function fullShaFor(value: string, option: RefSearchOption | null): string | null {
+  if (option?.sha) return option.sha;
+  return /^[0-9a-f]{12,64}$/i.test(value) ? value : null;
+}
+
+function compareTargetFor(
+  baseRef: string,
+  compareRef: string,
+  baseIsRepoStart: boolean,
+  loadedTarget: string,
+): string {
+  const parsed = parseCompareTarget(loadedTarget);
+  const preservesTwoDotTarget =
+    parsed?.op === ".." && parsed.base === baseRef && parsed.compare === compareRef;
+  return `${baseRef}${baseIsRepoStart || preservesTwoDotTarget ? ".." : "..."}${compareRef}`;
+}
+
+function appliedScopeMode(
+  target: string,
+  presentation: ReviewTargetPresentation | undefined,
+): ReviewScopeMode {
+  if (presentation || parseCompareTarget(target)) return "compare";
+  if (isBranchTarget(target)) return "branch";
+  return "none";
+}
+
+function presentationsMatch(
+  current: ReviewTargetPresentation | undefined,
+  next: ReviewTargetPresentation,
+): boolean {
+  return Boolean(
+    current &&
+      current.baseRef === next.baseRef &&
+      current.baseLabel === next.baseLabel &&
+      current.baseIsRepoStart === next.baseIsRepoStart &&
+      current.compareRef === next.compareRef &&
+      current.compareLabel === next.compareLabel,
+  );
+}
+
+function cacheRefOptions(cache: Map<string, RefSearchOption>, results: RefSearchResults) {
+  for (const option of [
+    ...results.branches,
+    ...results.remotes,
+    ...results.tags,
+    ...results.commits,
+  ]) {
+    cache.set(option.value, option);
+  }
+}
+
+function optionForValue(
+  cache: Map<string, RefSearchOption>,
+  value: string,
+  results: RefSearchResults,
+  currentBranch: string | null,
+): RefSearchOption | null {
+  const cached = cache.get(value);
+  if (value === "HEAD") {
+    const tip = currentBranch ? cache.get(currentBranch) : null;
+    const recent = tip ?? results.commits[0] ?? null;
+    if (cached?.sha || !recent) {
+      return cached ?? { kind: "branch", value, label: "HEAD" };
+    }
+    const option: RefSearchOption = {
+      kind: "branch",
+      value,
+      label: "HEAD",
+      sha: recent.sha,
+      shortSha: recent.shortSha,
+      committer: recent.committer,
+      committedAt: recent.committedAt,
+      subject: recent.subject,
+    };
+    cache.set(value, option);
+    return option;
+  }
+  if (cached) return cached;
+  if (/^[0-9a-f]{12,64}$/i.test(value)) {
+    const option: RefSearchOption = {
+      kind: "commit",
+      value,
+      label: value.slice(0, 7),
+      sha: value,
+      shortSha: value.slice(0, 7),
+    };
+    cache.set(value, option);
+    return option;
+  }
+  return null;
 }
 
 function isBranchTarget(target: string): boolean {
@@ -789,6 +1093,7 @@ interface RefSearchPickerProps {
   worktree: string | null;
   selectedValue: string;
   selectedLabel?: string;
+  selectedOption?: RefSearchOption | null;
   fallbackResults: RefSearchResults;
   allowedKinds?: RefSearchKind[];
   includeHead?: boolean;
@@ -812,6 +1117,7 @@ function RefSearchPicker({
   worktree,
   selectedValue,
   selectedLabel,
+  selectedOption = null,
   fallbackResults,
   allowedKinds,
   includeHead = true,
@@ -928,20 +1234,10 @@ function RefSearchPicker({
           return;
         }
         if (event.key !== "Tab") return;
-        const controls = Array.from(
-          event.currentTarget.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
-          ),
-        );
-        const first = controls[0];
-        const last = controls.at(-1);
-        if (event.shiftKey && document.activeElement === first && last) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last && first) {
-          event.preventDefault();
-          first.focus();
-        }
+        event.preventDefault();
+        setOpen(false);
+        onOpenChange?.(false);
+        focusAdjacentControl(triggerRef.current, event.shiftKey);
       }}
       style={
         portalPopover
@@ -1016,18 +1312,16 @@ function RefSearchPicker({
                       type="button"
                       id={`${listId}-${idx}`}
                       role="option"
-                      aria-selected={idx === activeIndex}
+                      tabIndex={-1}
+                      aria-selected={selectedValue === option.value}
+                      aria-label={refOptionAccessibleLabel(option, countLabel)}
+                      title={refOptionTitle(option)}
                       className={`ref-option ${idx === activeIndex ? "active" : ""}`}
                       onMouseEnter={() => setActiveIndex(idx)}
                       onClick={() => choose(option)}
                     >
-                      <span className="ref-option-main">
-                        <span className={option.kind === "commit" ? "ref-sha" : "ref-name"}>
-                          {option.label}
-                        </span>
-                        {option.kind === "commit" && option.subject && (
-                          <span className="ref-subject">{option.subject}</span>
-                        )}
+                      <RefOptionContent option={option} />
+                      <span className="ref-option-state">
                         {countLabel && (
                           <span
                             className={`ref-thread-count ${threadCount?.open ? "open" : "closed"}`}
@@ -1036,8 +1330,8 @@ function RefSearchPicker({
                             {countLabel}
                           </span>
                         )}
+                        {selectedValue === option.value && <span className="ref-check">✓</span>}
                       </span>
-                      {selectedValue === option.value && <span className="ref-check">✓</span>}
                     </button>
                   </li>
                 );
@@ -1073,10 +1367,14 @@ function RefSearchPicker({
             onOpenChange?.(true);
           }
         }}
-        title={`${label}: ${selectedLabel ?? displayRefValue(selectedValue)}`}
-        aria-label={`${label}: ${selectedLabel ?? (displayRefValue(selectedValue) || `select ${label.toLowerCase()}`)}`}
+        title={refTriggerTitle(label, selectedLabel, selectedValue, selectedOption)}
+        aria-label={refTriggerAccessibleLabel(label, selectedLabel, selectedValue, selectedOption)}
       >
-        {selectedLabel ?? (displayRefValue(selectedValue) || `Select ${label.toLowerCase()}`)}
+        {selectedOption ? (
+          <RefOptionContent option={selectedOption} compact fallbackLabel={selectedLabel} />
+        ) : (
+          selectedLabel ?? (displayRefValue(selectedValue) || `Select ${label.toLowerCase()}`)
+        )}
       </button>
 
       {portalPopover && popover ? createPortal(popover, document.body) : popover}
@@ -1205,9 +1503,23 @@ function groupedOptions(
       option.label.toLowerCase().includes(needle) ||
       (option.kind === "commit" &&
         option.subject?.toLowerCase().includes(needle) === true));
+  const headTip = results.commits[0];
   const head: RefSearchOption[] =
     includeHead && matches({ kind: "branch", value: "HEAD", label: "HEAD" })
-      ? [{ kind: "branch", value: "HEAD", label: "HEAD", subject: "current checkout" }]
+      ? [{
+          kind: "branch",
+          value: "HEAD",
+          label: "HEAD",
+          ...(headTip
+            ? {
+                sha: headTip.sha,
+                shortSha: headTip.shortSha,
+                committer: headTip.committer,
+                committedAt: headTip.committedAt,
+                subject: headTip.subject,
+              }
+            : { subject: "current checkout" }),
+        }]
       : [];
   return [
     { title: "Branches", options: [...head, ...results.branches.filter(matches)] },
@@ -1218,6 +1530,127 @@ function groupedOptions(
       options: [...results.commits.filter(matches), ...trailingCommitOptions.filter(matches)],
     },
   ].filter((group) => group.options.length > 0);
+}
+
+function RefOptionContent({
+  option,
+  compact = false,
+  fallbackLabel,
+}: {
+  option: RefSearchOption;
+  compact?: boolean;
+  fallbackLabel?: string;
+}) {
+  const primary = option.kind === "commit"
+    ? option.shortSha ?? fallbackLabel ?? option.label
+    : fallbackLabel ?? option.label;
+  const time = option.committedAt ? relativeTime(option.committedAt) : "";
+  const metadata = [
+    option.kind === "commit" ? null : option.shortSha,
+    option.committer,
+    time,
+  ].filter(Boolean).join(" · ");
+  return (
+    <span className={`ref-option-main${compact ? " compact" : ""}`} aria-hidden="true">
+      <span className={option.kind === "commit" ? "ref-sha" : "ref-name"}>{primary}</span>
+      {metadata && <span className="ref-meta">{metadata}</span>}
+      {option.subject && <span className="ref-subject">{option.subject}</span>}
+    </span>
+  );
+}
+
+function refOptionAccessibleLabel(option: RefSearchOption, countLabel: string | null): string {
+  const primary = option.kind === "commit"
+    ? option.shortSha ?? option.label
+    : option.label;
+  return [
+    primary,
+    option.kind === "commit" ? null : option.shortSha ? `tip ${option.shortSha}` : null,
+    option.committer,
+    option.committedAt ? relativeTime(option.committedAt) : null,
+    option.committedAt ? `committed ${exactTimestamp(option.committedAt)}` : null,
+    option.subject,
+    countLabel ? `${countLabel} comments` : null,
+  ].filter(Boolean).join(", ");
+}
+
+function refOptionTitle(option: RefSearchOption): string | undefined {
+  const details = [
+    option.subject,
+    option.sha,
+    option.committedAt ? `committed ${exactTimestamp(option.committedAt)}` : null,
+  ].filter(Boolean);
+  return details.length > 0 ? details.join(" · ") : undefined;
+}
+
+function refTriggerAccessibleLabel(
+  label: string,
+  selectedLabel: string | undefined,
+  selectedValue: string,
+  option: RefSearchOption | null,
+): string {
+  const fallback =
+    selectedLabel ?? (displayRefValue(selectedValue) || `select ${label.toLowerCase()}`);
+  return option
+    ? `${label}: ${refOptionAccessibleLabel({ ...option, label: selectedLabel ?? option.label }, null)}`
+    : `${label}: ${fallback}`;
+}
+
+function refTriggerTitle(
+  label: string,
+  selectedLabel: string | undefined,
+  selectedValue: string,
+  option: RefSearchOption | null,
+): string {
+  const value = selectedLabel ?? displayRefValue(selectedValue);
+  const details = option ? refOptionTitle(option) : undefined;
+  return [`${label}: ${value}`, details].filter(Boolean).join(" · ");
+}
+
+function exactTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "long",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function focusAdjacentControl(trigger: HTMLElement | null, backwards: boolean) {
+  if (!trigger) return;
+  const panel = trigger.closest<HTMLElement>(".review-target-popover");
+  const selector = [
+    "button:not(:disabled)",
+    "input:not(:disabled)",
+    "summary",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(", ");
+  const controls = panel
+    ? Array.from(panel.querySelectorAll<HTMLElement>(selector)).filter(
+        (control) => !control.closest(".ref-popover") && control.getClientRects().length > 0,
+      )
+    : [];
+  const index = controls.indexOf(trigger);
+  const adjacent = controls[index + (backwards ? -1 : 1)];
+  if (adjacent) {
+    adjacent.focus();
+    return;
+  }
+  const panelTrigger = panel?.id
+    ? document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(panel.id)}"]`)
+    : null;
+  if (backwards) {
+    panelTrigger?.focus();
+    return;
+  }
+  const pageControls = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
+    (control) =>
+      !control.closest(".review-target-popover") &&
+      !control.closest(".ref-popover") &&
+      control.getClientRects().length > 0,
+  );
+  const ownerIndex = panelTrigger ? pageControls.indexOf(panelTrigger) : -1;
+  (pageControls[ownerIndex + 1] ?? panelTrigger)?.focus();
 }
 
 function isFocusableClickTarget(node: Node): boolean {

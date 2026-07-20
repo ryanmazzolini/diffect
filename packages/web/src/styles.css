@@ -1006,8 +1006,8 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   left: 0;
   z-index: 55;
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(290px, 0.85fr);
-  grid-template-rows: auto minmax(0, auto) auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, auto) auto auto;
   width: min(1080px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   border: 1px solid var(--border);
@@ -1044,14 +1044,14 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   grid-row: 2;
   min-width: 0;
   padding: 0 12px 10px;
-  border-right: 1px solid var(--border);
 }
 .review-scope-options {
-  grid-column: 2;
-  grid-row: 2;
+  grid-column: 1;
+  grid-row: 4;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  border-top: 1px solid var(--border);
 }
 .review-section-head {
   display: flex;
@@ -1229,7 +1229,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .review-request-notice {
   grid-column: 1;
   grid-row: 3;
-  border-right: 1px solid var(--border);
 }
 .review-request-actions {
   display: inline-flex;
@@ -1258,6 +1257,11 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .open-review-copy-status {
   color: var(--muted);
   font-size: 10px;
+}
+.manual-review-details {
+  margin-top: auto;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
 }
 .review-scope-section > .ref-picker,
 .review-scope-section > .ref-picker .ref-trigger {
@@ -1311,28 +1315,6 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   border-top: 1px solid var(--border);
 }
 @media (max-width: 780px) {
-  .review-target-popover {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
-  }
-  .review-target-heading-row,
-  .open-reviews-section,
-  .review-request-notice,
-  .review-scope-options {
-    grid-column: 1;
-  }
-  .open-reviews-section {
-    grid-row: 2;
-    border-right: 0;
-  }
-  .review-request-notice {
-    grid-row: 3;
-    border-right: 0;
-  }
-  .review-scope-options {
-    grid-row: 4;
-    border-top: 1px solid var(--border);
-  }
   .open-review-table-scroll {
     max-height: 210px;
   }
@@ -1393,11 +1375,16 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   min-width: 112px;
   max-width: 210px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
   font-family: var(--mono);
   cursor: pointer;
+}
+.ref-trigger .ref-option-main {
+  width: 100%;
+}
+.ref-trigger .ref-option-main > span {
+  font-size: 10px;
 }
 .ref-popover {
   position: absolute;
@@ -1406,7 +1393,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   z-index: 50;
   display: flex;
   flex-direction: column;
-  width: min(360px, calc(100vw - 16px));
+  width: min(520px, calc(100vw - 16px));
   max-height: min(480px, calc(100vh - 16px));
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1490,28 +1477,43 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .ref-option-main {
   min-width: 0;
   display: flex;
+  flex: 1;
   align-items: baseline;
   gap: 8px;
+  overflow: hidden;
 }
 .ref-name,
 .ref-sha {
+  flex: 0 0 auto;
+  color: var(--accent);
   font-family: var(--mono);
+  font-weight: 700;
   white-space: nowrap;
 }
 .ref-name {
-  min-width: 0;
+  max-width: 38%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ref-sha {
+.ref-meta {
   flex: 0 0 auto;
-  color: var(--accent);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 .ref-subject {
-  color: var(--muted);
+  min-width: 0;
+  color: var(--text);
   overflow: hidden;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.ref-option-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
 }
 .ref-thread-count {
   flex: 0 0 auto;
