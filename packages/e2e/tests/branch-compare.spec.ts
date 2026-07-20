@@ -81,6 +81,145 @@ test("branch picker compares a selected branch to the working tree", async ({ pa
   await expect(trigger).toBeFocused();
 });
 
+test("picker entry stays inert while explicit Branch, Base, and Compare choices load once", async ({ page }) => {
+  let releaseRefs: (() => void) | null = null;
+  const refsGate = new Promise<void>((resolve) => {
+    releaseRefs = resolve;
+  });
+  let refsRequested = false;
+  await page.route("**/repos/*/refs", async (route) => {
+    refsRequested = true;
+    await refsGate;
+    await route.continue();
+  });
+
+  const requestedTargets: string[] = [];
+  page.on("request", (request) => {
+    if (!request.url().includes("/diff?")) return;
+    requestedTargets.push(new URL(request.url()).searchParams.get("target") ?? "");
+  });
+
+  await page.goto("/");
+  await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
+  const picker = page.locator(".target-picker");
+  const trigger = picker.locator(".review-target-trigger");
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  const assertInertOpen = async () => {
+    requestedTargets.length = 0;
+    await trigger.click();
+    await expect(dialog).toBeVisible();
+    await page.waitForTimeout(250);
+    expect(requestedTargets).toEqual([]);
+    await dialog.press("Escape");
+    await expect(dialog).toBeHidden();
+  };
+
+  // Mount the panel while refs are still hydrating, then open and escape a
+  // nested picker. Neither lifecycle transition may imply navigation.
+  requestedTargets.length = 0;
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => refsRequested).toBe(true);
+  releaseRefs?.();
+  await expect(dialog.getByRole("button", { name: /^Compare: HEAD,/ })).toBeVisible();
+  await dialog.getByRole("button", { name: /^Compare: HEAD,/ }).click();
+  const search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  await expect(search).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(requestedTargets).toEqual([]);
+  await search.press("Escape");
+  await expect(dialog.getByRole("button", { name: /^Compare: HEAD,/ })).toBeFocused();
+  await dialog.press("Escape");
+
+  // Each explicit manual control still issues exactly one request.
+  await trigger.click();
+  await dialog.getByRole("button", { name: /^Branch: main,/ }).click();
+  let branchSearch = page.getByPlaceholder("Find a branch…");
+  await branchSearch.fill("feature");
+  requestedTargets.length = 0;
+  await page.getByRole("option", { name: /^feature,/ }).click();
+  await expect(trigger).toHaveText("feature▾");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+  expect(requestedTargets).toEqual(["feature"]);
+  await dialog.press("Escape");
+  await assertInertOpen();
+
+  await trigger.click();
+  await dialog.getByRole("button", { name: /^Base: main,/ }).click();
+  let refSearch = page.getByPlaceholder("Find a branch, tag, or commit…");
+  await refSearch.fill("v1");
+  requestedTargets.length = 0;
+  await page.getByRole("option", { name: /^v1,/ }).click();
+  await expect(trigger).toHaveText("v1 → HEAD▾");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+  expect(requestedTargets).toEqual(["tags/v1...HEAD"]);
+  await dialog.press("Escape");
+  await assertInertOpen();
+
+  await trigger.click();
+  await dialog.getByRole("button", { name: /^Compare: HEAD,/ }).click();
+  refSearch = page.getByPlaceholder("Find a branch, tag, or commit…");
+  await refSearch.fill("feature");
+  requestedTargets.length = 0;
+  await page.getByRole("option", { name: /^feature,/ }).click();
+  await expect(trigger).toHaveText("v1 → feature▾");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+  expect(requestedTargets).toEqual(["tags/v1...feature"]);
+  await dialog.press("Escape");
+  await assertInertOpen();
+
+  const staged = picker.getByRole("button", { name: "Staged changes", exact: true });
+  await staged.click();
+  await expect(staged).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+  await assertInertOpen();
+
+  const unstaged = picker.getByRole("button", { name: "Unstaged changes", exact: true });
+  await unstaged.click();
+  await expect(unstaged).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+  await assertInertOpen();
+});
+
+test("opening a restored range selection does not navigate", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
+  const repo = await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((response) => response.json());
+    return workspace.repos[0].name as string;
+  });
+  await page.evaluate((repoName) => {
+    const selection = { worktree: null, target: "main...feature" };
+    sessionStorage.setItem(
+      "diffect-place-v1",
+      JSON.stringify({
+        workspacePath: null,
+        repo: repoName,
+        worktree: null,
+        target: selection.target,
+        file: null,
+        selections: { [repoName]: selection },
+      }),
+    );
+  }, repo);
+
+  const requestedTargets: string[] = [];
+  page.on("request", (request) => {
+    if (!request.url().includes("/diff?")) return;
+    requestedTargets.push(new URL(request.url()).searchParams.get("target") ?? "");
+  });
+  await page.reload();
+  const trigger = page.locator(".target-picker .review-target-trigger");
+  await expect(trigger).toHaveText("main → feature▾");
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+
+  requestedTargets.length = 0;
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "Review changes" })).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(requestedTargets).toEqual([]);
+});
+
 test("shows ref metadata, exact timestamps, and copyable loaded details", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/");
