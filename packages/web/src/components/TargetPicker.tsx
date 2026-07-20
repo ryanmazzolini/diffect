@@ -702,6 +702,9 @@ function LiveReviewScopePicker({
       syncControlsToLoaded();
       return;
     }
+    // Mounted/synchronized controls describe the loaded review; only an
+    // explicit picker selection creates a draft that may navigate.
+    if (!draftTargetRef.current) return;
 
     let nextTarget: string;
     let nextPresentation: ReviewTargetPresentation | undefined;
@@ -712,7 +715,11 @@ function LiveReviewScopePicker({
         draftTargetRef.current === nextTarget &&
         reviewRequest?.status === "loading" &&
         reviewRequest.selection.target !== nextTarget;
-      if (target === nextTarget && !supersedesPending) return;
+      if (target === nextTarget && !supersedesPending) {
+        draftTargetRef.current = null;
+        draftAgainstRequestRef.current = null;
+        return;
+      }
     } else if (mode === "compare") {
       if (!baseRef || !compareRef) return;
       nextTarget = compareTargetFor(baseRef, compareRef, baseIsRepoStart, target);
@@ -733,6 +740,8 @@ function LiveReviewScopePicker({
         presentationsMatch(presentation, nextPresentation) &&
         !supersedesPending
       ) {
+        draftTargetRef.current = null;
+        draftAgainstRequestRef.current = null;
         return;
       }
     } else {

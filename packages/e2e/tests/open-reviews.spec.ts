@@ -101,6 +101,75 @@ test("loads an exact Open review and restores its grouped comments", async ({ pa
   await expect(page.locator(".thread-pane")).not.toContainText("only on the local review");
 });
 
+test("opening the picker on a historical work review does not navigate", async ({ page }) => {
+  const workReview = {
+    ...mockedReview({ sessionId: "scope-work", worktree: null }),
+    scope: {
+      target: "work",
+      kind: "work",
+      baseRef: "main",
+      headRef: "worktree",
+      baseSha: endpoint.sha,
+      branch: "main",
+    },
+    rangeSemantics: null,
+    to: {
+      kind: "local",
+      label: "Working tree",
+      subject: "Working tree changes",
+    },
+  };
+  await page.route("**/open-reviews?**", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify([workReview]) }),
+  );
+  await page.goto("/");
+  await expect(page.locator(".file-header").first()).toBeVisible();
+  const fixture = await page.evaluate(async () => {
+    const workspace = await fetch("/workspace").then((response) => response.json());
+    const repo = workspace.repos[0].name as string;
+    const diff = await fetch(`/repos/${encodeURIComponent(repo)}/diff?target=main`).then(
+      (response) => response.json(),
+    );
+    return { diff };
+  });
+
+  const requestedTargets: string[] = [];
+  page.on("request", (request) => {
+    if (!request.url().includes("/diff?")) return;
+    requestedTargets.push(new URL(request.url()).searchParams.get("target") ?? "");
+  });
+  await page.route("**/repos/*/diff?**", async (route) => {
+    const target = new URL(route.request().url()).searchParams.get("target");
+    if (target !== "work") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...fixture.diff,
+        target: "work",
+        scope: workReview.scope,
+        sessionId: workReview.sessionId,
+      }),
+    });
+  });
+
+  const trigger = page.locator(".target-picker .review-target-trigger");
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  await dialog.getByRole("row", { name: /1 open comment/ }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".target-request-status")).toHaveCount(0);
+  expect(requestedTargets).toEqual(["work"]);
+
+  requestedTargets.length = 0;
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(requestedTargets).toEqual([]);
+});
+
 test("keeps the loaded review on failure and retries in place", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".file-header").first()).toBeVisible();
