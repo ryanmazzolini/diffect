@@ -67,6 +67,94 @@ describe("listRefs", () => {
     expect(refs.commits.at(-1)?.subject).toBe("revision 0");
   });
 
+  it("pages full and filtered commit history without loading it all", async () => {
+    await git(dir, ["branch", "-D", "feature"]);
+    await git(dir, ["tag", "-d", "v1"]);
+    for (let index = 0; index < 25; index += 1) {
+      await git(dir, ["commit", "--allow-empty", "-m", `paged topic ${index}`]);
+    }
+
+    const legacyLimit = await searchRefs(dir, "", 3);
+    expect(legacyLimit.commits).toHaveLength(3);
+    expect(legacyLimit.commitPage.limit).toBe(3);
+
+    const newest = await searchRefs(dir, "", 5, { commitOffset: 0, commitLimit: 10 });
+    expect(newest.commits).toHaveLength(10);
+    expect(newest.commits[0]?.subject).toBe("paged topic 24");
+    expect(newest.commitPage).toEqual({
+      offset: 0,
+      limit: 10,
+      hasNewer: false,
+      hasOlder: true,
+    });
+
+    const middle = await searchRefs(dir, "", 5, { commitOffset: 10, commitLimit: 10 });
+    expect(middle.commits[0]?.subject).toBe("paged topic 14");
+    expect(middle.commitPage).toEqual({
+      offset: 10,
+      limit: 10,
+      hasNewer: true,
+      hasOlder: true,
+    });
+
+    const oldestFiltered = await searchRefs(dir, "paged topic", 5, {
+      commitOffset: 20,
+      commitLimit: 10,
+    });
+    expect(oldestFiltered.commits.map((commit) => commit.subject)).toEqual([
+      "paged topic 4",
+      "paged topic 3",
+      "paged topic 2",
+      "paged topic 1",
+      "paged topic 0",
+    ]);
+    expect(oldestFiltered.commitPage).toEqual({
+      offset: 20,
+      limit: 10,
+      hasNewer: true,
+      hasOlder: false,
+    });
+  });
+
+  it("pages branches independently and keeps the default on the first page", async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await git(dir, ["branch", `topic-${index}`]);
+    }
+    const { stdout } = await git(dir, ["rev-parse", "HEAD"]);
+    await git(dir, ["branch", "release/stable"]);
+    await git(dir, ["update-ref", "refs/remotes/origin/release/stable", stdout.trim()]);
+    await git(dir, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/release/stable",
+    ]);
+
+    const first = await searchRefs(dir, "", 20, { branchLimit: 5 });
+    const second = await searchRefs(dir, "", 20, { branchOffset: 5, branchLimit: 5 });
+    const third = await searchRefs(dir, "", 20, { branchOffset: 10, branchLimit: 5 });
+    expect(first.branches).toHaveLength(5);
+    expect(first.branches[0]?.label).toBe("release/stable");
+    expect(first.remotes[0]?.label).toBe("origin/release/stable");
+    expect(first.branchPage).toEqual({ offset: 0, limit: 5, hasNewer: false, hasOlder: true });
+    expect(second.branchPage).toEqual({ offset: 5, limit: 5, hasNewer: true, hasOlder: true });
+    expect(third.branchPage).toEqual({ offset: 10, limit: 5, hasNewer: true, hasOlder: false });
+    expect(new Set([
+      ...first.branches,
+      ...second.branches,
+      ...third.branches,
+    ].map((branch) => branch.value)).size).toBe(13);
+
+    const filteredFirst = await searchRefs(dir, "topic-", 20, { branchLimit: 5 });
+    const filteredSecond = await searchRefs(dir, "topic-", 20, {
+      branchOffset: 5,
+      branchLimit: 5,
+    });
+    expect(filteredFirst.branches).toHaveLength(5);
+    expect(filteredFirst.branchPage.hasOlder).toBe(true);
+    expect(filteredSecond.branches).toHaveLength(5);
+    expect(filteredSecond.branchPage).toMatchObject({ hasNewer: true, hasOlder: false });
+  });
+
   it("searches branches, tags, commit subjects, and SHA prefixes", async () => {
     await writeFile(join(dir, "a.txt"), "two\n");
     await git(dir, ["commit", "-am", "searchable topic"]);
@@ -93,8 +181,23 @@ describe("listRefs", () => {
       value: fullSha,
     });
 
-    const hashMatches = await searchRefs(dir, fullSha.slice(0, 8), 5);
+    const hashQuery = fullSha.slice(0, 8);
+    const hashMatches = await searchRefs(dir, hashQuery, 5);
     expect(hashMatches.commits[0]).toMatchObject({ sha: fullSha });
+
+    await git(dir, ["commit", "--allow-empty", "-m", `mentions ${hashQuery}`]);
+    const exactPage = await searchRefs(dir, hashQuery, 5, {
+      commitOffset: 0,
+      commitLimit: 1,
+    });
+    expect(exactPage.commits[0]).toMatchObject({ sha: fullSha });
+    expect(exactPage.commitPage.hasOlder).toBe(true);
+    const subjectPage = await searchRefs(dir, hashQuery, 5, {
+      commitOffset: 1,
+      commitLimit: 1,
+    });
+    expect(subjectPage.commits[0]?.subject).toBe(`mentions ${hashQuery}`);
+    expect(subjectPage.commitPage).toMatchObject({ hasNewer: true, hasOlder: false });
   });
 
   it("does not let a flag-like target inject a git option (argument injection)", async () => {
@@ -171,6 +274,28 @@ describe("remote-tracking refs", () => {
       "origin/main",
     ]);
     expect(refs.remotes.some((ref) => ref.label === "origin/HEAD")).toBe(false);
+  });
+
+  it("pages remote branches independently and keeps the default on the first page", async () => {
+    await fabricateOrigin();
+    const { stdout } = await git(dir, ["rev-parse", "HEAD"]);
+    for (let index = 0; index < 10; index += 1) {
+      await git(dir, ["update-ref", `refs/remotes/origin/topic-${index}`, stdout.trim()]);
+    }
+
+    const first = await searchRefs(dir, "", 20, { remoteLimit: 5 });
+    const second = await searchRefs(dir, "", 20, { remoteOffset: 5, remoteLimit: 5 });
+    const third = await searchRefs(dir, "", 20, { remoteOffset: 10, remoteLimit: 5 });
+    expect(first.remotes).toHaveLength(5);
+    expect(first.remotes[0]?.label).toBe("origin/main");
+    expect(first.remotePage).toEqual({ offset: 0, limit: 5, hasNewer: false, hasOlder: true });
+    expect(second.remotePage).toEqual({ offset: 5, limit: 5, hasNewer: true, hasOlder: true });
+    expect(third.remotePage).toEqual({ offset: 10, limit: 5, hasNewer: true, hasOlder: false });
+    expect(new Set([
+      ...first.remotes,
+      ...second.remotes,
+      ...third.remotes,
+    ].map((remote) => remote.value)).size).toBe(12);
   });
 
   it("searches remotes under their own group, keeping bare names as values", async () => {

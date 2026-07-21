@@ -1,3 +1,4 @@
+import { defaultBranchRefNames } from "@diffect/shared";
 import type {
   CommitSummary,
   RefList,
@@ -5,7 +6,7 @@ import type {
   RefSearchResults,
   RepoFileList,
 } from "@diffect/shared";
-import { ignoredUntrackedFiles } from "./diff.js";
+import { ignoredUntrackedFiles, resolveDefaultBranch } from "./diff.js";
 import { gitTry, gitWithInput } from "./exec.js";
 
 const lines = (s: string | null): string[] =>
@@ -21,6 +22,7 @@ const isRemoteBranch = (name: string): boolean =>
 
 const DEFAULT_SEARCH_LIMIT = 12;
 const MAX_SEARCH_LIMIT = 50;
+const MAX_PAGE_LIMIT = 50;
 const RECENT_COMMIT_LIMIT = 30;
 const METADATA_CONCURRENCY = 8;
 const COMMIT_FORMAT = "%H%x09%h%x09%cn%x09%cI%x09%s";
@@ -67,20 +69,43 @@ export async function listRefs(repoRoot: string): Promise<RefList> {
  * render a painful all-history dropdown. Branches/tags are filtered by name;
  * commits search full reachable history by subject and by SHA prefix.
  */
+interface RefSearchPagination {
+  branchOffset?: number;
+  branchLimit?: number;
+  remoteOffset?: number;
+  remoteLimit?: number;
+  commitOffset?: number;
+  commitLimit?: number;
+}
+
 export async function searchRefs(
   repoRoot: string,
   query = "",
   limit = DEFAULT_SEARCH_LIMIT,
+  pagination: RefSearchPagination = {},
 ): Promise<RefSearchResults> {
   const q = query.trim();
   const capped = clampLimit(limit);
-  const [branches, remotes, tags, commits] = await Promise.all([
-    searchNamedRefs(repoRoot, "branch", q, capped),
-    searchNamedRefs(repoRoot, "remote", q, capped),
-    searchNamedRefs(repoRoot, "tag", q, capped),
-    searchCommits(repoRoot, q, capped),
+  const branchPage = normalizePage(pagination.branchOffset, pagination.branchLimit, capped);
+  const remotePage = normalizePage(pagination.remoteOffset, pagination.remoteLimit, capped);
+  const commitPage = normalizePage(pagination.commitOffset, pagination.commitLimit, capped);
+  const priorities = defaultBranchRefNames(await resolveDefaultBranch(repoRoot));
+  const [branchResults, remoteResults, tagResults, commitResults] = await Promise.all([
+    searchNamedRefs(repoRoot, "branch", q, branchPage, priorities.local),
+    searchNamedRefs(repoRoot, "remote", q, remotePage, priorities.remote),
+    searchNamedRefs(repoRoot, "tag", q, { offset: 0, limit: capped }, ""),
+    searchCommits(repoRoot, q, commitPage.offset, commitPage.limit),
   ]);
-  return { query: q, branches, remotes, tags, commits };
+  return {
+    query: q,
+    branches: branchResults.options,
+    branchPage: pageResult(branchPage, branchResults.hasOlder),
+    remotes: remoteResults.options,
+    remotePage: pageResult(remotePage, remoteResults.hasOlder),
+    tags: tagResults.options,
+    commits: commitResults.options,
+    commitPage: pageResult(commitPage, commitResults.hasOlder),
+  };
 }
 
 const NAMED_REF_SPEC: Record<
@@ -135,25 +160,36 @@ async function searchNamedRefs(
   repoRoot: string,
   kind: "branch" | "tag" | "remote",
   query: string,
-  limit: number,
-): Promise<RefSearchOption[]> {
+  page: { offset: number; limit: number },
+  priority: string,
+): Promise<{ options: RefSearchOption[]; hasOlder: boolean }> {
   const { namespace, sort } = NAMED_REF_SPEC[kind];
-  const refs = lines(
-    await gitTry(repoRoot, [
-      "for-each-ref",
-      "--format=%(refname:short)",
-      sort,
-      namespace,
-    ]),
-  ).filter((name) => kind !== "remote" || isRemoteBranch(name));
   const needle = query.toLowerCase();
-  return summarizeNamedRefs(
-    repoRoot,
-    kind,
-    refs
-      .filter((name) => needle === "" || name.toLowerCase().includes(needle))
-      .slice(0, limit),
+  const names = promoteName(
+    lines(
+      await gitTry(repoRoot, [
+        "for-each-ref",
+        "--format=%(refname:short)",
+        sort,
+        namespace,
+      ]),
+    )
+      .filter((name) => kind !== "remote" || isRemoteBranch(name))
+      .filter((name) => needle === "" || name.toLowerCase().includes(needle)),
+    priority,
   );
+  const pageNames = names.slice(page.offset, page.offset + page.limit + 1);
+  return {
+    options: await summarizeNamedRefs(repoRoot, kind, pageNames.slice(0, page.limit)),
+    hasOlder: pageNames.length > page.limit,
+  };
+}
+
+function promoteName(names: string[], priority: string): string[] {
+  const index = names.indexOf(priority);
+  return index > 0
+    ? [names[index]!, ...names.slice(0, index), ...names.slice(index + 1)]
+    : names;
 }
 
 async function summarizeNamedRefs(
@@ -173,27 +209,20 @@ async function summarizeNamedRefs(
 async function searchCommits(
   repoRoot: string,
   query: string,
+  offset: number,
   limit: number,
-): Promise<RefSearchOption[]> {
-  const bySha = new Map<string, RefSearchOption>();
-  const add = (raw: string | null) => {
-    for (const line of lines(raw)) {
-      const commit = parseCommitLine(line);
-      if (!commit) continue;
-      bySha.set(commit.sha, {
-        kind: "commit",
-        value: commit.sha,
-        label: commit.shortSha,
-        ...commit,
-      });
-    }
-  };
+): Promise<{ options: RefSearchOption[]; hasOlder: boolean }> {
+  const parse = (raw: string | null) => lines(raw)
+    .map(parseCommitLine)
+    .filter((commit): commit is CommitSummary => commit !== null)
+    .map((commit): RefSearchOption => ({
+      kind: "commit",
+      value: commit.sha,
+      label: commit.shortSha,
+      ...commit,
+    }));
 
-  if (query === "") {
-    add(await gitTry(repoRoot, commitLogArgs(limit)));
-    return [...bySha.values()].slice(0, limit);
-  }
-
+  let exact: RefSearchOption[] = [];
   if (/^[0-9a-f]{4,64}$/i.test(query)) {
     const sha = await gitTry(repoRoot, [
       "rev-parse",
@@ -202,33 +231,33 @@ async function searchCommits(
       `${query}^{commit}`,
     ]);
     if (sha) {
-      add(
-        await gitTry(repoRoot, [
-          "show",
-          "-s",
-          `--format=${COMMIT_FORMAT}`,
-          sha,
-        ]),
-      );
+      exact = parse(await gitTry(repoRoot, ["show", "-s", `--format=${COMMIT_FORMAT}`, sha]));
     }
   }
 
-  add(
-    await gitTry(repoRoot, [
-      "log",
-      "--all",
-      `--max-count=${limit}`,
-      "--regexp-ignore-case",
-      "--fixed-strings",
-      `--grep=${query}`,
-      `--format=${COMMIT_FORMAT}`,
-    ]),
-  );
-  return [...bySha.values()].slice(0, limit);
-}
-
-function commitLogArgs(limit: number): string[] {
-  return ["log", "--all", `--max-count=${limit}`, `--format=${COMMIT_FORMAT}`];
+  // An exact SHA-prefix match leads the filtered history, followed by subject
+  // matches. Read through the requested window so de-duplicating that one exact
+  // commit cannot leave the page short or hide whether an older page exists.
+  const pagedAfterExact = exact.length > 0;
+  const args = [
+    "log",
+    "--all",
+    `--skip=${pagedAfterExact ? 0 : offset}`,
+    `--max-count=${pagedAfterExact ? offset + limit + 2 : limit + 1}`,
+    ...(query
+      ? ["--regexp-ignore-case", "--fixed-strings", `--grep=${query}`]
+      : []),
+    `--format=${COMMIT_FORMAT}`,
+  ];
+  const logged = parse(await gitTry(repoRoot, args));
+  const candidates = pagedAfterExact
+    ? [...new Map([...exact, ...logged].map((option) => [option.value, option])).values()]
+    : logged;
+  const pageStart = pagedAfterExact ? offset : 0;
+  return {
+    options: candidates.slice(pageStart, pageStart + limit),
+    hasOlder: candidates.length > pageStart + limit,
+  };
 }
 
 /** Whether Git resolves `ref` as a named branch/tag/remote rather than an object id. */
@@ -273,6 +302,35 @@ function parseCommitLine(line: string): CommitSummary | null {
 function clampLimit(limit: number): number {
   if (!Number.isFinite(limit)) return DEFAULT_SEARCH_LIMIT;
   return Math.min(MAX_SEARCH_LIMIT, Math.max(1, Math.trunc(limit)));
+}
+
+function clampOffset(offset: number): number {
+  if (!Number.isFinite(offset)) return 0;
+  return Math.max(0, Math.trunc(offset));
+}
+
+function normalizePage(
+  offset: number | undefined,
+  limit: number | undefined,
+  fallbackLimit: number,
+): { offset: number; limit: number } {
+  const normalizedLimit = limit === undefined
+    ? fallbackLimit
+    : Number.isFinite(limit)
+      ? Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.trunc(limit)))
+      : DEFAULT_SEARCH_LIMIT;
+  return { offset: clampOffset(offset ?? 0), limit: normalizedLimit };
+}
+
+function pageResult(
+  page: { offset: number; limit: number },
+  hasOlder: boolean,
+) {
+  return {
+    ...page,
+    hasNewer: page.offset > 0,
+    hasOlder,
+  };
 }
 
 async function mapWithConcurrency<T, R>(

@@ -9,11 +9,13 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { defaultBranchRefNames } from "@diffect/shared";
 import type {
   OpenReviewSummary,
   RefList,
   RefSearchKind,
   RefSearchOption,
+  RefSearchPage,
   RefSearchResults,
   ReviewEndpointSummary,
   ReviewTargetPresentation,
@@ -28,6 +30,8 @@ import type {
 } from "../reviewTarget.js";
 
 const EMPTY_REPO_LABEL = "empty repo";
+const BRANCH_PAGE_LIMIT = 5;
+const COMMIT_PAGE_LIMIT = 10;
 const LIVE_SELECTION_DEBOUNCE_MS = 150;
 const EMPTY_OPEN_REVIEWS_STATE: OpenReviewsState = { status: "loading", reviews: [] };
 
@@ -86,7 +90,10 @@ export function TargetPicker({
       "",
     [defaultBranch, refs],
   );
-  const fallbackResults = useMemo(() => refsToSearchResults(refs), [refs]);
+  const fallbackResults = useMemo(
+    () => refsToSearchResults(refs, fallbackBase),
+    [fallbackBase, refs],
+  );
   const repoStartOption = useMemo<RefSearchOption | null>(
     () => refs?.repoStartSha
       ? {
@@ -1150,6 +1157,9 @@ function RefSearchPicker({
   const seq = useRef(0);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [branchOffset, setBranchOffset] = useState(0);
+  const [remoteOffset, setRemoteOffset] = useState(0);
+  const [commitOffset, setCommitOffset] = useState(0);
   const [results, setResults] = useState<RefSearchResults>(fallbackResults);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1163,7 +1173,12 @@ function RefSearchPicker({
   );
 
   useEffect(() => {
-    if (!open) setResults(fallbackResults);
+    if (!open) {
+      setResults(fallbackResults);
+      setBranchOffset(0);
+      setRemoteOffset(0);
+      setCommitOffset(0);
+    }
   }, [fallbackResults, open]);
 
   useEffect(() => {
@@ -1173,7 +1188,17 @@ function RefSearchPicker({
     setError(null);
     const handle = window.setTimeout(() => {
       api
-        .searchRefs(repo, { query, limit: query ? 12 : 30, worktree })
+        .searchRefs(repo, {
+          query,
+          limit: query ? 12 : 30,
+          branchOffset,
+          branchLimit: BRANCH_PAGE_LIMIT,
+          remoteOffset,
+          remoteLimit: BRANCH_PAGE_LIMIT,
+          commitOffset,
+          commitLimit: COMMIT_PAGE_LIMIT,
+          worktree,
+        })
         .then((next) => {
           if (current === seq.current) {
             setResults(next);
@@ -1187,8 +1212,11 @@ function RefSearchPicker({
           if (current === seq.current) setLoading(false);
         });
     }, query ? 120 : 0);
-    return () => window.clearTimeout(handle);
-  }, [open, query, repo, worktree]);
+    return () => {
+      window.clearTimeout(handle);
+      if (seq.current === current) seq.current += 1;
+    };
+  }, [branchOffset, commitOffset, open, query, remoteOffset, repo, worktree]);
 
   useEffect(() => {
     if (!open) return;
@@ -1210,12 +1238,39 @@ function RefSearchPicker({
   }, [onOpenChange, open]);
 
   const groups = useMemo(
-    () => groupedOptions(results, query, allowedKinds, includeHead, trailingCommitOptions),
-    [allowedKinds, includeHead, query, results, trailingCommitOptions],
+    () => groupedOptions(
+      results,
+      query,
+      allowedKinds,
+      includeHead,
+      trailingCommitOptions,
+      fallbackResults,
+    ),
+    [
+      allowedKinds,
+      fallbackResults,
+      includeHead,
+      query,
+      results,
+      trailingCommitOptions,
+    ],
   );
   const flat = groups.flatMap((group) => group.options);
   const hasResults = flat.length > 0;
   const branchOnly = allowedKinds?.every((kind) => kind === "branch" || kind === "remote") === true;
+  const showsCommits = !allowedKinds || allowedKinds.includes("commit");
+  const showCommitPager = showsCommits &&
+    (results.commitPage.hasNewer || results.commitPage.hasOlder);
+  const commitRangeStart = results.commits.length > 0
+    ? results.commitPage.offset + 1
+    : results.commitPage.offset;
+  const commitRangeEnd = results.commitPage.offset + results.commits.length;
+
+  const setGroupOffset = (kind: "branch" | "remote", offset: number) => {
+    if (kind === "branch") setBranchOffset(offset);
+    else setRemoteOffset(offset);
+    setActiveIndex(0);
+  };
 
   const choose = (option: RefSearchOption) => {
     onSelect(option);
@@ -1243,6 +1298,28 @@ function RefSearchPicker({
           return;
         }
         if (event.key !== "Tab") return;
+        const pagerButtons = Array.from(
+          event.currentTarget.querySelectorAll<HTMLButtonElement>(
+            ".ref-pagination button:not(:disabled)",
+          ),
+        );
+        const target = event.target;
+        if (target === inputRef.current && !event.shiftKey && pagerButtons.length > 0) {
+          event.preventDefault();
+          pagerButtons[0]?.focus();
+          return;
+        }
+        const pagerIndex = pagerButtons.indexOf(target as HTMLButtonElement);
+        if (pagerIndex >= 0 && event.shiftKey) {
+          event.preventDefault();
+          (pagerButtons[pagerIndex - 1] ?? inputRef.current)?.focus();
+          return;
+        }
+        if (pagerIndex >= 0 && pagerIndex < pagerButtons.length - 1) {
+          event.preventDefault();
+          pagerButtons[pagerIndex + 1]?.focus();
+          return;
+        }
         event.preventDefault();
         setOpen(false);
         onOpenChange?.(false);
@@ -1275,6 +1352,9 @@ function RefSearchPicker({
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
+          setBranchOffset(0);
+          setRemoteOffset(0);
+          setCommitOffset(0);
           setActiveIndex(0);
         }}
         onKeyDown={(e) => {
@@ -1346,9 +1426,68 @@ function RefSearchPicker({
                 );
               })}
             </ul>
+            {group.page && group.pageKind &&
+              (group.page.hasNewer || group.page.hasOlder) && (
+                <nav
+                  className="ref-pagination ref-group-pagination"
+                  aria-label={`${group.title} pages`}
+                >
+                  <button
+                    type="button"
+                    disabled={loading || !group.page.hasNewer}
+                    onClick={() => setGroupOffset(
+                      group.pageKind!,
+                      Math.max(0, group.page!.offset - group.page!.limit),
+                    )}
+                  >
+                    ← Newer
+                  </button>
+                  <span aria-live="polite" aria-atomic="true">
+                    {group.title} {group.page.offset + 1}–
+                    {group.page.offset + (group.resultCount ?? 0)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={loading || !group.page.hasOlder}
+                    onClick={() => setGroupOffset(
+                      group.pageKind!,
+                      group.page!.offset + group.page!.limit,
+                    )}
+                  >
+                    Older →
+                  </button>
+                </nav>
+              )}
           </li>
         ))}
       </ul>
+      {showCommitPager && (
+        <nav className="ref-pagination" aria-label="Commit pages">
+          <button
+            type="button"
+            disabled={loading || !results.commitPage.hasNewer}
+            onClick={() => {
+              setCommitOffset(Math.max(0, results.commitPage.offset - results.commitPage.limit));
+              setActiveIndex(0);
+            }}
+          >
+            ← Newer
+          </button>
+          <span aria-live="polite" aria-atomic="true">
+            Commits {commitRangeStart}–{commitRangeEnd}
+          </span>
+          <button
+            type="button"
+            disabled={loading || !results.commitPage.hasOlder}
+            onClick={() => {
+              setCommitOffset(results.commitPage.offset + results.commitPage.limit);
+              setActiveIndex(0);
+            }}
+          >
+            Older →
+          </button>
+        </nav>
+      )}
     </span>
   ) : null;
 
@@ -1368,11 +1507,17 @@ function RefSearchPicker({
           setOpen(nextOpen);
           onOpenChange?.(nextOpen);
           setQuery("");
+          setBranchOffset(0);
+          setRemoteOffset(0);
+          setCommitOffset(0);
         }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             setOpen(true);
+            setBranchOffset(0);
+            setRemoteOffset(0);
+            setCommitOffset(0);
             onOpenChange?.(true);
           }
         }}
@@ -1482,19 +1627,49 @@ function usePopoverPosition(
   return coords;
 }
 
-function refsToSearchResults(refs: RefList | null): RefSearchResults {
+function refsToSearchResults(refs: RefList | null, priorityBranch: string): RefSearchResults {
+  const commits = refs?.commits ?? [];
+  const branches = refs?.branches ?? [];
+  const remotes = refs?.remotes ?? [];
+  const { local, remote } = defaultBranchRefNames(priorityBranch);
   return {
     query: "",
-    branches: refs?.branches ?? [],
-    remotes: refs?.remotes ?? [],
+    branches: promoteRef(branches, local, []).slice(0, BRANCH_PAGE_LIMIT),
+    branchPage: {
+      offset: 0,
+      limit: BRANCH_PAGE_LIMIT,
+      hasNewer: false,
+      hasOlder: branches.length > BRANCH_PAGE_LIMIT,
+    },
+    remotes: promoteRef(remotes, remote, []).slice(0, BRANCH_PAGE_LIMIT),
+    remotePage: {
+      offset: 0,
+      limit: BRANCH_PAGE_LIMIT,
+      hasNewer: false,
+      hasOlder: remotes.length > BRANCH_PAGE_LIMIT,
+    },
     tags: refs?.tags ?? [],
-    commits: (refs?.commits ?? []).map((commit) => ({
+    commits: commits.slice(0, COMMIT_PAGE_LIMIT).map((commit) => ({
       kind: "commit",
       value: commit.sha,
       label: commit.shortSha,
       ...commit,
     })),
+    commitPage: {
+      offset: 0,
+      limit: COMMIT_PAGE_LIMIT,
+      hasNewer: false,
+      hasOlder: commits.length > COMMIT_PAGE_LIMIT,
+    },
   };
+}
+
+interface RefOptionGroup {
+  title: string;
+  options: RefSearchOption[];
+  pageKind?: "branch" | "remote";
+  page?: RefSearchPage;
+  resultCount?: number;
 }
 
 function groupedOptions(
@@ -1503,6 +1678,7 @@ function groupedOptions(
   allowedKinds: RefSearchKind[] | undefined,
   includeHead: boolean,
   trailingCommitOptions: RefSearchOption[],
+  priorityFallbackResults: RefSearchResults,
 ) {
   const needle = query.trim().toLowerCase();
   const allowed = (kind: RefSearchKind) => !allowedKinds || allowedKinds.includes(kind);
@@ -1512,7 +1688,7 @@ function groupedOptions(
       option.label.toLowerCase().includes(needle) ||
       (option.kind === "commit" &&
         option.subject?.toLowerCase().includes(needle) === true));
-  const headTip = results.commits[0];
+  const headTip = priorityFallbackResults.commits[0] ?? results.commits[0];
   const head: RefSearchOption[] =
     includeHead && matches({ kind: "branch", value: "HEAD", label: "HEAD" })
       ? [{
@@ -1530,15 +1706,53 @@ function groupedOptions(
             : { subject: "current checkout" }),
         }]
       : [];
-  return [
-    { title: "Branches", options: [...head, ...results.branches.filter(matches)] },
-    { title: "Remote branches", options: results.remotes.filter(matches) },
+  const branches = results.branches.filter(matches).slice(0, results.branchPage.limit);
+  const remotes = results.remotes.filter(matches).slice(0, results.remotePage.limit);
+  const commits = results.commits.filter(matches);
+  const trailingCommits = trailingCommitOptions.filter(matches);
+  const canShowTrailingCommits = needle !== "" ||
+    (!results.commitPage.hasOlder && commits.length < results.commitPage.limit);
+  const visibleTrailingCommits = canShowTrailingCommits
+    ? trailingCommits.slice(0, Math.max(0, results.commitPage.limit - commits.length))
+    : [];
+  const groups: RefOptionGroup[] = [
+    {
+      title: "Branches",
+      options: [...head, ...branches],
+      pageKind: "branch",
+      page: results.branchPage,
+      resultCount: branches.length,
+    },
+    {
+      title: "Remote branches",
+      options: remotes,
+      pageKind: "remote",
+      page: results.remotePage,
+      resultCount: remotes.length,
+    },
     { title: "Tags", options: results.tags.filter(matches) },
     {
       title: "Commits",
-      options: [...results.commits.filter(matches), ...trailingCommitOptions.filter(matches)],
+      options: [...commits, ...visibleTrailingCommits],
     },
-  ].filter((group) => group.options.length > 0);
+  ];
+  return groups.filter((group) =>
+    group.options.length > 0 || group.page?.hasNewer === true || group.page?.hasOlder === true
+  );
+}
+
+function promoteRef(
+  options: RefSearchOption[],
+  value: string,
+  fallbacks: RefSearchOption[],
+): RefSearchOption[] {
+  const index = options.findIndex((option) => option.value === value);
+  if (index === 0) return options;
+  const preferred = index > 0
+    ? options[index]
+    : fallbacks.find((option) => option.value === value);
+  if (!preferred) return options;
+  return [preferred, ...options.filter((option) => option.value !== value)];
 }
 
 function RefOptionContent({
