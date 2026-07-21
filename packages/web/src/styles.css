@@ -1457,6 +1457,43 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.ref-pagination {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 7px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ref-pagination button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.ref-pagination button:first-child {
+  justify-self: start;
+}
+.ref-pagination button:last-child {
+  justify-self: end;
+}
+.ref-pagination button:hover:not(:disabled) {
+  color: var(--text);
+}
+.ref-pagination button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ref-pagination button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.5;
+}
 .ref-option {
   width: 100%;
   border: 0;
@@ -1485,7 +1522,7 @@ html[data-shell="desktop"][data-platform="macos"] .rh-identity {
 .ref-name,
 .ref-sha {
   flex: 0 0 auto;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-family: var(--mono);
   font-weight: 700;
   white-space: nowrap;

@@ -58,6 +58,19 @@ it("GET /repos/:repo/refs exposes Repo Start for a root comparison", async () =>
   ]);
 });
 
+it("GET /repos/:repo/refs/search keeps empty pagination params at their defaults", async () => {
+  const repo = (await (await fetch(`${base}/workspace`)).json()).repos[0].name;
+  const response = await fetch(
+    `${base}/repos/${repo}/refs/search?limit=&branchOffset=&branchLimit=&remoteOffset=&remoteLimit=&commitOffset=&commitLimit=`,
+  );
+
+  expect(response.status).toBe(200);
+  const results = await response.json();
+  expect(results.branchPage).toMatchObject({ offset: 0, limit: 12 });
+  expect(results.remotePage).toMatchObject({ offset: 0, limit: 12 });
+  expect(results.commitPage).toMatchObject({ offset: 0, limit: 12 });
+});
+
 it("404s for an unknown repo", async () => {
   expect((await fetch(`${base}/repos/nope/files`)).status).toBe(404);
 });

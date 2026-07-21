@@ -276,6 +276,22 @@ export interface RefList {
 
 export type RefSearchKind = "branch" | "tag" | "remote" | "commit";
 
+/** Local and remote names for promoting a repository's resolved default ref. */
+export function defaultBranchRefNames(
+  value: string | null,
+): { local: string; remote: string } {
+  if (!value) return { local: "", remote: "" };
+  if (value.startsWith("remotes/")) {
+    const remote = value.slice("remotes/".length);
+    const separator = remote.indexOf("/");
+    return { local: separator >= 0 ? remote.slice(separator + 1) : remote, remote };
+  }
+  if (value.startsWith("origin/")) {
+    return { local: value.slice("origin/".length), remote: value };
+  }
+  return { local: value, remote: `origin/${value}` };
+}
+
 /** One selectable base/compare point returned by `GET /repos/:repo/refs/search`. */
 export interface RefSearchOption {
   kind: RefSearchKind;
@@ -291,13 +307,23 @@ export interface RefSearchOption {
   committedAt?: string;
 }
 
+export interface RefSearchPage {
+  offset: number;
+  limit: number;
+  hasNewer: boolean;
+  hasOlder: boolean;
+}
+
 export interface RefSearchResults {
   query: string;
   branches: RefSearchOption[];
+  branchPage: RefSearchPage;
   /** Remote-tracking branches (kind "remote"); value is the short name, e.g. "origin/main". */
   remotes: RefSearchOption[];
+  remotePage: RefSearchPage;
   tags: RefSearchOption[];
   commits: RefSearchOption[];
+  commitPage: RefSearchPage;
 }
 
 /** A slice of a file's lines, for unfolding collapsed diff context (GET /repos/:repo/file). */

@@ -747,12 +747,26 @@ async function repoRoutes(
       worktree,
     );
     if (!treeRoot) return true;
-    const rawLimit = url.searchParams.get("limit");
-    const limit = rawLimit ? Number(rawLimit) : undefined;
+    const numberParam = (name: string) => {
+      const raw = url.searchParams.get(name);
+      return raw ? Number(raw) : undefined;
+    };
     sendJson(
       res,
       200,
-      await searchRefs(treeRoot, url.searchParams.get("q") ?? "", limit),
+      await searchRefs(
+        treeRoot,
+        url.searchParams.get("q") ?? "",
+        numberParam("limit"),
+        {
+          branchOffset: numberParam("branchOffset"),
+          branchLimit: numberParam("branchLimit"),
+          remoteOffset: numberParam("remoteOffset"),
+          remoteLimit: numberParam("remoteLimit"),
+          commitOffset: numberParam("commitOffset"),
+          commitLimit: numberParam("commitLimit"),
+        },
+      ),
     );
     return true;
   }

@@ -81,6 +81,253 @@ test("branch picker compares a selected branch to the working tree", async ({ pa
   await expect(trigger).toBeFocused();
 });
 
+test("ref picker paginates branches, remotes, and commits independently", async ({ page }) => {
+  const requests: Array<{
+    query: string;
+    branchOffset: number;
+    remoteOffset: number;
+    commitOffset: number;
+  }> = [];
+  const option = (index: number, subjectPrefix = "recent") => {
+    const sha = index.toString(16).padStart(40, "0");
+    return {
+      kind: "commit",
+      value: sha,
+      label: sha.slice(0, 7),
+      sha,
+      shortSha: sha.slice(0, 7),
+      committer: "E2E",
+      committedAt: "2026-07-20T12:00:00.000Z",
+      subject: `${subjectPrefix} commit ${index}`,
+    };
+  };
+  await page.route("**/repos/*/refs", async (route) => {
+    const response = await route.fetch();
+    const refs = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...refs,
+        branches: [
+          { ...option(90), kind: "branch", value: "feature", label: "feature" },
+          { ...option(10), kind: "branch", value: "main", label: "main" },
+        ],
+        remotes: [
+          { ...option(91), kind: "remote", value: "origin/feature", label: "origin/feature" },
+          { ...option(11), kind: "remote", value: "origin/main", label: "origin/main" },
+        ],
+      },
+    });
+  });
+  await page.route("**/repos/*/refs/search?**", async (route) => {
+    const url = new URL(route.request().url());
+    const query = url.searchParams.get("q") ?? "";
+    const branchOffset = Number(url.searchParams.get("branchOffset") ?? 0);
+    const branchLimit = Number(url.searchParams.get("branchLimit") ?? 5);
+    const remoteOffset = Number(url.searchParams.get("remoteOffset") ?? 0);
+    const remoteLimit = Number(url.searchParams.get("remoteLimit") ?? 5);
+    const commitOffset = Number(url.searchParams.get("commitOffset") ?? 0);
+    const commitLimit = Number(url.searchParams.get("commitLimit") ?? 10);
+    requests.push({ query, branchOffset, remoteOffset, commitOffset });
+    const branches = Array.from({ length: branchLimit }, (_, index) => {
+      const number = branchOffset + index;
+      const name = number === 0 ? "main" : `feature-${number}`;
+      return { ...option(100 + number), kind: "branch", value: name, label: name };
+    });
+    const remotes = Array.from({ length: remoteLimit }, (_, index) => {
+      const number = remoteOffset + index;
+      const name = number === 0 ? "origin/main" : `origin/feature-${number}`;
+      return { ...option(200 + number), kind: "remote", value: name, label: name };
+    });
+    await route.fulfill({
+      json: {
+        query,
+        branches,
+        branchPage: {
+          offset: branchOffset,
+          limit: branchLimit,
+          hasNewer: branchOffset > 0,
+          hasOlder: branchOffset < 10,
+        },
+        remotes,
+        remotePage: {
+          offset: remoteOffset,
+          limit: remoteLimit,
+          hasNewer: remoteOffset > 0,
+          hasOlder: remoteOffset < 10,
+        },
+        tags: [],
+        commits: Array.from(
+          { length: commitLimit },
+          (_, index) => option(commitOffset + index + 1, query || "recent"),
+        ),
+        commitPage: {
+          offset: commitOffset,
+          limit: commitLimit,
+          hasNewer: commitOffset > 0,
+          hasOlder: commitOffset < 20,
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
+  await page.locator(".target-picker .review-target-trigger").click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  await dialog.getByRole("button", { name: /^Base: main,/ }).click();
+  const search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  await expect(search).toBeVisible();
+
+  const branchGroup = page.locator(".ref-group").filter({
+    has: page.locator(".ref-group-title", { hasText: /^Branches$/ }),
+  });
+  const remoteGroup = page.locator(".ref-group").filter({
+    has: page.locator(".ref-group-title", { hasText: /^Remote branches$/ }),
+  });
+  const commitGroup = page.locator(".ref-group").filter({
+    has: page.locator(".ref-group-title", { hasText: /^Commits$/ }),
+  });
+  const branchPager = branchGroup.getByRole("navigation", { name: "Branches pages" });
+  const remotePager = remoteGroup.getByRole("navigation", { name: "Remote branches pages" });
+  const commitPager = page.getByRole("navigation", { name: "Commit pages" });
+  await expect(branchGroup.getByRole("option").nth(0)).toHaveAccessibleName(/^HEAD,/);
+  await expect(branchGroup.getByRole("option").nth(1)).toHaveAccessibleName(/^main,/);
+  await expect(branchGroup.getByRole("option")).toHaveCount(6);
+  await expect(remoteGroup.getByRole("option").first()).toHaveAccessibleName(/^origin\/main,/);
+  await expect(remoteGroup.getByRole("option")).toHaveCount(5);
+  await expect(commitGroup.getByRole("option")).toHaveCount(10);
+  await expect(branchPager).toContainText("Branches 1–5");
+  await expect(remotePager).toContainText("Remote branches 1–5");
+  await expect(commitPager).toContainText("Commits 1–10");
+
+  await branchPager.getByRole("button", { name: "Older" }).click();
+  await expect.poll(() => requests.at(-1)).toEqual({
+    query: "",
+    branchOffset: 5,
+    remoteOffset: 0,
+    commitOffset: 0,
+  });
+  await expect(branchPager).toContainText("Branches 6–10");
+  await expect(remotePager).toContainText("Remote branches 1–5");
+
+  await remotePager.getByRole("button", { name: "Older" }).click();
+  await expect.poll(() => requests.at(-1)).toEqual({
+    query: "",
+    branchOffset: 5,
+    remoteOffset: 5,
+    commitOffset: 0,
+  });
+  await commitPager.getByRole("button", { name: "Older" }).click();
+  await expect.poll(() => requests.at(-1)).toEqual({
+    query: "",
+    branchOffset: 5,
+    remoteOffset: 5,
+    commitOffset: 10,
+  });
+  await expect(commitPager).toContainText("Commits 11–20");
+  await search.focus();
+  await search.press("Tab");
+  await expect(branchPager.getByRole("button", { name: "Newer" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(branchPager.getByRole("button", { name: "Older" })).toBeFocused();
+
+  await search.fill("topic");
+  await expect.poll(() => requests.at(-1)).toEqual({
+    query: "topic",
+    branchOffset: 0,
+    remoteOffset: 0,
+    commitOffset: 0,
+  });
+  await commitPager.getByRole("button", { name: "Older" }).click();
+  await expect.poll(() => requests.at(-1)).toEqual({
+    query: "topic",
+    branchOffset: 0,
+    remoteOffset: 0,
+    commitOffset: 10,
+  });
+});
+
+test("closing a paged ref picker discards its in-flight older page", async ({ page }) => {
+  let releaseOlder: (() => void) | null = null;
+  const olderGate = new Promise<void>((resolve) => {
+    releaseOlder = resolve;
+  });
+  let releaseReopen: (() => void) | null = null;
+  const reopenGate = new Promise<void>((resolve) => {
+    releaseReopen = resolve;
+  });
+  let olderRequested = false;
+  let olderCompleted = false;
+  let blockPageZero = false;
+  await page.route("**/repos/*/refs/search?**", async (route) => {
+    const url = new URL(route.request().url());
+    const offset = Number(url.searchParams.get("commitOffset") ?? 0);
+    if (offset === 10) {
+      olderRequested = true;
+      await olderGate;
+    } else if (blockPageZero) {
+      await reopenGate;
+    }
+    const commits = Array.from({ length: 10 }, (_, index) => {
+      const number = offset + index;
+      const sha = number.toString(16).padStart(40, "0");
+      return {
+        kind: "commit",
+        value: sha,
+        label: sha.slice(0, 7),
+        sha,
+        shortSha: sha.slice(0, 7),
+        committer: "E2E",
+        committedAt: "2026-07-20T12:00:00.000Z",
+        subject: `${offset === 0 ? "newest" : "older"} commit ${number}`,
+      };
+    });
+    await route.fulfill({
+      json: {
+        query: "",
+        branches: [],
+        branchPage: { offset: 0, limit: 5, hasNewer: false, hasOlder: false },
+        remotes: [],
+        remotePage: { offset: 0, limit: 5, hasNewer: false, hasOlder: false },
+        tags: [],
+        commits,
+        commitPage: {
+          offset,
+          limit: 10,
+          hasNewer: offset > 0,
+          hasOlder: offset === 0,
+        },
+      },
+    });
+    if (offset === 10) olderCompleted = true;
+  });
+
+  await page.goto("/");
+  await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
+  await page.locator(".target-picker .review-target-trigger").click();
+  const dialog = page.getByRole("dialog", { name: "Review changes" });
+  const base = dialog.getByRole("button", { name: /^Base: main,/ });
+  await base.click();
+  const search = page.getByPlaceholder("Find a branch, tag, or commit…");
+  await page
+    .getByRole("navigation", { name: "Commit pages" })
+    .getByRole("button", { name: "Older" })
+    .click();
+  await expect.poll(() => olderRequested).toBe(true);
+  await search.press("Escape");
+
+  blockPageZero = true;
+  releaseOlder?.();
+  await expect.poll(() => olderCompleted).toBe(true);
+  await base.click();
+  try {
+    await expect(page.getByText(/^older commit /)).toHaveCount(0);
+  } finally {
+    releaseReopen?.();
+  }
+});
+
 test("picker entry stays inert while explicit Branch, Base, and Compare choices load once", async ({ page }) => {
   let releaseRefs: (() => void) | null = null;
   const refsGate = new Promise<void>((resolve) => {
@@ -454,6 +701,7 @@ test("removed checkout ref searches keep the loaded review coherent", async ({ p
   await branch.click();
 
   await expect(page.locator(".ref-search-error")).toContainText("checkout no longer exists");
+  await expect(page.getByRole("option").first()).toHaveAccessibleName(/^main,/);
   await expect(trigger).toHaveText("main▾");
   await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
   await expect(dialog).toBeVisible();

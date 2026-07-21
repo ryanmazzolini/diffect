@@ -188,11 +188,27 @@ export const api = {
 
   searchRefs: (
     repo: string,
-    opts: { query?: string; limit?: number; worktree?: string | null } = {},
+    opts: {
+      query?: string;
+      limit?: number;
+      branchOffset?: number;
+      branchLimit?: number;
+      remoteOffset?: number;
+      remoteLimit?: number;
+      commitOffset?: number;
+      commitLimit?: number;
+      worktree?: string | null;
+    } = {},
   ) => {
     const q = new URLSearchParams();
     if (opts.query) q.set("q", opts.query);
     if (opts.limit) q.set("limit", String(opts.limit));
+    if (opts.branchOffset) q.set("branchOffset", String(opts.branchOffset));
+    if (opts.branchLimit) q.set("branchLimit", String(opts.branchLimit));
+    if (opts.remoteOffset) q.set("remoteOffset", String(opts.remoteOffset));
+    if (opts.remoteLimit) q.set("remoteLimit", String(opts.remoteLimit));
+    if (opts.commitOffset) q.set("commitOffset", String(opts.commitOffset));
+    if (opts.commitLimit) q.set("commitLimit", String(opts.commitLimit));
     if (opts.worktree) q.set("worktree", opts.worktree);
     const qs = q.toString();
     return fetch(
