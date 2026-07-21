@@ -902,6 +902,9 @@ test("restores empty repo labels and target-only comparisons", async ({ page }) 
 test("external local target changes cancel a pending live comparison", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
+  // Keep the live-comparison debounce pending regardless of CI load while the
+  // external Staged selection is issued.
+  await page.clock.install();
 
   let releaseStaged: (() => void) | null = null;
   const stagedGate = new Promise<void>((resolve) => {
@@ -937,12 +940,12 @@ test("external local target changes cancel a pending live comparison", async ({ 
 
   await expect.poll(() => stagedRequested).toBe(true);
   await expect(page.locator(".target-request-status")).toContainText("Loading Staged changes");
-  await page.waitForTimeout(250);
+  await page.clock.runFor(250);
   expect(manualComparisonRequested).toBe(false);
   releaseStaged?.();
 
   await expect(staged).toHaveAttribute("aria-pressed", "true");
   await expect(trigger).toHaveText("Staged changes▾");
-  await page.waitForTimeout(200);
+  await page.clock.runFor(200);
   expect(manualComparisonRequested).toBe(false);
 });
