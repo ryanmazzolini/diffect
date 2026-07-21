@@ -43,6 +43,12 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { DiffFile, FileContent, Side, Thread } from "@diffect/shared";
+import {
+  applyPreciseReadingAnchorStep,
+  beginReadingAnchorRestoration,
+  isCurrentReadingAnchorRestoration,
+  type ReadingAnchorRestorationState,
+} from "../readingAnchorRestoration.js";
 import type { Theme } from "../theme.js";
 import { CommentForm } from "./CommentForm.js";
 import { InlineThread } from "./InlineThread.js";
@@ -99,6 +105,14 @@ interface ReadingAnchor {
   documentTop: number;
   screenTop: number;
   scrollTop: number;
+  scrollIntent: ScrollIntentState;
+  scrollIntentEpoch: number;
+  restorationState: ReadingAnchorRestorationState;
+  restorationGeneration: number;
+}
+
+interface ScrollIntentState {
+  epoch: number;
 }
 
 interface CmLineWidgetData {
@@ -107,6 +121,18 @@ interface CmLineWidgetData {
   threads: Thread[];
   selection: SelectionComment | null;
 }
+
+const scrollIntentByRoot = new WeakMap<HTMLElement, ScrollIntentState>();
+const restorationStateByRoot = new WeakMap<HTMLElement, ReadingAnchorRestorationState>();
+const SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
 
 const setCmDecorations = StateEffect.define<DecorationSet>();
 const cmDecorations = StateField.define<DecorationSet>({
@@ -502,7 +528,15 @@ export function CodeMirrorDiffBody({
     const contexts = viewContextsRef.current;
     if (contexts.length === 0) return;
 
-    const readingAnchor = captureReadingAnchor(contexts);
+    // Diff metadata arrives before refreshed file content. Only the content
+    // update should claim the shared viewport anchor; anchoring both passes lets
+    // an older no-op restoration race the document change.
+    const contentChanged = contexts.some(({ side, view }) => {
+      const nextText = side === "old" ? content.old : content.new;
+      if (view.state.doc.toString() !== nextText) return true;
+      return side === "unified" && getOriginalDoc(view.state).toString() !== content.old;
+    });
+    const readingAnchor = contentChanged ? captureReadingAnchor(contexts) : null;
     for (const { side, view } of contexts) {
       const nextText = side === "old" ? content.old : content.new;
       const currentText = view.state.doc.toString();
@@ -540,8 +574,11 @@ export function CodeMirrorDiffBody({
     if (readingAnchor) {
       // MergeView aligns its two sides on the next animation frame. Measure
       // after that alignment so its spacer heights are included in the delta.
-      if (contexts.length > 1) requestAnimationFrame(() => restoreReadingAnchor(readingAnchor));
-      else restoreReadingAnchor(readingAnchor);
+      if (contexts.length > 1) {
+        requestAnimationFrame(() => restoreReadingAnchor(readingAnchor, true));
+      } else {
+        restoreReadingAnchor(readingAnchor);
+      }
     }
   }, [anchorCompartment, content.new, content.old, editableUnified, file, viewVersion]);
 
@@ -1046,6 +1083,12 @@ function buildLineAnchors(file: DiffFile, docLines: number): LineAnchors {
 function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
   const scrollRoot = contexts[0]?.view.dom.closest<HTMLElement>(".diff-pane, .modmain");
   if (!scrollRoot) return null;
+  let restorationState = restorationStateByRoot.get(scrollRoot);
+  if (!restorationState) {
+    restorationState = { generation: 0 };
+    restorationStateByRoot.set(scrollRoot, restorationState);
+  }
+  const restorationGeneration = beginReadingAnchorRestoration(restorationState);
   const rootRect = scrollRoot.getBoundingClientRect();
   const readingY = rootRect.top + rootRect.height / 2;
   const editors = Array.from(scrollRoot.querySelectorAll<HTMLElement>(".cm-editor"));
@@ -1071,6 +1114,7 @@ function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
     );
     const screenTop = lineScreenTop(view, position);
     if (screenTop === null) continue;
+    const scrollIntent = observeScrollIntent(scrollRoot);
     return {
       scrollRoot,
       view,
@@ -1079,16 +1123,53 @@ function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
       documentTop: view.documentTop,
       screenTop,
       scrollTop: scrollRoot.scrollTop,
+      scrollIntent,
+      scrollIntentEpoch: scrollIntent.epoch,
+      restorationState,
+      restorationGeneration,
     };
   }
   return null;
 }
 
-function restoreReadingAnchor(anchor: ReadingAnchor): void {
-  if (!anchor.view.dom.isConnected || !anchor.scrollRoot.isConnected) return;
+function observeScrollIntent(scrollRoot: HTMLElement): ScrollIntentState {
+  const existing = scrollIntentByRoot.get(scrollRoot);
+  if (existing) return existing;
+
+  const state: ScrollIntentState = { epoch: 0 };
+  const markIntent = () => {
+    state.epoch += 1;
+  };
+  scrollRoot.addEventListener("wheel", markIntent, { passive: true });
+  scrollRoot.addEventListener("touchstart", markIntent, { passive: true });
+  scrollRoot.addEventListener("keydown", (event) => {
+    if (SCROLL_KEYS.has(event.key)) markIntent();
+  });
+  scrollIntentByRoot.set(scrollRoot, state);
+  return state;
+}
+
+function userScrolledSinceCapture(anchor: ReadingAnchor): boolean {
+  return anchor.scrollIntent.epoch !== anchor.scrollIntentEpoch;
+}
+
+function restorationIsCurrent(anchor: ReadingAnchor): boolean {
+  return isCurrentReadingAnchorRestoration(
+    anchor.restorationState,
+    anchor.restorationGeneration,
+  );
+}
+
+function restoreReadingAnchor(anchor: ReadingAnchor, settleMergeView = false): void {
+  if (
+    !restorationIsCurrent(anchor) ||
+    !anchor.view.dom.isConnected ||
+    !anchor.scrollRoot.isConnected
+  ) return;
   anchor.view.requestMeasure({
-    key: anchor.scrollRoot,
+    key: anchor,
     read(view) {
+      if (!restorationIsCurrent(anchor)) return null;
       const position = Math.min(anchor.position, view.state.doc.length);
       return {
         blockTop: view.lineBlockAt(position).top,
@@ -1098,28 +1179,65 @@ function restoreReadingAnchor(anchor: ReadingAnchor): void {
     write(next, view) {
       // A user scroll between the refresh and measurement always wins. Native
       // scroll anchoring may also have already made the correction for us.
-      if (Math.abs(anchor.scrollRoot.scrollTop - anchor.scrollTop) > 1) return;
+      if (next === null || !restorationIsCurrent(anchor)) return;
+      const currentScrollTop = anchor.scrollRoot.scrollTop;
+      if (userScrolledSinceCapture(anchor)) return;
+      if (Math.abs(currentScrollTop - anchor.scrollTop) > 1) return;
       const lineDelta = (next.blockTop - anchor.blockTop) * view.scaleY;
       const layoutDelta = next.documentTop - anchor.documentTop;
       const expectedScrollTop = anchor.scrollTop + lineDelta + layoutDelta;
       anchor.scrollRoot.scrollTop = expectedScrollTop;
-      requestAnimationFrame(() => restorePreciseReadingAnchor(anchor, expectedScrollTop));
+      const restorePrecisely = () => restorePreciseReadingAnchor(
+        anchor,
+        expectedScrollTop,
+        settleMergeView ? 8 : 1,
+      );
+      if (settleMergeView) {
+        requestAnimationFrame(() => requestAnimationFrame(restorePrecisely));
+      } else {
+        requestAnimationFrame(restorePrecisely);
+      }
     },
   });
 }
 
-function restorePreciseReadingAnchor(anchor: ReadingAnchor, expectedScrollTop: number): void {
-  if (!anchor.view.dom.isConnected || !anchor.scrollRoot.isConnected) return;
+function restorePreciseReadingAnchor(
+  anchor: ReadingAnchor,
+  expectedScrollTop: number,
+  maxScrollDrift: number,
+  retryCount = 0,
+): void {
+  if (
+    !restorationIsCurrent(anchor) ||
+    !anchor.view.dom.isConnected ||
+    !anchor.scrollRoot.isConnected
+  ) return;
   anchor.view.requestMeasure({
     key: anchor,
     read(view) {
+      if (!restorationIsCurrent(anchor)) return null;
       const position = Math.min(anchor.position, view.state.doc.length);
       return lineScreenTop(view, position);
     },
     write(nextScreenTop) {
       if (nextScreenTop === null) return;
-      if (Math.abs(anchor.scrollRoot.scrollTop - expectedScrollTop) > 1) return;
-      anchor.scrollRoot.scrollTop += nextScreenTop - anchor.screenTop;
+      const result = applyPreciseReadingAnchorStep({
+        scrollRoot: anchor.scrollRoot,
+        expectedScrollTop,
+        maxScrollDrift,
+        nextScreenTop,
+        anchorScreenTop: anchor.screenTop,
+        scrollIntentChanged: userScrolledSinceCapture(anchor) || !restorationIsCurrent(anchor),
+        retryCount,
+      });
+      if (result.status === "retry") {
+        requestAnimationFrame(() => restorePreciseReadingAnchor(
+          anchor,
+          result.expectedScrollTop,
+          maxScrollDrift,
+          result.retryCount,
+        ));
+      }
     },
   });
 }

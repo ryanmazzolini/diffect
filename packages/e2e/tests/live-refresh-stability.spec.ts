@@ -68,24 +68,7 @@ async function expectReadingAnchorStable(
     .toBeLessThanOrEqual(tolerance);
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  );
-});
-
-test("live refresh keeps the reading anchor stable with follow off", async ({ page }) => {
-  const { anchor, top } = await centerReadingAnchor(page);
-  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
-  await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
-  await expectReadingAnchorStable(anchor, top);
-});
-
-test("a user scroll during refresh overrides reading-anchor restoration", async ({ page }) => {
-  const { anchor } = await centerReadingAnchor(page);
-  const root = await fixtureRoot(page);
+async function holdAnimationFrames(page: Page): Promise<void> {
   await page.evaluate(() => {
     const nativeRequest = window.requestAnimationFrame.bind(window);
     const nativeCancel = window.cancelAnimationFrame.bind(window);
@@ -113,6 +96,36 @@ test("a user scroll during refresh overrides reading-anchor restoration", async 
       },
     };
   });
+}
+
+async function releaseAnimationFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const controlledWindow = window as typeof window & {
+      __diffectRafControl?: { release: () => void };
+    };
+    controlledWindow.__diffectRafControl?.release();
+  });
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("live refresh keeps the reading anchor stable with follow off", async ({ page }) => {
+  const { anchor, top } = await centerReadingAnchor(page);
+  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
+  await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
+  await expectReadingAnchorStable(anchor, top);
+});
+
+test("a user scroll during refresh overrides reading-anchor restoration", async ({ page }) => {
+  const { anchor } = await centerReadingAnchor(page);
+  const root = await fixtureRoot(page);
+  await holdAnimationFrames(page);
 
   const contentRefresh = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -133,12 +146,36 @@ test("a user scroll during refresh overrides reading-anchor restoration", async 
     element.scrollTop = 0;
     return element.scrollTop;
   });
-  await page.evaluate(() => {
-    const controlledWindow = window as typeof window & {
-      __diffectRafControl?: { release: () => void };
-    };
-    controlledWindow.__diffectRafControl?.release();
+  await releaseAnimationFrames(page);
+  await page.waitForTimeout(100);
+
+  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(userScrollTop);
+  await expect(anchor).not.toBeInViewport();
+});
+
+test("scroll intent before coarse refresh measurement cancels restoration", async ({ page }) => {
+  const { anchor } = await centerReadingAnchor(page);
+  const root = await fixtureRoot(page);
+  await holdAnimationFrames(page);
+
+  const contentRefresh = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().method() === "GET" &&
+      url.pathname.endsWith("/file/content") &&
+      url.searchParams.get("path") === "calc.js"
+    );
   });
+  const calcPath = join(root, "calc.js");
+  const original = await readFile(calcPath, "utf8");
+  await writeFile(calcPath, `${GENERATED_PREFIX}\n${original}`);
+  await contentRefresh;
+  await expect(page.locator('.file[data-path="calc.js"] .cm-content')).toContainText("generated0");
+
+  const pane = page.locator(".diff-pane");
+  const userScrollTop = await pane.evaluate((element) => element.scrollTop);
+  await pane.dispatchEvent("wheel", { deltaY: 1 });
+  await releaseAnimationFrames(page);
   await page.waitForTimeout(100);
 
   await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(userScrollTop);
