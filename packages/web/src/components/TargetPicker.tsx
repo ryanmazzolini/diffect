@@ -22,6 +22,10 @@ import type {
 } from "@diffect/shared";
 import { api } from "../api.js";
 import { relativeTime } from "../relativeTime.js";
+import {
+  createReviewSelectionIntentController,
+  type ReviewSelectionIntentController,
+} from "../reviewSelectionIntent.js";
 import type {
   OpenReviewsState,
   ReviewRequestContext,
@@ -34,8 +38,6 @@ const BRANCH_PAGE_LIMIT = 5;
 const COMMIT_PAGE_LIMIT = 10;
 const LIVE_SELECTION_DEBOUNCE_MS = 150;
 const EMPTY_OPEN_REVIEWS_STATE: OpenReviewsState = { status: "loading", reviews: [] };
-
-type ReviewScopeMode = "branch" | "compare" | "none";
 
 const STATIC_LOCAL_TARGETS = [
   { target: "staged", label: "Staged changes", short: "Staged" },
@@ -105,6 +107,26 @@ export function TargetPicker({
       : null,
     [refs],
   );
+  const selectionIntentsRef = useRef<ReviewSelectionIntentController | null>(null);
+  if (selectionIntentsRef.current === null) {
+    selectionIntentsRef.current = createReviewSelectionIntentController(
+      LIVE_SELECTION_DEBOUNCE_MS,
+    );
+  }
+  const selectionIntents = selectionIntentsRef.current;
+  const cancelDeferredSelection = useCallback(() => selectionIntents.cancel(), [selectionIntents]);
+  const deferSelection = useCallback(
+    (action: () => void) => selectionIntents.schedule(action),
+    [selectionIntents],
+  );
+  const requestSelection = useCallback<Props["onSelection"]>(
+    (selection, context) => selectionIntents.runNow(() => onSelection(selection, context)),
+    [onSelection, selectionIntents],
+  );
+  useEffect(
+    () => () => selectionIntents.cancel(),
+    [repo, selectionIntents, worktree],
+  );
 
   const requestTarget = useCallback(
     (nextTarget: string, nextPresentation?: ReviewTargetPresentation) => {
@@ -120,9 +142,9 @@ export function TargetPicker({
         fallbackBase,
         repoStartOption,
       );
-      void onSelection(selection, { label });
+      void requestSelection(selection, { label });
     },
-    [currentBranch, fallbackBase, onSelection, repoStartOption, worktree],
+    [currentBranch, fallbackBase, repoStartOption, requestSelection, worktree],
   );
 
   return (
@@ -141,9 +163,11 @@ export function TargetPicker({
         refThreadCounts={refThreadCounts}
         openReviews={openReviews}
         reviewRequest={reviewRequest}
-        onSelection={onSelection}
+        onSelection={requestSelection}
         onRefreshOpenReviews={onRefreshOpenReviews}
         onTarget={requestTarget}
+        onDeferTarget={deferSelection}
+        onCancelDeferredTarget={cancelDeferredSelection}
       />
       {reviewRequest?.status === "loading" && (
         <span className="target-request-status" role="status" title={`Loading ${reviewRequest.context.label}`}>
@@ -189,6 +213,8 @@ interface ReviewTargetMenuProps {
   ) => Promise<boolean>;
   onRefreshOpenReviews: () => void;
   onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
+  onDeferTarget: (action: () => void) => void;
+  onCancelDeferredTarget: () => void;
 }
 
 function ReviewTargetMenu({
@@ -208,6 +234,8 @@ function ReviewTargetMenu({
   onSelection,
   onRefreshOpenReviews,
   onTarget,
+  onDeferTarget,
+  onCancelDeferredTarget,
 }: ReviewTargetMenuProps) {
   const headingId = useId();
   const panelId = useId();
@@ -320,6 +348,8 @@ function ReviewTargetMenu({
         refThreadCounts={refThreadCounts}
         reviewRequest={reviewRequest}
         onTarget={onTarget}
+        onDeferTarget={onDeferTarget}
+        onCancelDeferredTarget={onCancelDeferredTarget}
       />
     </div>
   ) : null;
@@ -598,6 +628,8 @@ function LiveReviewScopePicker({
   refThreadCounts,
   reviewRequest,
   onTarget,
+  onDeferTarget,
+  onCancelDeferredTarget,
 }: {
   repo: string;
   worktree: string | null;
@@ -613,6 +645,8 @@ function LiveReviewScopePicker({
   refThreadCounts?: ReadonlyMap<string, RefThreadCount>;
   reviewRequest: ReviewRequestState | null;
   onTarget: (target: string, presentation?: ReviewTargetPresentation) => void;
+  onDeferTarget: (action: () => void) => void;
+  onCancelDeferredTarget: () => void;
 }) {
   const initialParsedTarget = presentation ? null : parseCompareTarget(target);
   const initialBranchRef = branchRefForTarget(target, fallbackBase);
@@ -622,7 +656,6 @@ function LiveReviewScopePicker({
   const lastIssuedTargetRef = useRef<string | null>(null);
   cacheRefOptions(optionCacheRef.current, fallbackResults);
   if (repoStartOption) optionCacheRef.current.set(repoStartOption.value, repoStartOption);
-  const [mode, setMode] = useState<ReviewScopeMode>(appliedScopeMode(target, presentation));
   const [branchRef, setBranchRef] = useState(initialBranchRef);
   const [branchLabel, setBranchLabel] = useState(displayRefValue(initialBranchRef));
   const [baseRef, setBaseRef] = useState(
@@ -645,7 +678,6 @@ function LiveReviewScopePicker({
   );
 
   const syncControlsToLoaded = useCallback(() => {
-    setMode(appliedScopeMode(target, presentation));
     const parsed = presentation ? null : parseCompareTarget(target);
     if (presentation) {
       setBaseRef(presentation.baseRef);
@@ -693,8 +725,9 @@ function LiveReviewScopePicker({
     draftTargetRef.current = null;
     draftAgainstRequestRef.current = null;
     lastIssuedTargetRef.current = null;
+    onCancelDeferredTarget();
     syncControlsToLoaded();
-  }, [reviewRequest?.status, syncControlsToLoaded]);
+  }, [onCancelDeferredTarget, reviewRequest?.status, syncControlsToLoaded]);
 
   useEffect(() => {
     if (
@@ -709,49 +742,34 @@ function LiveReviewScopePicker({
       syncControlsToLoaded();
       return;
     }
-    // Mounted/synchronized controls describe the loaded review; only an
-    // explicit picker selection creates a draft that may navigate.
-    if (!draftTargetRef.current) return;
+    if (
+      draftTargetRef.current &&
+      reviewRequest === null &&
+      target === draftTargetRef.current
+    ) {
+      draftTargetRef.current = null;
+      draftAgainstRequestRef.current = null;
+      syncControlsToLoaded();
+    }
+  }, [reviewRequest, syncControlsToLoaded, target]);
+  useEffect(() => () => onCancelDeferredTarget(), [onCancelDeferredTarget]);
 
-    let nextTarget: string;
-    let nextPresentation: ReviewTargetPresentation | undefined;
-    if (mode === "branch") {
-      if (!branchRef) return;
-      nextTarget = branchRef;
-      const supersedesPending =
-        draftTargetRef.current === nextTarget &&
-        reviewRequest?.status === "loading" &&
-        reviewRequest.selection.target !== nextTarget;
-      if (target === nextTarget && !supersedesPending) {
-        draftTargetRef.current = null;
-        draftAgainstRequestRef.current = null;
-        return;
-      }
-    } else if (mode === "compare") {
-      if (!baseRef || !compareRef) return;
-      nextTarget = compareTargetFor(baseRef, compareRef, baseIsRepoStart, target);
-      nextPresentation = {
-        kind: "compare",
-        baseRef,
-        baseLabel,
-        ...(baseIsRepoStart ? { baseIsRepoStart: true } : {}),
-        compareRef,
-        compareLabel,
-      };
-      const supersedesPending =
-        draftTargetRef.current === nextTarget &&
-        reviewRequest?.status === "loading" &&
-        reviewRequest.selection.target !== nextTarget;
-      if (
-        target === nextTarget &&
-        presentationsMatch(presentation, nextPresentation) &&
-        !supersedesPending
-      ) {
-        draftTargetRef.current = null;
-        draftAgainstRequestRef.current = null;
-        return;
-      }
-    } else {
+  const queueDraftTarget = (
+    nextTarget: string,
+    nextPresentation?: ReviewTargetPresentation,
+  ) => {
+    draftTargetRef.current = nextTarget;
+    draftAgainstRequestRef.current = reviewRequest;
+    const supersedesPending =
+      reviewRequest?.status === "loading" &&
+      reviewRequest.selection.target !== nextTarget;
+    const matchesLoadedTarget =
+      target === nextTarget &&
+      (!nextPresentation || presentationsMatch(presentation, nextPresentation));
+    if (matchesLoadedTarget && !supersedesPending) {
+      draftTargetRef.current = null;
+      draftAgainstRequestRef.current = null;
+      onCancelDeferredTarget();
       return;
     }
     if (
@@ -759,27 +777,14 @@ function LiveReviewScopePicker({
       reviewRequest?.status === "loading" &&
       reviewRequest.selection.target === nextTarget
     ) {
+      onCancelDeferredTarget();
       return;
     }
-    const timer = window.setTimeout(() => {
+    onDeferTarget(() => {
       lastIssuedTargetRef.current = nextTarget;
       onTarget(nextTarget, nextPresentation);
-    }, LIVE_SELECTION_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [
-    baseIsRepoStart,
-    baseLabel,
-    baseRef,
-    branchRef,
-    compareLabel,
-    compareRef,
-    mode,
-    onTarget,
-    presentation,
-    reviewRequest,
-    syncControlsToLoaded,
-    target,
-  ]);
+    });
+  };
 
   const rememberOption = (option: RefSearchOption) => {
     optionCacheRef.current.set(option.value, option);
@@ -841,9 +846,7 @@ function LiveReviewScopePicker({
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
               rememberOption(option);
-              draftTargetRef.current = option.value;
-              draftAgainstRequestRef.current = reviewRequest;
-              setMode("branch");
+              queueDraftTarget(option.value);
               setBranchRef(option.value);
               setBranchLabel(option.label);
             }}
@@ -875,14 +878,20 @@ function LiveReviewScopePicker({
             onSelect={(option) => {
               rememberOption(option);
               const nextIsRepoStart = option.value === repoStartOption?.value;
-              draftTargetRef.current = compareTargetFor(
+              const nextTarget = compareTargetFor(
                 option.value,
                 compareRef,
                 nextIsRepoStart,
                 target,
               );
-              draftAgainstRequestRef.current = reviewRequest;
-              setMode("compare");
+              queueDraftTarget(nextTarget, {
+                kind: "compare",
+                baseRef: option.value,
+                baseLabel: option.label,
+                ...(nextIsRepoStart ? { baseIsRepoStart: true } : {}),
+                compareRef,
+                compareLabel,
+              });
               setBaseRef(option.value);
               setBaseLabel(option.label);
               setBaseIsRepoStart(nextIsRepoStart);
@@ -904,14 +913,20 @@ function LiveReviewScopePicker({
             onOpenChange={onPickerOpenChange}
             onSelect={(option) => {
               rememberOption(option);
-              draftTargetRef.current = compareTargetFor(
+              const nextTarget = compareTargetFor(
                 baseRef,
                 option.value,
                 baseIsRepoStart,
                 target,
               );
-              draftAgainstRequestRef.current = reviewRequest;
-              setMode("compare");
+              queueDraftTarget(nextTarget, {
+                kind: "compare",
+                baseRef,
+                baseLabel,
+                ...(baseIsRepoStart ? { baseIsRepoStart: true } : {}),
+                compareRef: option.value,
+                compareLabel: option.label,
+              });
               setCompareRef(option.value);
               setCompareLabel(option.label);
             }}
@@ -1018,15 +1033,6 @@ function compareTargetFor(
   const preservesTwoDotTarget =
     parsed?.op === ".." && parsed.base === baseRef && parsed.compare === compareRef;
   return `${baseRef}${baseIsRepoStart || preservesTwoDotTarget ? ".." : "..."}${compareRef}`;
-}
-
-function appliedScopeMode(
-  target: string,
-  presentation: ReviewTargetPresentation | undefined,
-): ReviewScopeMode {
-  if (presentation || parseCompareTarget(target)) return "compare";
-  if (isBranchTarget(target)) return "branch";
-  return "none";
 }
 
 function presentationsMatch(

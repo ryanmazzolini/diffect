@@ -148,6 +148,9 @@ importers:
       vite:
         specifier: ^6.4.3
         version: 6.4.3(@types/node@22.19.19)
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@22.19.19)(vite@6.4.3(@types/node@22.19.19))
 
 packages:
 
