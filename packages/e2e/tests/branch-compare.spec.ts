@@ -899,27 +899,20 @@ test("restores empty repo labels and target-only comparisons", async ({ page }) 
   );
 });
 
-test("external local target changes cancel a pending live comparison", async ({ page }) => {
+test("immediate local selection cancels a deferred comparison", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator('.file[data-path="calc.js"] .file-path')).toBeVisible();
-  // Keep the live-comparison debounce pending regardless of CI load while the
-  // external Staged selection is issued.
   await page.clock.install();
 
   let releaseStaged: (() => void) | null = null;
   const stagedGate = new Promise<void>((resolve) => {
     releaseStaged = resolve;
   });
-  let stagedRequested = false;
-  let manualComparisonRequested = false;
+  let comparisonRequested = false;
   await page.route("**/repos/*/diff?**", async (route) => {
     const target = new URL(route.request().url()).searchParams.get("target") ?? "";
-    if (target === "staged") {
-      stagedRequested = true;
-      await stagedGate;
-    } else if (target.includes("...")) {
-      manualComparisonRequested = true;
-    }
+    if (target === "staged") await stagedGate;
+    if (target.includes("...")) comparisonRequested = true;
     await route.continue();
   });
 
@@ -931,21 +924,30 @@ test("external local target changes cancel a pending live comparison", async ({ 
   });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Review changes" });
-
   await dialog.getByRole("button", { name: /^Compare: HEAD,/ }).click();
   const search = page.getByPlaceholder("Find a branch, tag, or commit…");
   await search.fill("base");
-  await page.getByRole("option", { name: /^[0-9a-f]+, E2E,/ }).click();
-  await staged.evaluate((button: HTMLButtonElement) => button.click());
+  const comparison = page.getByRole("option", { name: /^[0-9a-f]+, E2E,/ });
+  await expect(comparison).toBeVisible();
 
-  await expect.poll(() => stagedRequested).toBe(true);
-  await expect(page.locator(".target-request-status")).toContainText("Loading Staged changes");
-  await page.clock.runFor(250);
-  expect(manualComparisonRequested).toBe(false);
-  releaseStaged?.();
+  await page.clock.pauseAt(Date.now() + 1_000);
+  await comparison.click();
+  await expect(dialog.getByRole("button", { name: /^Compare: [0-9a-f]{7},/ })).toBeVisible();
+  await page.clock.runFor(149);
+  expect(comparisonRequested).toBe(false);
+
+  try {
+    // Keyboard activation keeps the picker mounted and the staged request is
+    // held, isolating synchronous intent cancellation from unmount and loaded-state cleanup.
+    await staged.focus();
+    await staged.press("Enter");
+    await expect(page.locator(".target-request-status")).toContainText("Loading Staged changes");
+    await page.clock.runFor(1);
+    expect(comparisonRequested).toBe(false);
+  } finally {
+    releaseStaged?.();
+  }
 
   await expect(staged).toHaveAttribute("aria-pressed", "true");
   await expect(trigger).toHaveText("Staged changes▾");
-  await page.clock.runFor(200);
-  expect(manualComparisonRequested).toBe(false);
 });
