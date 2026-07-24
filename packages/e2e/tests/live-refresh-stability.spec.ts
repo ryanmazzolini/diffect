@@ -68,24 +68,77 @@ async function expectReadingAnchorStable(
     .toBeLessThanOrEqual(tolerance);
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  );
-});
+async function armSplitScrollDrift(
+  page: Page,
+  pixels: number,
+  options: { userIntent?: boolean; clampNextWrite?: boolean } = {},
+): Promise<Locator> {
+  const pane = page.locator(".diff-pane");
+  await pane.evaluate((element, options) => {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    if (!descriptor?.get || !descriptor.set) throw new Error("scrollTop descriptor unavailable");
+    const scrollRoot = element as HTMLElement;
+    let applied = false;
+    let restoredScrollRange = false;
+    const scrollContent = scrollRoot.firstElementChild as HTMLElement | null;
+    const originalContentHeight = scrollContent?.style.height ?? "";
+    const originalContentOverflow = scrollContent?.style.overflow ?? "";
+    Object.defineProperty(scrollRoot, "scrollTop", {
+      configurable: true,
+      get: () => descriptor.get?.call(scrollRoot),
+      set: (value: number) => {
+        const before = descriptor.get?.call(scrollRoot) as number;
+        descriptor.set?.call(scrollRoot, value);
+        if (applied) {
+          if (options.clampNextWrite && !restoredScrollRange && value > before) {
+            restoredScrollRange = true;
+            const appliedValue = descriptor.get?.call(scrollRoot) as number;
+            scrollRoot.dataset.testSplitScrollClamp = String(value - appliedValue);
+            if (scrollContent) {
+              scrollContent.style.height = originalContentHeight;
+              scrollContent.style.overflow = originalContentOverflow;
+            }
+          } else if (options.clampNextWrite && restoredScrollRange) {
+            scrollRoot.dataset.testSplitScrollRetry = String(value);
+            delete (scrollRoot as HTMLElement & { scrollTop?: number }).scrollTop;
+          }
+          return;
+        }
+        if (value < 1_000) return;
+        applied = true;
+        requestAnimationFrame(() => {
+          if (options.userIntent) {
+            scrollRoot.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -options.pixels }));
+          }
+          const shifted = (descriptor.get?.call(scrollRoot) as number) - options.pixels;
+          descriptor.set?.call(scrollRoot, shifted);
+          if (options.clampNextWrite) {
+            if (!scrollContent) throw new Error("split scroll content missing");
+            const maxScrollTop = scrollRoot.scrollHeight - scrollRoot.clientHeight;
+            const reduction = Math.max(0, maxScrollTop - shifted);
+            const contentHeight = scrollContent.getBoundingClientRect().height;
+            scrollContent.style.height = `${contentHeight - reduction}px`;
+            scrollContent.style.overflow = "hidden";
+          } else {
+            delete (scrollRoot as HTMLElement & { scrollTop?: number }).scrollTop;
+          }
+          scrollRoot.dataset.testSplitScrollDrift = String(descriptor.get?.call(scrollRoot));
+        });
+      },
+    });
+  }, { pixels, ...options });
+  return pane;
+}
 
-test("live refresh keeps the reading anchor stable with follow off", async ({ page }) => {
-  const { anchor, top } = await centerReadingAnchor(page);
-  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
-  await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
-  await expectReadingAnchorStable(anchor, top);
-});
+async function expectInjectedScrollPreserved(pane: Locator): Promise<void> {
+  await expect(pane).toHaveAttribute("data-test-split-scroll-drift", /\d+/);
+  await expect.poll(async () => pane.evaluate((element) => {
+    const injected = Number((element as HTMLElement).dataset.testSplitScrollDrift);
+    return Math.abs((element as HTMLElement).scrollTop - injected);
+  })).toBeLessThanOrEqual(1);
+}
 
-test("a user scroll during refresh overrides reading-anchor restoration", async ({ page }) => {
-  const { anchor } = await centerReadingAnchor(page);
-  const root = await fixtureRoot(page);
+async function holdAnimationFrames(page: Page): Promise<void> {
   await page.evaluate(() => {
     const nativeRequest = window.requestAnimationFrame.bind(window);
     const nativeCancel = window.cancelAnimationFrame.bind(window);
@@ -113,6 +166,66 @@ test("a user scroll during refresh overrides reading-anchor restoration", async 
       },
     };
   });
+}
+
+async function releaseAnimationFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const controlledWindow = window as typeof window & {
+      __diffectRafControl?: { release: () => void };
+    };
+    controlledWindow.__diffectRafControl?.release();
+  });
+}
+
+async function refreshCalcWithInjectedSplitDrift(
+  page: Page,
+  pixels: number,
+  options: { userIntent?: boolean; clampNextWrite?: boolean } = {},
+): Promise<Locator> {
+  const root = await fixtureRoot(page);
+  await holdAnimationFrames(page);
+  const contentRefresh = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().method() === "GET" &&
+      url.pathname.endsWith("/file/content") &&
+      url.searchParams.get("path") === "calc.js"
+    );
+  });
+  const calcPath = join(root, "calc.js");
+  const original = await readFile(calcPath, "utf8");
+  await writeFile(calcPath, `${GENERATED_PREFIX}\n${original}`);
+  await contentRefresh;
+  await expect(page.getByRole("textbox", { name: "calc.js new diff editor" })).toContainText("generated0");
+
+  // Arm only after the refresh has captured its reading anchor. The next
+  // scroll write is therefore the coarse restoration, not split setup or a
+  // preceding metadata update.
+  const pane = await armSplitScrollDrift(page, pixels, options);
+  await releaseAnimationFrames(page);
+  await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
+  return pane;
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Follow changes" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("live refresh keeps the reading anchor stable with follow off", async ({ page }) => {
+  const { anchor, top } = await centerReadingAnchor(page);
+  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
+  await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
+  await expectReadingAnchorStable(anchor, top);
+});
+
+test("a user scroll during refresh overrides reading-anchor restoration", async ({ page }) => {
+  const { anchor } = await centerReadingAnchor(page);
+  const root = await fixtureRoot(page);
+  await holdAnimationFrames(page);
 
   const contentRefresh = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -133,12 +246,36 @@ test("a user scroll during refresh overrides reading-anchor restoration", async 
     element.scrollTop = 0;
     return element.scrollTop;
   });
-  await page.evaluate(() => {
-    const controlledWindow = window as typeof window & {
-      __diffectRafControl?: { release: () => void };
-    };
-    controlledWindow.__diffectRafControl?.release();
+  await releaseAnimationFrames(page);
+  await page.waitForTimeout(100);
+
+  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(userScrollTop);
+  await expect(anchor).not.toBeInViewport();
+});
+
+test("scroll intent before coarse refresh measurement cancels restoration", async ({ page }) => {
+  const { anchor } = await centerReadingAnchor(page);
+  const root = await fixtureRoot(page);
+  await holdAnimationFrames(page);
+
+  const contentRefresh = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().method() === "GET" &&
+      url.pathname.endsWith("/file/content") &&
+      url.searchParams.get("path") === "calc.js"
+    );
   });
+  const calcPath = join(root, "calc.js");
+  const original = await readFile(calcPath, "utf8");
+  await writeFile(calcPath, `${GENERATED_PREFIX}\n${original}`);
+  await contentRefresh;
+  await expect(page.locator('.file[data-path="calc.js"] .cm-content')).toContainText("generated0");
+
+  const pane = page.locator(".diff-pane");
+  const userScrollTop = await pane.evaluate((element) => element.scrollTop);
+  await pane.dispatchEvent("wheel", { deltaY: 1 });
+  await releaseAnimationFrames(page);
   await page.waitForTimeout(100);
 
   await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(userScrollTop);
@@ -152,6 +289,36 @@ test("live refresh keeps the reading anchor stable in split view", async ({ page
   await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
   await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
   await expectReadingAnchorStable(anchor, top);
+});
+
+test("split refresh retries a clamped MergeView alignment correction", async ({ page }) => {
+  await page.getByRole("button", { name: "Options" }).click();
+  await page.getByRole("button", { name: "Split" }).click();
+  const { anchor, top } = await centerReadingAnchor(page);
+  const pane = await refreshCalcWithInjectedSplitDrift(page, 5, { clampNextWrite: true });
+
+  await expect(pane).toHaveAttribute("data-test-split-scroll-drift", /\d+/);
+  await expect(pane).toHaveAttribute("data-test-split-scroll-clamp", /^[1-9]\d*$/);
+  await expect(pane).toHaveAttribute("data-test-split-scroll-retry", /\d+/);
+  await expectReadingAnchorStable(anchor, top);
+});
+
+test("split refresh leaves a small intentional user scroll alone", async ({ page }) => {
+  await page.getByRole("button", { name: "Options" }).click();
+  await page.getByRole("button", { name: "Split" }).click();
+  await centerReadingAnchor(page);
+  const pane = await refreshCalcWithInjectedSplitDrift(page, 5, { userIntent: true });
+
+  await expectInjectedScrollPreserved(pane);
+});
+
+test("split refresh preserves larger post-capture scroll drift", async ({ page }) => {
+  await page.getByRole("button", { name: "Options" }).click();
+  await page.getByRole("button", { name: "Split" }).click();
+  await centerReadingAnchor(page);
+  const pane = await refreshCalcWithInjectedSplitDrift(page, 12);
+
+  await expectInjectedScrollPreserved(pane);
 });
 
 test("live refresh keeps the reading anchor stable when an earlier file changes", async ({ page }) => {
