@@ -305,6 +305,48 @@ describe("cmux provider", () => {
     });
   });
 
+  it("matches an exact session by transcript path when no ID is available", async () => {
+    const sessions = await fixture("cmux-sessions.json");
+    const tree = await fixture("cmux-tree.json");
+    const calls: string[][] = [];
+
+    const results = await discoverCmuxWorkspaces(
+      { id: "cmux", kind: "cmux", enabled: true, command: "cmux" },
+      {
+        agentSession: {
+          provider: "pi",
+          path: "/sessions/pi/session.jsonl",
+        },
+      },
+      async (_command, args) => {
+        calls.push([...args]);
+        return {
+          stdout: args.includes("sessions") ? sessions : tree,
+          stderr: "",
+        };
+      },
+    );
+
+    expect(calls).toEqual([
+      [
+        "--json",
+        "sessions",
+        "list",
+        "--agent",
+        "pi",
+        "--all",
+        "--limit",
+        "20",
+      ],
+      ["--json", "tree", "--all"],
+    ]);
+    expect(results.at(-1)).toMatchObject({
+      externalWorkspaceId: "00000000-0000-0000-0000-000000000001",
+      matchedSession: true,
+      status: "available",
+    });
+  });
+
   it("keeps multiple exact session workspaces ambiguous", async () => {
     const payload = JSON.parse(await fixture("cmux-sessions.json")) as {
       total_matches: number;

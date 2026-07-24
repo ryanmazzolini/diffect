@@ -151,7 +151,7 @@ export async function discoverCmuxWorkspaces(
   const diagnostics: WorkspaceProviderResult[] = [];
   const session = context.agentSession;
 
-  if (session?.id) {
+  if (session?.id || session?.path) {
     try {
       const snapshot = parseCmuxSessions(
         (
@@ -162,8 +162,7 @@ export async function discoverCmuxWorkspaces(
               "list",
               "--agent",
               session.provider,
-              "--session",
-              session.id,
+              ...(session.id ? ["--session", session.id] : []),
               "--all",
               "--limit",
               "20",
@@ -172,10 +171,15 @@ export async function discoverCmuxWorkspaces(
           )
         ).stdout,
       );
-      const sessions = snapshot.sessions.filter(
-        (candidate) =>
-          candidate.agent === session.provider && candidate.sessionId === session.id,
-      );
+      const sessions = snapshot.sessions.filter((candidate) => {
+        const matchesId = Boolean(
+          session.id && candidate.sessionId === session.id,
+        );
+        const matchesPath = Boolean(
+          session.path && candidate.transcriptPath === session.path,
+        );
+        return candidate.agent === session.provider && (matchesId || matchesPath);
+      });
 
       if (snapshot.totalMatches > snapshot.sessions.length) {
         diagnostics.push(
