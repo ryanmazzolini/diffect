@@ -1,6 +1,6 @@
 [package]
 name = "diffect-desktop"
-version = "0.2.1"
+version = "0.3.0"
 description = "Diffect desktop shell: a Tauri window over a private diffectd"
 license = "Apache-2.0"
 edition = "2021"
