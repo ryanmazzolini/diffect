@@ -72,7 +72,7 @@ export async function discoverHerdrWorkspaces(
   let current: HerdrPane;
   try {
     current = parseHerdrCurrentPane(
-      (await runHerdr(config, ["pane", "current", "--current"], run)).stdout,
+      (await runHerdr(config, ["pane", "current"], run)).stdout,
     );
   } catch (error) {
     return [...diagnostics, providerDiagnostic(config.id, error)];
