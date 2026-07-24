@@ -25,9 +25,7 @@ export async function scanSessionProjects(
   const dirents = await readdir(root, { withFileTypes: true }).catch(() => []);
   const projects = await Promise.all(
     dirents.map(async (dirent): Promise<SessionProject | null> => {
-      if (!dirent.isDirectory() || (kind === "pi" && /test/i.test(dirent.name))) {
-        return null;
-      }
+      if (!dirent.isDirectory()) return null;
       const projectDir = join(root, dirent.name);
       const newest = await newestSession(projectDir);
       if (!newest) return null;
