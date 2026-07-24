@@ -207,6 +207,29 @@ describe("workspace resolver", () => {
     expect(response.results.every((result) => result.providerId === "pi")).toBe(true);
   });
 
+  it("keeps Pi session projects whose directory names contain test", async () => {
+    const repo = await mkRepo(join(root, "test-app"));
+    const sessionsRoot = join(root, "pi-sessions");
+    await mkSession(join(sessionsRoot, "--home-me-test-app--"), repo, 1_000);
+
+    const response = await resolveWorkspace(
+      {},
+      settings([
+        {
+          id: "pi",
+          kind: "pi-session",
+          enabled: true,
+          sessionsPath: sessionsRoot,
+        },
+      ]),
+    );
+
+    expect(response.selected).toMatchObject({
+      workspacePath: await realpath(repo),
+      providerId: "pi",
+    });
+  });
+
   it("does not let newer stale projects hide an older valid session workspace", async () => {
     const repo = await mkRepo(join(root, "older-valid"));
     const sessionsRoot = join(root, "pi-sessions");

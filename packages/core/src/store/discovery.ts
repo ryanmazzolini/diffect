@@ -66,7 +66,12 @@ export async function recommendations(limit = 20): Promise<RecommendedWorkspace[
   const found = (
     await Promise.all(
       sources.map(async ({ root, kind, source }) => {
-        const projects = await scanSessionProjects(root, kind);
+        // Preserve the existing recommendation-only suppression of Pi test runs.
+        // Resolver providers must not apply this name heuristic to real projects.
+        const projects = (await scanSessionProjects(root, kind)).filter(
+          (project) =>
+            kind !== "pi" || !/test/i.test(basename(project.projectDir)),
+        );
         const recommendations = await Promise.all(
           projects.map(async (project): Promise<RecommendedWorkspace | null> => {
             if (!(await isGitRepo(project.cwd))) return null;
