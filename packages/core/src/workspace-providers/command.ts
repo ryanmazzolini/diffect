@@ -114,9 +114,16 @@ export const runProviderCommand: ProviderCommandRunner = (
     }
   });
 
-/** Remove native-provider context variables so settings, not parent env, select state. */
-export function providerCommandEnvironment(prefix: string): NodeJS.ProcessEnv {
+/** Remove native-provider context while allowing named provider-owned credentials. */
+export function providerCommandEnvironment(
+  prefix: string,
+  preservedKeys: readonly string[] = [],
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const preserved = new Set(preservedKeys);
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith(prefix)),
+    Object.entries(source).filter(
+      ([key]) => !key.startsWith(prefix) || preserved.has(key),
+    ),
   );
 }

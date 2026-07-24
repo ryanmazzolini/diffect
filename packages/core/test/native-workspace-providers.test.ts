@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ProviderCommandError,
+  providerCommandEnvironment,
   runProviderCommand,
   type ProviderCommandRunner,
 } from "../src/workspace-providers/command.js";
@@ -64,6 +65,23 @@ describe("native provider command runner", () => {
     controller.abort();
 
     await expect(pending).rejects.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("removes provider context while preserving named native credentials", () => {
+    const env = providerCommandEnvironment(
+      "CMUX_",
+      ["CMUX_SOCKET_PASSWORD"],
+      {
+        PATH: "/usr/bin",
+        CMUX_SOCKET_PATH: "/tmp/context.sock",
+        CMUX_SOCKET_PASSWORD: "provider-owned-secret",
+      },
+    );
+
+    expect(env).toEqual({
+      PATH: "/usr/bin",
+      CMUX_SOCKET_PASSWORD: "provider-owned-secret",
+    });
   });
 });
 
@@ -156,19 +174,24 @@ describe("Herdr provider", () => {
     ]);
   });
 
-  it("falls back to current pane paths and reports native failures", async () => {
+  it("falls back to focused pane paths and reports native failures", async () => {
     const current = await fixture("herdr-pane-current.json");
     const list = await fixture("herdr-pane-list.json");
-    const run: ProviderCommandRunner = async (_command, args) => ({
-      stdout: args.includes("current") ? current : list,
-      stderr: "",
-    });
+    const calls: string[][] = [];
+    const run: ProviderCommandRunner = async (_command, args) => {
+      calls.push([...args]);
+      return {
+        stdout: args.includes("current") ? current : list,
+        stderr: "",
+      };
+    };
 
     const results = await discoverHerdrWorkspaces(
       { id: "herdr", kind: "herdr", enabled: true, command: "herdr" },
       {},
       run,
     );
+    expect(calls[0]).toEqual(["pane", "current"]);
     expect(results.at(-1)).toMatchObject({
       externalWorkspaceId: "workspace-a",
       candidatePaths: [

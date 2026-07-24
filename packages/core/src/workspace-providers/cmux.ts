@@ -249,7 +249,9 @@ async function runCmux(
       "--json",
       ...args,
     ],
-    { env: providerCommandEnvironment("CMUX_") },
+    {
+      env: providerCommandEnvironment("CMUX_", ["CMUX_SOCKET_PASSWORD"]),
+    },
   );
 }
 
