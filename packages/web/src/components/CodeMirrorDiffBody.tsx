@@ -47,7 +47,9 @@ import {
   applyPreciseReadingAnchorStep,
   beginReadingAnchorRestoration,
   isCurrentReadingAnchorRestoration,
+  observeScrollIntent,
   type ReadingAnchorRestorationState,
+  type ScrollIntentState,
 } from "../readingAnchorRestoration.js";
 import type { Theme } from "../theme.js";
 import { CommentForm } from "./CommentForm.js";
@@ -111,10 +113,6 @@ interface ReadingAnchor {
   restorationGeneration: number;
 }
 
-interface ScrollIntentState {
-  epoch: number;
-}
-
 interface CmLineWidgetData {
   side: Side;
   line: number;
@@ -122,17 +120,7 @@ interface CmLineWidgetData {
   selection: SelectionComment | null;
 }
 
-const scrollIntentByRoot = new WeakMap<HTMLElement, ScrollIntentState>();
 const restorationStateByRoot = new WeakMap<HTMLElement, ReadingAnchorRestorationState>();
-const SCROLL_KEYS = new Set([
-  "ArrowDown",
-  "ArrowUp",
-  "End",
-  "Home",
-  "PageDown",
-  "PageUp",
-  " ",
-]);
 
 const setCmDecorations = StateEffect.define<DecorationSet>();
 const cmDecorations = StateField.define<DecorationSet>({
@@ -1130,23 +1118,6 @@ function captureReadingAnchor(contexts: ViewContext[]): ReadingAnchor | null {
     };
   }
   return null;
-}
-
-function observeScrollIntent(scrollRoot: HTMLElement): ScrollIntentState {
-  const existing = scrollIntentByRoot.get(scrollRoot);
-  if (existing) return existing;
-
-  const state: ScrollIntentState = { epoch: 0 };
-  const markIntent = () => {
-    state.epoch += 1;
-  };
-  scrollRoot.addEventListener("wheel", markIntent, { passive: true });
-  scrollRoot.addEventListener("touchstart", markIntent, { passive: true });
-  scrollRoot.addEventListener("keydown", (event) => {
-    if (SCROLL_KEYS.has(event.key)) markIntent();
-  });
-  scrollIntentByRoot.set(scrollRoot, state);
-  return state;
 }
 
 function userScrolledSinceCapture(anchor: ReadingAnchor): boolean {
