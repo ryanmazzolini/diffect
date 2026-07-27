@@ -153,34 +153,48 @@ test("a user scroll during refresh overrides reading-anchor restoration", async 
   await expect(anchor).not.toBeInViewport();
 });
 
-test("scroll intent before coarse refresh measurement cancels restoration", async ({ page }) => {
-  const { anchor } = await centerReadingAnchor(page);
-  const root = await fixtureRoot(page);
-  await holdAnimationFrames(page);
+for (const intent of ["wheel", "native scrollbar pointer"] as const) {
+  test(`${intent} intent before coarse refresh measurement cancels restoration`, async ({ page }) => {
+    const { anchor } = await centerReadingAnchor(page);
+    const root = await fixtureRoot(page);
+    await holdAnimationFrames(page);
 
-  const contentRefresh = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return (
-      response.request().method() === "GET" &&
-      url.pathname.endsWith("/file/content") &&
-      url.searchParams.get("path") === "calc.js"
-    );
+    const contentRefresh = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname.endsWith("/file/content") &&
+        url.searchParams.get("path") === "calc.js"
+      );
+    });
+    const calcPath = join(root, "calc.js");
+    const original = await readFile(calcPath, "utf8");
+    await writeFile(calcPath, `${GENERATED_PREFIX}\n${original}`);
+    await contentRefresh;
+    await expect(page.locator('.file[data-path="calc.js"] .cm-content')).toContainText("generated0");
+
+    const pane = page.locator(".diff-pane");
+    const userScrollTop = await pane.evaluate((element) => element.scrollTop);
+    if (intent === "wheel") {
+      await pane.dispatchEvent("wheel", { deltaY: 1 });
+    } else {
+      await pane.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true,
+          clientX: rect.right - 1,
+          clientY: rect.top + rect.height / 2,
+          pointerType: "mouse",
+        }));
+      });
+    }
+    await releaseAnimationFrames(page);
+    await page.waitForTimeout(100);
+
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(userScrollTop);
+    await expect(anchor).not.toBeInViewport();
   });
-  const calcPath = join(root, "calc.js");
-  const original = await readFile(calcPath, "utf8");
-  await writeFile(calcPath, `${GENERATED_PREFIX}\n${original}`);
-  await contentRefresh;
-  await expect(page.locator('.file[data-path="calc.js"] .cm-content')).toContainText("generated0");
-
-  const pane = page.locator(".diff-pane");
-  const userScrollTop = await pane.evaluate((element) => element.scrollTop);
-  await pane.dispatchEvent("wheel", { deltaY: 1 });
-  await releaseAnimationFrames(page);
-  await page.waitForTimeout(100);
-
-  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBe(userScrollTop);
-  await expect(anchor).not.toBeInViewport();
-});
+}
 
 test("live refresh keeps the reading anchor stable in split view", async ({ page }) => {
   await page.getByRole("button", { name: "Options" }).click();
