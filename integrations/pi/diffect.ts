@@ -1,7 +1,7 @@
-import { realpathSync } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -15,11 +15,19 @@ import {
   type FeedbackEvent,
 } from "./watch.js";
 import { findLocalFile, resolveTrustedCommand } from "./local-files.js";
+import {
+  buildPiWorkspaceResolutionRequest,
+  daemonWorkspaceArguments,
+  decideWorkspaceCandidate,
+  parseWorkspaceResolutionResponse,
+  settingsWithWorkspaceBinding,
+  type WorkspaceResolutionCandidate,
+  type WorkspaceResolutionResponse,
+} from "./workspace-resolution.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:7421";
 const DEFAULT_TARGET = "work";
 const MAX_OUTPUT = 50_000;
-const WORKSPACE_ENTRY = "diffect-workspace";
 const WATCH_ENTRY = "diffect-feedback-watch";
 const WATCH_STATUS = "diffect-watch";
 const FEEDBACK_BATCH_MS = 250;
@@ -29,9 +37,12 @@ type Command = { command: string; args: string[] };
 type RepoLocation = { repo: string; worktree: string | null };
 type ReviewMode = "feedback" | "proactive";
 type ReviewWorkspace = { workspaceRoot: string; anchorRoot: string | null };
-type WorkspaceCandidate = ReviewWorkspace & { dirty: boolean; score: number; sources: Set<string> };
-type WorkspaceResolveOptions = { forcePicker?: boolean; interactive?: boolean; save?: boolean };
-type EnsureDaemonOptions = { openApp?: boolean };
+type WorkspaceResolveOptions = {
+  forcePicker?: boolean;
+  interactive?: boolean;
+  persistSelection?: boolean;
+};
+type EnsureDaemonOptions = { openApp?: boolean; seedWorkspace?: string };
 type WatchConfig = {
   enabled: boolean;
   workspaceRoot: string;
@@ -49,6 +60,8 @@ type SessionLike = {
     getBranch?: () => unknown[];
     getEntries?: () => unknown[];
     getSessionId?: () => string;
+    getSessionFile?: () => string | undefined;
+    getCwd?: () => string;
   };
 };
 type CwdContext = SessionLike & {
@@ -134,7 +147,10 @@ export default function diffectExtension(pi: ExtensionAPI) {
 
     try {
       const connectDaemon = async (signal: AbortSignal) => {
-        const url = await ensureDaemon(pi, config.workspaceRoot, signal, { openApp: false });
+        const url = await ensureDaemon(pi, config.workspaceRoot, signal, {
+          openApp: false,
+          seedWorkspace: config.workspaceRoot,
+        });
         await registerWorkspace(url, config.workspaceRoot, signal);
         return url;
       };
@@ -217,7 +233,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
           ctx,
           parsed.workspace,
           undefined,
-          { interactive: true, save: true },
+          { interactive: true, persistSelection: true },
         );
         const config: WatchConfig = {
           enabled: true,
@@ -277,7 +293,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
         const parsed = parseCommandArgs(args, ctx.cwd);
         const { url, workspaceRoot } = await diffectUrl(pi, ctx, parsed.target, parsed.workspace, undefined, {
           interactive: true,
-          save: true,
+          persistSelection: true,
         });
         await openUrl(pi, workspaceRoot, url);
         ctx.ui.notify(`Diffect: ${url}`, "info");
@@ -294,7 +310,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
         const workspace = await resolveReviewWorkspace(pi, ctx, undefined, undefined, {
           forcePicker: true,
           interactive: true,
-          save: true,
+          persistSelection: true,
         });
         ctx.ui.notify(`Diffect workspace: ${shortPath(workspace.workspaceRoot)}`, "info");
       } catch (err) {
@@ -310,7 +326,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
         const parsed = parseReviewCommandArgs(args, ctx.cwd);
         const { workspaceRoot } = await resolveReviewWorkspace(pi, ctx, parsed.workspace, undefined, {
           interactive: true,
-          save: true,
+          persistSelection: true,
         });
         pi.sendUserMessage(diffectReviewPrompt(parsed.mode, workspaceRoot));
       } catch (err) {
@@ -507,7 +523,9 @@ async function diffectUrl(
     signal,
     options,
   );
-  const baseUrl = await ensureDaemon(pi, workspaceRoot, signal);
+  const baseUrl = await ensureDaemon(pi, workspaceRoot, signal, {
+    seedWorkspace: workspaceRoot,
+  });
   await registerWorkspace(baseUrl, workspaceRoot, signal);
   const loc = await locateRepo(baseUrl, workspaceRoot, anchorRoot, signal);
   const q = new URLSearchParams({ workspace: workspaceRoot, repo: loc.repo, target });
@@ -641,167 +659,106 @@ async function resolveReviewWorkspace(
   signal?: AbortSignal,
   options: WorkspaceResolveOptions = {},
 ): Promise<ReviewWorkspace> {
-  if (explicitWorkspace) {
-    const workspace = await workspaceFromPath(pi, resolveUserPath(explicitWorkspace, ctx.cwd), signal);
-    if (!workspace) throw new Error(`No git repo or Diffect workspace found at ${explicitWorkspace}.`);
-    if (options.save) saveWorkspace(pi, workspace);
-    return workspace;
+  const baseUrl = await ensureDaemon(pi, ctx.cwd, signal, { openApp: false });
+  const sessionManager = ctx.sessionManager;
+  const request = buildPiWorkspaceResolutionRequest(
+    {
+      cwd: ctx.cwd,
+      sessionId: sessionManager?.getSessionId?.(),
+      sessionFile: sessionManager?.getSessionFile?.(),
+      sessionCwd: sessionManager?.getCwd?.(),
+    },
+    explicitWorkspace
+      ? resolveUserPath(explicitWorkspace, ctx.cwd)
+      : undefined,
+  );
+  const response = await requestWorkspaceResolution(baseUrl, request, signal);
+  let candidate = decideWorkspaceCandidate(response, {
+    forcePicker: options.forcePicker,
+    interactive: options.interactive,
+  });
+  const selectedInteractively = candidate === null;
+  if (!candidate) candidate = await pickWorkspace(ctx, response.candidates);
+
+  if (selectedInteractively && options.persistSelection) {
+    await persistWorkspaceBinding(baseUrl, candidate, signal);
   }
-
-  const saved = options.forcePicker ? null : await savedWorkspace(pi, ctx, signal);
-  if (saved) return saved;
-
-  const candidates = await workspaceCandidates(pi, ctx, signal);
-  if (candidates.length === 0) throw new Error(`No git repo or Diffect workspace found from this session or ${ctx.cwd}.`);
-
-  const workspace = options.interactive && (options.forcePicker || candidates.length > 1)
-    ? await pickWorkspace(ctx, candidates)
-    : candidates[0]!;
-  if (options.save) saveWorkspace(pi, workspace);
-  return workspace;
+  return {
+    workspaceRoot: candidate.workspacePath,
+    anchorRoot: candidate.anchorPath,
+  };
 }
 
-async function workspaceCandidates(pi: ExtensionAPI, ctx: CwdContext, signal?: AbortSignal): Promise<WorkspaceCandidate[]> {
-  const byRoot = new Map<string, WorkspaceCandidate>();
-  const saved = latestSavedWorkspace(ctx);
-  const paths = sessionPathCandidates(ctx).map((path, index) => ({ path, source: "session", score: 1000 - index }));
-  if (saved) paths.push({ path: saved.anchorRoot ?? saved.path, source: "saved", score: 900 });
-  paths.push({ path: ctx.cwd, source: "current directory", score: 0 });
-
-  for (const candidate of paths) {
-    const workspace = await workspaceFromPath(pi, resolveUserPath(candidate.path, ctx.cwd), signal);
-    if (!workspace) continue;
-
-    const key = real(workspace.workspaceRoot);
-    const dirty = await workspaceDirty(pi, workspace, signal);
-    const score = candidate.score + (dirty ? 200 : 0);
-    const existing = byRoot.get(key);
-    if (existing) {
-      existing.dirty ||= dirty;
-      existing.sources.add(candidate.source);
-      if (score > existing.score) {
-        existing.score = score;
-        existing.anchorRoot = workspace.anchorRoot;
-      }
-    } else {
-      byRoot.set(key, { ...workspace, dirty, score, sources: new Set([candidate.source]) });
+async function requestWorkspaceResolution(
+  baseUrl: string,
+  request: ReturnType<typeof buildPiWorkspaceResolutionRequest>,
+  signal?: AbortSignal,
+): Promise<WorkspaceResolutionResponse> {
+  const response = await fetch(`${baseUrl}/workspace-resolution`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+    signal,
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(
+        "diffectd does not support workspace resolution; restart or update Diffect",
+      );
     }
+    throw new Error(await responseError(response));
   }
-
-  return [...byRoot.values()].sort((a, b) => b.score - a.score || a.workspaceRoot.localeCompare(b.workspaceRoot));
+  return parseWorkspaceResolutionResponse(await response.json());
 }
 
-async function savedWorkspace(pi: ExtensionAPI, ctx: CwdContext, signal?: AbortSignal): Promise<ReviewWorkspace | null> {
-  const saved = latestSavedWorkspace(ctx);
-  if (!saved) return null;
-  const workspace = (await workspaceFromPath(pi, saved.anchorRoot ?? saved.path, signal))
-    ?? (await workspaceFromPath(pi, saved.path, signal));
-  return workspace && real(workspace.workspaceRoot) === real(saved.path) ? workspace : null;
+async function persistWorkspaceBinding(
+  baseUrl: string,
+  candidate: WorkspaceResolutionCandidate,
+  signal?: AbortSignal,
+): Promise<void> {
+  const current = await fetch(`${baseUrl}/settings`, { signal });
+  if (!current.ok) throw new Error(await responseError(current));
+  const update = settingsWithWorkspaceBinding(await current.json(), candidate);
+  if (!update?.changed) return;
+
+  const replacement = await fetch(`${baseUrl}/settings`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(update.document),
+    signal,
+  });
+  if (!replacement.ok) throw new Error(await responseError(replacement));
 }
 
-function latestSavedWorkspace(ctx: SessionLike): { path: string; anchorRoot: string | null } | null {
-  for (const entry of safeSessionEntries(ctx).slice().reverse()) {
-    if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== WORKSPACE_ENTRY || !isRecord(entry.data)) continue;
-    if (typeof entry.data.path === "string") {
-      return {
-        path: entry.data.path,
-        anchorRoot: typeof entry.data.anchorRoot === "string" ? entry.data.anchorRoot : null,
-      };
-    }
+async function pickWorkspace(
+  ctx: CwdContext,
+  candidates: WorkspaceResolutionCandidate[],
+): Promise<WorkspaceResolutionCandidate> {
+  if (!ctx.ui?.select) {
+    throw new Error(
+      "Multiple Diffect workspaces found. Run /diffect-space to choose one.",
+    );
   }
-  return null;
-}
-
-function saveWorkspace(pi: ExtensionAPI, workspace: ReviewWorkspace) {
-  pi.appendEntry(WORKSPACE_ENTRY, { path: workspace.workspaceRoot, anchorRoot: workspace.anchorRoot });
-}
-
-async function pickWorkspace(ctx: CwdContext, candidates: WorkspaceCandidate[]): Promise<ReviewWorkspace> {
-  if (!ctx.ui?.select) throw new Error("Multiple Diffect workspaces found. Run /diffect-space to choose one.");
-  const choices = candidates.slice(0, MAX_WORKSPACE_CHOICES).map(formatWorkspaceChoice);
+  const choices = candidates
+    .slice(0, MAX_WORKSPACE_CHOICES)
+    .map(formatWorkspaceChoice);
   const selected = await ctx.ui.select("Choose Diffect workspace", choices);
   const index = selected ? choices.indexOf(selected) : -1;
   if (index < 0) throw new Error("Diffect workspace selection cancelled.");
   return candidates[index]!;
 }
 
-function formatWorkspaceChoice(candidate: WorkspaceCandidate, index: number): string {
-  const anchor = candidate.anchorRoot && real(candidate.anchorRoot) !== real(candidate.workspaceRoot)
-    ? ` · ${basename(candidate.anchorRoot)}`
+function formatWorkspaceChoice(
+  candidate: WorkspaceResolutionCandidate,
+  index: number,
+): string {
+  const anchor = candidate.anchorPath &&
+      real(candidate.anchorPath) !== real(candidate.workspacePath)
+    ? ` · ${basename(candidate.anchorPath)}`
     : "";
-  const dirty = candidate.dirty ? " · dirty" : "";
-  return `${index + 1}. ${shortPath(candidate.workspaceRoot)}${anchor}${dirty} · ${[...candidate.sources].join(", ")}`;
-}
-
-async function workspaceDirty(pi: ExtensionAPI, workspace: ReviewWorkspace, signal?: AbortSignal): Promise<boolean> {
-  const dir = workspace.anchorRoot ?? (await firstWorkingTree(workspace.workspaceRoot));
-  if (!dir) return false;
-  const r = await pi.exec("git", ["status", "--porcelain"], { cwd: dir, signal, timeout: 5_000 });
-  return r.code === 0 && r.stdout.trim().length > 0;
-}
-
-async function workspaceFromPath(
-  pi: ExtensionAPI,
-  path: string,
-  signal?: AbortSignal,
-): Promise<ReviewWorkspace | null> {
-  const dir = await existingDirectory(path);
-  if (!dir) return null;
-
-  const repoRoot = await gitTopLevel(pi, dir, signal);
-  if (repoRoot) {
-    const parent = dirname(repoRoot);
-    // ticket-worktree layout: .../worktrees/<ticket>/<repo>
-    if (basename(dirname(parent)) === "worktrees" && (await firstWorkingTree(parent))) {
-      return { workspaceRoot: parent, anchorRoot: repoRoot };
-    }
-    return { workspaceRoot: repoRoot, anchorRoot: repoRoot };
-  }
-
-  return (await firstWorkingTree(dir)) ? { workspaceRoot: dir, anchorRoot: null } : null;
-}
-
-async function existingDirectory(path: string): Promise<string | null> {
-  const info = await stat(path).catch(() => null);
-  if (!info) return null;
-  return info.isDirectory() ? path : dirname(path);
-}
-
-async function gitTopLevel(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<string | null> {
-  const r = await pi.exec("git", ["rev-parse", "--show-toplevel"], {
-    cwd,
-    signal,
-    timeout: 5_000,
-  });
-  return r.code === 0 && r.stdout.trim() ? resolve(r.stdout.trim()) : null;
-}
-
-async function firstWorkingTree(root: string): Promise<string | null> {
-  async function walk(dir: string, depth: number): Promise<string | null> {
-    if (depth > 2) return null;
-    if (await isWorkingTree(dir)) return resolve(dir);
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name === "node_modules" || e.name === ".git" || e.name === ".reviews") continue;
-      const found = await walk(join(dir, e.name), depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  return walk(root, 0);
-}
-
-async function isWorkingTree(dir: string): Promise<boolean> {
-  return Boolean(await stat(join(dir, ".git")).catch(() => null));
-}
-
-function sessionPathCandidates(ctx: SessionLike): string[] {
-  const paths: string[] = [];
-  for (const entry of safeSessionEntries(ctx).slice(-80).reverse()) {
-    paths.push(...extractPaths(JSON.stringify(entry)));
-  }
-  return [...new Set(paths)];
+  const provider = candidate.providerId ? ` · ${candidate.providerId}` : "";
+  const matched = candidate.matchedSession ? " · exact session" : "";
+  return `${index + 1}. ${shortPath(candidate.workspacePath)}${anchor}${provider}${matched}`;
 }
 
 function safeSessionEntries(ctx: SessionLike): unknown[] {
@@ -810,12 +767,6 @@ function safeSessionEntries(ctx: SessionLike): unknown[] {
   } catch {
     return [];
   }
-}
-
-function extractPaths(text: string): string[] {
-  return (text.match(/(?:~\/|\/)[^\s"'`<>),;]+/g) ?? [])
-    .map((p) => p.replace(/[.!?:}\]]+$/, ""))
-    .filter(Boolean);
 }
 
 function resolveUserPath(path: string, cwd: string): string {
@@ -834,7 +785,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function ensureDaemon(
   pi: ExtensionAPI,
-  workspaceRoot: string,
+  cwd: string,
   signal?: AbortSignal,
   options: EnsureDaemonOptions = {},
 ): Promise<string> {
@@ -847,7 +798,11 @@ async function ensureDaemon(
   const marked = await liveMarkedDaemon(signal);
   if (marked) return marked;
 
-  if (options.openApp !== false && (await openDiffectApp(pi, workspaceRoot, undefined, signal))) {
+  if (
+    options.openApp !== false &&
+    options.seedWorkspace &&
+    (await openDiffectApp(pi, options.seedWorkspace, undefined, signal))
+  ) {
     for (let i = 0; i < 80; i++) {
       await sleep(100, signal);
       const url = await liveMarkedDaemon(signal);
@@ -857,12 +812,24 @@ async function ensureDaemon(
 
   if (await isDiffectd(DEFAULT_BASE_URL, signal)) return DEFAULT_BASE_URL;
 
-  const daemon = await findDaemon(pi, workspaceRoot, signal);
-  spawn(daemon.command, [...daemon.args, "--workspace", workspaceRoot, "--host", "127.0.0.1", "--port", "0"], {
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
-  }).unref();
+  const daemon = await findDaemon(pi, cwd, signal);
+  spawn(
+    daemon.command,
+    [
+      ...daemon.args,
+      ...daemonWorkspaceArguments(options.seedWorkspace),
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "0",
+    ],
+    {
+      cwd,
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    },
+  ).unref();
 
   for (let i = 0; i < 40; i++) {
     await sleep(100, signal);

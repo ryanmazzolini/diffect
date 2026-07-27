@@ -20,14 +20,19 @@ port), otherwise starts one, registers the workspace, and opens Diffect at:
 /?repo=<repo>&worktree=<worktree>&target=work
 ```
 
-Workspace choice is session-scoped. The first `/diffect` checks saved session
-state, recent absolute paths in the pi session, ticket-worktree spaces shaped
-like `.../worktrees/<ticket>/<repo>`, and finally the current directory. If more
-than one workspace fits, it shows a picker and saves the choice for the session.
+Workspace resolution is daemon-owned. Pi sends its native session ID, session
+file, session cwd, and current cwd to `POST /workspace-resolution`. Diffect then
+checks enabled sources in settings order, prefers saved external-workspace
+bindings and exact agent-session matches, validates every candidate through the
+same workspace discovery path, and falls through when a provider is unavailable.
+An explicit `--workspace` path remains the highest-priority override.
 
-Use `/diffect-space` to change the saved workspace. Use `/diffect staged`,
-`/diffect unstaged`, or `/diffect main..feature` to open a specific review
-target.
+When equally ranked candidates remain, interactive commands show a picker.
+`/diffect-space` forces that ambiguity picker, and a user's external-workspace
+choice is saved as a durable Diffect settings binding rather than a Pi session
+entry. Existing `diffect-workspace` session entries are not migrated or deleted,
+but new entries are no longer written. Use `/diffect staged`, `/diffect
+unstaged`, or `/diffect main..feature` to open a specific review target.
 
 Use `/diffect-review` to ask the agent to read open Diffect feedback for the
 inferred workspace. Use `/diffect-review proactive` to ask it to inspect changes
@@ -43,8 +48,9 @@ Connect the current Pi session after choosing the workspace:
 
 The first connection is explicit. It reuses or starts `diffectd` without opening
 another application window, then reconnects automatically when this Pi session
-reloads, resumes, or forks. Pi's selected workspace is authoritative; Diffect
-does not choose another terminal or agent session.
+reloads, resumes, or forks. The daemon resolver's validated workspace is
+authoritative; terminal focus alone does not override an exact session match or
+saved binding.
 
 By default, only new user-authored threads and replies trigger the agent. Existing
 feedback becomes the connection baseline and does not trigger a turn. Events are
