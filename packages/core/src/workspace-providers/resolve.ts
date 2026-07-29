@@ -39,7 +39,12 @@ export function parseWorkspaceResolutionRequest(
   const issues: SettingsValidationIssue[] = [];
   const raw = objectValue(value, "$", issues);
   if (!raw) throw new WorkspaceResolutionError(issues);
-  unknownKeys(raw, ["explicitWorkspace", "cwd", "agentSession"], "", issues);
+  unknownKeys(
+    raw,
+    ["explicitWorkspace", "cwd", "agentSession", "selectionMode"],
+    "",
+    issues,
+  );
 
   const explicitWorkspace = optionalAbsolutePath(
     raw.explicitWorkspace,
@@ -47,6 +52,11 @@ export function parseWorkspaceResolutionRequest(
     issues,
   );
   const cwd = optionalAbsolutePath(raw.cwd, "cwd", issues);
+  const selectionMode = optionalSelectionMode(
+    raw.selectionMode,
+    "selectionMode",
+    issues,
+  );
   const sessionRaw = raw.agentSession === undefined
     ? undefined
     : objectValue(raw.agentSession, "agentSession", issues);
@@ -80,6 +90,7 @@ export function parseWorkspaceResolutionRequest(
     ...(typeof explicitWorkspace === "string" ? { explicitWorkspace } : {}),
     ...(typeof cwd === "string" ? { cwd } : {}),
     ...(agentSession === undefined ? {} : { agentSession }),
+    ...(selectionMode === undefined ? {} : { selectionMode }),
   };
 }
 
@@ -112,6 +123,8 @@ export async function resolveWorkspace(
     ...(request.agentSession === undefined ? {} : { agentSession: request.agentSession }),
   };
   const results: WorkspaceProviderResult[] = [];
+  const choosing = request.selectionMode === "choose";
+  const bindings = choosing ? [] : settings.workspaceResolution.bindings;
 
   for (const provider of settings.workspaceResolution.providers) {
     if (!provider.enabled) continue;
@@ -128,10 +141,7 @@ export async function resolveWorkspace(
     );
     const ranked: RankedCandidate[] = [];
     for (const result of observed) {
-      const resolved = await candidatesForResult(
-        result,
-        settings.workspaceResolution.bindings,
-      );
+      const resolved = await candidatesForResult(result, bindings);
       results.push(resolved.result);
       ranked.push(...resolved.candidates);
     }
@@ -145,7 +155,7 @@ export async function resolveWorkspace(
       .slice(0, MAX_RESOLUTION_CANDIDATES)
       .map((item) => item.candidate);
     return {
-      selected: candidates.length === 1 ? candidates[0]! : null,
+      selected: !choosing && candidates.length === 1 ? candidates[0]! : null,
       candidates,
       results,
     };
@@ -383,6 +393,19 @@ function optionalAbsolutePath(
     return null;
   }
   return parsed;
+}
+
+function optionalSelectionMode(
+  value: unknown,
+  path: string,
+  issues: SettingsValidationIssue[],
+): WorkspaceResolutionRequest["selectionMode"] | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "automatic" && value !== "choose") {
+    issue(issues, path, "must be automatic or choose");
+    return undefined;
+  }
+  return value;
 }
 
 function optionalNonEmptyString(

@@ -11,7 +11,9 @@ import {
   parseSettings,
   readSettings,
   replaceSettings,
+  SettingsConflictError,
   SettingsReadError,
+  settingsRevision,
   SettingsValidationError,
 } from "../src/store/settings.js";
 
@@ -40,6 +42,88 @@ describe("settings store", () => {
     const settings = configuredSettings();
     expect(await replaceSettings(settings)).toEqual(settings);
     expect(await readSettings()).toEqual(settings);
+  });
+
+  it("rejects a stale conditional replacement without losing newer settings", async () => {
+    const original = await replaceSettings(configuredSettings());
+    const revision = settingsRevision(original);
+    const newer: DiffectSettings = {
+      ...original,
+      workspaceResolution: {
+        ...original.workspaceResolution,
+        providers: original.workspaceResolution.providers.map((provider) => ({
+          ...provider,
+          enabled: false,
+        })),
+      },
+    };
+    await replaceSettings(newer);
+
+    await expect(
+      replaceSettings(original, { ifRevision: revision }),
+    ).rejects.toBeInstanceOf(SettingsConflictError);
+    expect(await readSettings()).toEqual(newer);
+  });
+
+  it("serializes concurrent replacements against the same revision", async () => {
+    const original = await replaceSettings(configuredSettings());
+    const revision = settingsRevision(original);
+    const first: DiffectSettings = {
+      ...original,
+      workspaceResolution: {
+        ...original.workspaceResolution,
+        bindings: [],
+      },
+    };
+    const second: DiffectSettings = {
+      ...original,
+      workspaceResolution: {
+        ...original.workspaceResolution,
+        providers: original.workspaceResolution.providers.map((provider) => ({
+          ...provider,
+          enabled: false,
+        })),
+      },
+    };
+
+    const results = await Promise.allSettled([
+      replaceSettings(first, { ifRevision: revision }),
+      replaceSettings(second, { ifRevision: revision }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.any(SettingsConflictError),
+    });
+  });
+
+  it("rechecks the revision after waiting for another process's lock", async () => {
+    const original = await replaceSettings(configuredSettings());
+    const revision = settingsRevision(original);
+    const newer: DiffectSettings = {
+      ...original,
+      workspaceResolution: {
+        ...original.workspaceResolution,
+        bindings: [],
+      },
+    };
+    const lock = `${settingsPath()}.lock`;
+    await mkdir(lock);
+    await writeFile(
+      join(lock, "owner.json"),
+      JSON.stringify({ pid: process.pid, token: "external-writer" }),
+      "utf8",
+    );
+    const pending = replaceSettings(original, { ifRevision: revision });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    try {
+      await writeFile(settingsPath(), `${JSON.stringify(newer)}\n`, "utf8");
+    } finally {
+      await rm(lock, { recursive: true, force: true });
+    }
+
+    await expect(pending).rejects.toBeInstanceOf(SettingsConflictError);
+    expect(await readSettings()).toEqual(newer);
   });
 
   it("rejects invalid fields without replacing the last good document", async () => {
@@ -143,16 +227,59 @@ describe("settings routes", () => {
     try {
       const initial = await fetch(`${base}/settings`);
       expect(initial.status).toBe(200);
+      const initialEtag = initial.headers.get("etag");
+      expect(initialEtag).toMatch(/^"[a-f0-9]{64}"$/);
       expect(await initial.json()).toEqual(defaultSettings());
 
       const settings = configuredSettings();
       const saved = await fetch(`${base}/settings`, {
         method: "PUT",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "if-match": initialEtag!,
+        },
         body: JSON.stringify(settings),
       });
       expect(saved.status).toBe(200);
+      expect(saved.headers.get("etag")).toMatch(/^"[a-f0-9]{64}"$/);
+      expect(saved.headers.get("etag")).not.toBe(initialEtag);
       expect(await saved.json()).toEqual(settings);
+      expect(await readSettings()).toEqual(settings);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("rejects stale conditional replacements and returns the current revision", async () => {
+    const { server, base } = await startServer("127.0.0.1");
+    try {
+      const initial = await fetch(`${base}/settings`);
+      const staleEtag = initial.headers.get("etag")!;
+      await initial.json();
+
+      const settings = configuredSettings();
+      const newer = await fetch(`${base}/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      const currentEtag = newer.headers.get("etag");
+      expect(newer.status).toBe(200);
+      await newer.json();
+
+      const stale = await fetch(`${base}/settings`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "if-match": staleEtag,
+        },
+        body: JSON.stringify(defaultSettings()),
+      });
+      expect(stale.status).toBe(412);
+      expect(stale.headers.get("etag")).toBe(currentEtag);
+      expect(await stale.json()).toEqual({
+        error: "settings changed; reload and retry",
+      });
       expect(await readSettings()).toEqual(settings);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

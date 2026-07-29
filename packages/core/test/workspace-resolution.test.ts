@@ -118,6 +118,50 @@ describe("workspace resolver", () => {
     expect(response.results).toHaveLength(1);
   });
 
+  it("bypasses a saved binding when the caller requests a manual choice", async () => {
+    const boundRepo = await mkRepo(join(root, "bound-repo"));
+    const observedRepo = await mkRepo(join(root, "observed-repo"));
+    const sessionDir = join(root, "pi-sessions", "project");
+    const sessionFile = await mkSession(sessionDir, observedRepo, 1_000);
+    const configured = settings(
+      [
+        {
+          id: "pi",
+          kind: "pi-session",
+          enabled: true,
+          sessionsPath: join(root, "pi-sessions"),
+        },
+      ],
+      [
+        {
+          providerId: "pi",
+          externalWorkspaceId: sessionDir,
+          diffectWorkspacePath: boundRepo,
+        },
+      ],
+    );
+    const context = {
+      agentSession: { provider: "pi" as const, path: sessionFile },
+    };
+
+    const automatic = await resolveWorkspace(context, configured);
+    expect(automatic.selected?.workspacePath).toBe(await realpath(boundRepo));
+
+    const choosing = await resolveWorkspace(
+      { ...context, selectionMode: "choose" },
+      configured,
+    );
+    expect(choosing.selected).toBeNull();
+    expect(choosing.candidates).toEqual([
+      expect.objectContaining({
+        workspacePath: await realpath(observedRepo),
+        providerId: "pi",
+        externalWorkspaceId: sessionDir,
+        matchedSession: true,
+      }),
+    ]);
+  });
+
   it("preserves a repo anchor when a binding selects an ordinary container", async () => {
     const workspace = join(root, "multi-repo-workspace");
     const repo = await mkRepo(join(workspace, "diffect"));
@@ -382,10 +426,14 @@ describe("workspace resolver", () => {
   });
 
   it("reports form-friendly request validation paths", () => {
+    expect(parseWorkspaceResolutionRequest({ selectionMode: "choose" })).toEqual({
+      selectionMode: "choose",
+    });
     expect(() =>
       parseWorkspaceResolutionRequest({
         cwd: "relative",
         agentSession: { provider: "other", path: "also-relative" },
+        selectionMode: "sometimes",
         extra: true,
       }),
     ).toThrowError(expect.objectContaining({
@@ -393,6 +441,7 @@ describe("workspace resolver", () => {
         expect.objectContaining({ path: "cwd" }),
         expect.objectContaining({ path: "agentSession.provider" }),
         expect.objectContaining({ path: "agentSession.path" }),
+        expect.objectContaining({ path: "selectionMode" }),
         expect.objectContaining({ path: "extra" }),
       ]),
     }));

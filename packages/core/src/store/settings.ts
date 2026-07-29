@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
+import { lock, type LockOptions } from "proper-lockfile";
 import {
   DIFFECT_SETTINGS_VERSION,
   type DiffectSettings,
@@ -19,7 +21,19 @@ const PROVIDER_KINDS: readonly WorkspaceProviderKind[] = [
   "cwd",
 ];
 
+const SETTINGS_LOCK_OPTIONS: LockOptions = {
+  realpath: false,
+  retries: {
+    retries: 50,
+    factor: 1,
+    minTimeout: 100,
+    maxTimeout: 100,
+    randomize: true,
+  },
+};
+
 let tmpCounter = 0;
+let replacementQueue: Promise<void> = Promise.resolve();
 
 export class SettingsValidationError extends Error {
   constructor(readonly issues: SettingsValidationIssue[]) {
@@ -32,6 +46,20 @@ export class SettingsReadError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "SettingsReadError";
+  }
+}
+
+export class SettingsConflictError extends Error {
+  constructor(readonly currentRevision: string) {
+    super("settings changed; reload and retry");
+    this.name = "SettingsConflictError";
+  }
+}
+
+export class SettingsBusyError extends Error {
+  constructor(message = "settings are busy; retry shortly") {
+    super(message);
+    this.name = "SettingsBusyError";
   }
 }
 
@@ -80,15 +108,90 @@ export async function readSettings(): Promise<DiffectSettings> {
   return parseSettings(parsed);
 }
 
+/** Stable content revision for conditional complete-document replacements. */
+export function settingsRevision(settings: DiffectSettings): string {
+  return createHash("sha256").update(JSON.stringify(settings), "utf8").digest("hex");
+}
+
 /** Validate and atomically replace the complete settings document. */
-export async function replaceSettings(value: unknown): Promise<DiffectSettings> {
+export async function replaceSettings(
+  value: unknown,
+  options: { ifRevision?: string } = {},
+): Promise<DiffectSettings> {
   const settings = parseSettings(value);
-  const file = settingsPath();
-  await mkdir(dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}-${++tmpCounter}`;
-  await writeFile(tmp, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  await rename(tmp, file);
-  return settings;
+  return serializeReplacement(async () => {
+    const file = settingsPath();
+    await mkdir(dirname(file), { recursive: true });
+    return withSettingsFileLock(file, async () => {
+      if (options.ifRevision !== undefined) {
+        const currentRevision = settingsRevision(await readSettings());
+        if (currentRevision !== options.ifRevision) {
+          throw new SettingsConflictError(currentRevision);
+        }
+      }
+
+      const tmp = `${file}.tmp-${process.pid}-${++tmpCounter}`;
+      await writeFile(tmp, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+      await rename(tmp, file);
+      return settings;
+    });
+  });
+}
+
+function serializeReplacement<T>(operation: () => Promise<T>): Promise<T> {
+  const pending = replacementQueue.then(operation, operation);
+  replacementQueue = pending.then(
+    () => undefined,
+    () => undefined,
+  );
+  return pending;
+}
+
+async function withSettingsFileLock<T>(
+  file: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let compromised: Error | undefined;
+  let release: () => Promise<void>;
+  try {
+    release = await lock(file, {
+      ...SETTINGS_LOCK_OPTIONS,
+      onCompromised(error) {
+        compromised ??= error;
+      },
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOCKED") {
+      throw new SettingsBusyError();
+    }
+    throw error;
+  }
+
+  let completed = false;
+  let result: T | undefined;
+  let operationError: unknown;
+  try {
+    result = await operation();
+    completed = true;
+  } catch (error) {
+    operationError = error;
+  }
+
+  let releaseError: unknown;
+  try {
+    await release();
+  } catch (error) {
+    releaseError = error;
+  }
+
+  if (!completed) throw operationError;
+  if (compromised) {
+    throw new SettingsBusyError("settings lock was compromised; retry shortly");
+  }
+  if (releaseError) {
+    throw new SettingsBusyError("settings were saved but the lock could not be released");
+  }
+  return result as T;
 }
 
 export function parseSettings(value: unknown): DiffectSettings {

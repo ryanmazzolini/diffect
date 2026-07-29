@@ -28,11 +28,13 @@ same workspace discovery path, and falls through when a provider is unavailable.
 An explicit `--workspace` path remains the highest-priority override.
 
 When equally ranked candidates remain, interactive commands show a picker.
-`/diffect-space` forces that ambiguity picker, and a user's external-workspace
-choice is saved as a durable Diffect settings binding rather than a Pi session
-entry. Existing `diffect-workspace` session entries are not migrated or deleted,
-but new entries are no longer written. Use `/diffect staged`, `/diffect
-unstaged`, or `/diffect main..feature` to open a specific review target.
+`/diffect-space` asks the daemon for a manual choice without applying the current
+binding, then forces the picker. Cancelling preserves the binding; choosing an
+external workspace replaces it with a durable Diffect settings binding rather
+than a Pi session entry. Existing `diffect-workspace` session entries are not
+migrated or deleted, but new entries are no longer written. Use `/diffect
+staged`, `/diffect unstaged`, or `/diffect main..feature` to open a specific
+review target.
 
 Use `/diffect-review` to ask the agent to read open Diffect feedback for the
 inferred workspace. Use `/diffect-review proactive` to ask it to inspect changes
