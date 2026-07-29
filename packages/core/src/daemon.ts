@@ -81,7 +81,10 @@ import { readUiState, updateUiState } from "./store/ui-state.js";
 import {
   readSettings,
   replaceSettings,
+  SettingsBusyError,
+  SettingsConflictError,
   SettingsReadError,
+  settingsRevision,
   SettingsValidationError,
 } from "./store/settings.js";
 import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
@@ -262,7 +265,9 @@ async function settingsRoutes(
 
   if (method === "GET") {
     try {
-      sendJson(res, 200, await readSettings());
+      const settings = await readSettings();
+      setSettingsEtag(res, settingsRevision(settings));
+      sendJson(res, 200, settings);
     } catch (error) {
       if (error instanceof SettingsValidationError) {
         sendJson(res, 500, { error: "settings file is invalid", issues: error.issues });
@@ -275,16 +280,34 @@ async function settingsRoutes(
     return true;
   }
 
+  const ifRevision = settingsIfMatchRevision(req.headers["if-match"]);
+  if (ifRevision === null) {
+    sendJson(res, 400, { error: "if-match must contain one Diffect settings ETag" });
+    return true;
+  }
   const body = await readJsonDocument(req);
   if (!body.ok) {
     sendJson(res, 400, { error: "a valid settings document is required" });
     return true;
   }
   try {
-    sendJson(res, 200, await replaceSettings(body.value));
+    const settings = await replaceSettings(body.value, {
+      ...(ifRevision === undefined ? {} : { ifRevision }),
+    });
+    setSettingsEtag(res, settingsRevision(settings));
+    sendJson(res, 200, settings);
   } catch (error) {
     if (error instanceof SettingsValidationError) {
       sendJson(res, 400, { error: error.message, issues: error.issues });
+      return true;
+    }
+    if (error instanceof SettingsConflictError) {
+      setSettingsEtag(res, error.currentRevision);
+      sendJson(res, 412, { error: error.message });
+      return true;
+    }
+    if (error instanceof SettingsBusyError) {
+      sendJson(res, 503, { error: error.message });
       return true;
     }
     throw error;
@@ -1389,6 +1412,19 @@ function isLoopbackOrigin(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function setSettingsEtag(res: ServerResponse, revision: string): void {
+  res.setHeader("etag", `"${revision}"`);
+}
+
+function settingsIfMatchRevision(
+  value: string | string[] | undefined,
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) return null;
+  const match = /^"([a-f0-9]{64})"$/.exec(value);
+  return match?.[1] ?? null;
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {

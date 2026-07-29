@@ -538,6 +538,8 @@ export interface WorkspaceResolutionRequest {
   explicitWorkspace?: string;
   cwd?: string;
   agentSession?: AgentSessionContext;
+  /** Ask the resolver for a manual choice without applying saved bindings. */
+  selectionMode?: "automatic" | "choose";
 }
 
 export type WorkspaceProviderStatus = "available" | "unavailable" | "error";

@@ -16,6 +16,7 @@ export interface WorkspaceResolutionRequest {
     path?: string;
     cwd: string;
   };
+  selectionMode?: "automatic" | "choose";
 }
 
 export interface WorkspaceResolutionCandidate {
@@ -53,9 +54,11 @@ export interface WorkspaceBindingUpdate {
 export function buildPiWorkspaceResolutionRequest(
   context: PiWorkspaceResolutionContext,
   explicitWorkspace?: string,
+  options: { selectionMode?: "automatic" | "choose" } = {},
 ): WorkspaceResolutionRequest {
   return {
     ...(explicitWorkspace ? { explicitWorkspace } : {}),
+    ...(options.selectionMode ? { selectionMode: options.selectionMode } : {}),
     cwd: context.cwd,
     agentSession: {
       provider: "pi",
@@ -172,10 +175,69 @@ export function settingsWithWorkspaceBinding(
   };
 }
 
+const MAX_BINDING_REPLACEMENT_ATTEMPTS = 3;
+
+type WorkspaceResolutionFetch = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export async function persistWorkspaceBinding(
+  baseUrl: string,
+  candidate: WorkspaceResolutionCandidate,
+  signal?: AbortSignal,
+  request: WorkspaceResolutionFetch = fetch,
+): Promise<void> {
+  if (!candidate.providerId || !candidate.externalWorkspaceId) return;
+
+  for (let attempt = 0; attempt < MAX_BINDING_REPLACEMENT_ATTEMPTS; attempt++) {
+    const current = await request(`${baseUrl}/settings`, { signal });
+    if (!current.ok) throw new Error(await settingsRequestError(current));
+    const revision = current.headers.get("etag");
+    if (!revision) {
+      throw new Error(
+        "diffectd does not support safe settings updates; restart or update Diffect",
+      );
+    }
+
+    const update = settingsWithWorkspaceBinding(await current.json(), candidate);
+    if (!update?.changed) return;
+    const replacement = await request(`${baseUrl}/settings`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "if-match": revision,
+      },
+      body: JSON.stringify(update.document),
+      signal,
+    });
+    if (replacement.status === 412) {
+      await replacement.text();
+      continue;
+    }
+    if (!replacement.ok) {
+      throw new Error(await settingsRequestError(replacement));
+    }
+    await replacement.arrayBuffer();
+    return;
+  }
+
+  throw new Error("Diffect settings kept changing; run /diffect-space again");
+}
+
 export function daemonWorkspaceArguments(workspaceRoot?: string): string[] {
   return workspaceRoot
     ? ["--workspace", workspaceRoot]
     : ["--no-workspace"];
+}
+
+async function settingsRequestError(response: Response): Promise<string> {
+  const body = await response.json().catch(() => null) as unknown;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const message = (body as Record<string, unknown>).error;
+    if (typeof message === "string" && message) return message;
+  }
+  return `diffectd request failed (${response.status})`;
 }
 
 function parseCandidate(

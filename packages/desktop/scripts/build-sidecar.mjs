@@ -46,8 +46,8 @@ rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
-// SEA requires CommonJS; the daemon is ESM and dependency-free, so the bundle
-// is just a format conversion. import.meta.url must be shimmed for the
+// SEA requires CommonJS; esbuild converts the ESM daemon and bundles its runtime
+// dependencies. import.meta.url must be shimmed for the
 // monorepo web-root fallback path (packaged runs always pass --web-root).
 const bundle = join(work, "daemon-bundle.cjs");
 await build({

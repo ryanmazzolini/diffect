@@ -20,7 +20,7 @@ import {
   daemonWorkspaceArguments,
   decideWorkspaceCandidate,
   parseWorkspaceResolutionResponse,
-  settingsWithWorkspaceBinding,
+  persistWorkspaceBinding,
   type WorkspaceResolutionCandidate,
   type WorkspaceResolutionResponse,
 } from "./workspace-resolution.js";
@@ -671,6 +671,7 @@ async function resolveReviewWorkspace(
     explicitWorkspace
       ? resolveUserPath(explicitWorkspace, ctx.cwd)
       : undefined,
+    options.forcePicker ? { selectionMode: "choose" } : undefined,
   );
   const response = await requestWorkspaceResolution(baseUrl, request, signal);
   let candidate = decideWorkspaceCandidate(response, {
@@ -709,25 +710,6 @@ async function requestWorkspaceResolution(
     throw new Error(await responseError(response));
   }
   return parseWorkspaceResolutionResponse(await response.json());
-}
-
-async function persistWorkspaceBinding(
-  baseUrl: string,
-  candidate: WorkspaceResolutionCandidate,
-  signal?: AbortSignal,
-): Promise<void> {
-  const current = await fetch(`${baseUrl}/settings`, { signal });
-  if (!current.ok) throw new Error(await responseError(current));
-  const update = settingsWithWorkspaceBinding(await current.json(), candidate);
-  if (!update?.changed) return;
-
-  const replacement = await fetch(`${baseUrl}/settings`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(update.document),
-    signal,
-  });
-  if (!replacement.ok) throw new Error(await responseError(replacement));
 }
 
 async function pickWorkspace(
