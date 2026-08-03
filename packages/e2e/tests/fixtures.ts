@@ -12,15 +12,13 @@ interface TestFixtures {
   fixtureServer: FixtureProcess;
 }
 
-const fixtureServerScript = fileURLToPath(new URL("../fixture-server.mjs", import.meta.url));
+const fixtureServerScript = fileURLToPath(
+  new URL("../fixture-server.mjs", import.meta.url),
+);
 
-async function startFixtureProcess(multi: boolean): Promise<FixtureProcess> {
+async function startFixtureProcess(): Promise<FixtureProcess> {
   const child = spawn(process.execPath, [fixtureServerScript], {
-    env: {
-      ...process.env,
-      PORT: "0",
-      ...(multi ? { FIXTURE_MULTI: "1" } : {}),
-    },
+    env: { ...process.env, PORT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   }) as ChildProcessWithoutNullStreams;
   let stdout = "";
@@ -38,19 +36,23 @@ async function startFixtureProcess(multi: boolean): Promise<FixtureProcess> {
       if ("url" in result) resolve(result.url);
       else reject(result.error);
     };
-    const timeout = setTimeout(() => {
-      finish(new Error(`fixture server did not start within 30s\n${stderr}`));
-    }, 30_000);
-
+    const timeout = setTimeout(
+      () => finish({ error: new Error(`fixture server did not start\n${stderr}`) }),
+      30_000,
+    );
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
       const match = stdout.match(/fixture diffectd ready (http:\/\/\S+)/);
       if (match?.[1]) finish({ url: match[1] });
     });
     child.once("error", (error) => finish({ error }));
-    child.once("exit", (code, signal) => {
-      finish(new Error(`fixture server exited before startup (${signal ?? code})\n${stderr}`));
-    });
+    child.once("exit", (code, signal) =>
+      finish({
+        error: new Error(
+          `fixture server exited before startup (${signal ?? code})\n${stderr}`,
+        ),
+      }),
+    );
   }).catch((error) => {
     child.kill("SIGKILL");
     throw error;
@@ -75,7 +77,7 @@ async function startFixtureProcess(multi: boolean): Promise<FixtureProcess> {
 
 export const test = base.extend<TestFixtures>({
   fixtureServer: async ({}, use, testInfo) => {
-    const server = await startFixtureProcess(testInfo.project.name === "chromium-multi");
+    const server = await startFixtureProcess();
     try {
       await use(server);
     } finally {
@@ -94,4 +96,3 @@ export const test = base.extend<TestFixtures>({
 });
 
 export { expect };
-export type { Locator, Page } from "@playwright/test";

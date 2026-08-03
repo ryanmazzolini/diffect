@@ -1,15 +1,8 @@
 import { readdir, stat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
-import type { RepoSummary, ReviewSession, WorkspaceInfo } from "@diffect/shared";
+import { basename, dirname, join, resolve } from "node:path";
+import type { WorkspaceRepository, WorkspaceSummary } from "@diffect/shared";
 import { gitTry } from "./git/exec.js";
-import {
-  resolveCurrentBranch,
-  resolveDefaultBranch,
-  resolveWorkBase,
-} from "./git/diff.js";
-import { pullRequestForBranch } from "./git/pull-request.js";
-import { normalizeTarget } from "./git/target.js";
-import { resolveScope, sessionIdForScope } from "./reviews/scope.js";
+import { resolveCurrentBranch } from "./git/diff.js";
 import { realpathSafe } from "./path-safe.js";
 
 export interface Workspace {
@@ -143,15 +136,27 @@ async function groupIntoRepos(treeRoots: string[]): Promise<DiscoveredRepo[]> {
   }
 
   const repos = order.map((key) => {
-    const worktrees = byCommonDir.get(key)!;
-    // The primary worktree is the one whose .git is a real dir (commonDir lives
-    // inside it); fall back to the first discovered.
+    const discovered = byCommonDir.get(key)!;
+    // A linked checkout reports the primary checkout's `.git` directory as its
+    // common dir even when the primary was outside the scanned workspace. Keep
+    // repository ownership on that primary path and include it as a selectable
+    // checkout so the same Review store is used from either entry point.
+    const discoveredPrimary = discovered.find(
+      (worktree) => realpathSafe(resolve(worktree.root, ".git")) === key,
+    );
+    const primaryRoot =
+      discoveredPrimary?.root ??
+      (basename(key) === ".git" ? dirname(key) : discovered[0]!.root);
     const primary =
-      worktrees.find((w) => realpathSafe(resolve(w.root, ".git")) === key) ??
-      worktrees[0]!;
+      discoveredPrimary ?? { name: basename(primaryRoot), root: primaryRoot };
+    const worktrees = discovered.some(
+      (worktree) => realpathSafe(worktree.root) === realpathSafe(primaryRoot),
+    )
+      ? discovered
+      : [primary, ...discovered];
     return {
-      name: basename(primary.root),
-      root: primary.root,
+      name: basename(primaryRoot),
+      root: primaryRoot,
       commonDir: key,
       worktrees,
     };
@@ -219,84 +224,28 @@ export function resolveRepoRoot(
   return r.worktrees.find((w) => w.name === worktree)?.root;
 }
 
-/**
- * Derive the `work` review session of each checked-out worktree — the sidebar's
- * primary review entries. Each is resolved with the SAME inputs the diff route
- * uses (the primary worktree as `worktree=null`, never its basename) so the
- * session id equals the one the daemon stamps onto the diff, and thus the
- * `Thread.sessionId` of comments filed under it. Deduped by canonical id;
- * checkout identity keeps same-ref reviews in different worktrees distinct.
- */
-async function deriveWorktreeSessions(
-  repo: DiscoveredRepo,
-): Promise<ReviewSession[]> {
-  const work = normalizeTarget("work");
-  const all = await Promise.all(
-    repo.worktrees.map(async (w) => {
-      const worktree = w.root === repo.root ? null : w.name;
-      const scope = await resolveScope(w.root, work, worktree);
-      return { id: sessionIdForScope(scope, worktree), scope, worktree };
-    }),
-  );
-  const seen = new Set<string>();
-  return all.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
-}
-
-function isDefaultBranch(
-  branch: string | null,
-  defaultBranch: string | null,
-): boolean {
-  return (
-    !!branch &&
-    !!defaultBranch &&
-    (branch === defaultBranch || defaultBranch.endsWith(`/${branch}`))
-  );
-}
-
-/** Summarize a set of repos (base/default-branch/worktrees) for the API. */
+/** Summarize repository and checkout identity without feedback-derived state. */
 export async function summarizeRepos(
   repos: DiscoveredRepo[],
-): Promise<RepoSummary[]> {
+): Promise<WorkspaceRepository[]> {
   return Promise.all(
-    repos.map(async (r) => {
-      const [base, defaultBranch] = await Promise.all([
-        resolveWorkBase(r.root),
-        resolveDefaultBranch(r.root),
-      ]);
-      return {
-        name: r.name,
-        root: r.root,
-        base,
-        defaultBranch,
-        worktrees: await Promise.all(
-          r.worktrees.map(async (w) => {
-            const branch = await resolveCurrentBranch(w.root);
-            return {
-              name: w.name,
-              root: w.root,
-              branch,
-              pullRequest:
-                branch && !isDefaultBranch(branch, defaultBranch)
-                  ? await pullRequestForBranch(w.root, branch)
-                  : null,
-            };
-          }),
-        ),
-        sessions: await deriveWorktreeSessions(r),
-      };
-    }),
+    repos.map(async (repo) => ({
+      name: repo.name,
+      root: repo.root,
+      worktrees: await Promise.all(
+        repo.worktrees.map(async (worktree) => ({
+          name: worktree.name,
+          root: worktree.root,
+          branch: await resolveCurrentBranch(worktree.root),
+        })),
+      ),
+    })),
   );
 }
 
-export async function summarizeWorkspace(
-  ws: Workspace,
-  openThreadCount: number,
-  editors: string[] = [],
-): Promise<WorkspaceInfo> {
+export async function summarizeWorkspace(ws: Workspace): Promise<WorkspaceSummary> {
   return {
     root: ws.root,
     repos: await summarizeRepos(ws.repos),
-    openThreadCount,
-    editors,
   };
 }

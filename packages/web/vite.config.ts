@@ -19,11 +19,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/workspace": DAEMON,
-      "/repos": DAEMON,
-      "/threads": DAEMON,
-      "/events": DAEMON,
-      "/open": DAEMON,
+      "/api": DAEMON,
     },
   },
   build: {

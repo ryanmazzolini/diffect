@@ -2,21 +2,17 @@
 
 [![CI](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml/badge.svg)](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml)
 
-Browser + desktop code review for repos, worktrees, and multi-repo AI coding
-spaces.
+Browser + desktop review for local Git changes and AI coding workspaces.
 
-Diffect runs beside the code — on your laptop, dev box, or trusted remote host —
-and opens a GitHub-style review UI in the browser or desktop app.
+Diffect runs beside the code and provides one focused Current changes surface.
+The first inline comment atomically creates a durable Review with an opaque ID
+and stable local link.
 
-- review `work`, `staged`, `unstaged`, refs, or base↔compare ranges
-- review one repo or a whole folder of repos/worktrees as one task space
-- leave durable inline comments that re-anchor or go stale as code changes
-- let agents read and update the same threads; pi is the first integration
-- keep review state in local files under `~/.config/diffect/`
-
-<p align="center">
-  <img src="docs/Screenshot.png" alt="Diffect review UI showing a diff with inline comments and a thread sidebar" width="900">
-</p>
+- review the current branch's complete local changes in a Pierre diff
+- select a line range with the pointer or keyboard and create one clean Review
+- reopen `/reviews/<id>` after a daemon restart
+- let Pi read that Review exactly by ID
+- keep Review state in local files under `~/.config/diffect/`
 
 ## Status
 
@@ -52,7 +48,7 @@ executable before launching it.
 ```text
 packages/
   shared/   contract types shared by daemon, CLI, and web UI
-  core/     diffect CLI + diffectd daemon + git diff + event log
+  core/     diffect CLI + diffectd daemon + Git diff + Review service
   web/      React + Vite browser UI served by diffectd
   desktop/  Tauri shell over a private diffectd
   e2e/      Playwright coverage
@@ -97,15 +93,13 @@ pnpm build
 alias diffect="node /path/to/diffect/packages/core/dist/cli.js"
 
 cd /path/to/repo
-diffect list --status open
-diffect comment --file src/a.ts --line 42 --severity must-fix --body "…"
-diffect reply <id> --agent pi --body "fixed"
-diffect resolve <id> --summary "fixed in this change"
+diffect diff
+diffect review show <review-id> --json
 ```
 
-The default target is `work` (committed-since-base + unstaged + untracked). Pick
-another with `--target staged|unstaged|<ref>|<a>..<b>`, and a specific checkout
-with `--repo`/`--worktree`.
+`diffect diff` shows Current changes: committed-since-base, unstaged, and
+untracked content. Use `--repo` or `--worktree` when the workspace contains more
+than one checkout.
 
 ## Develop
 
@@ -127,16 +121,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor notes and
 ## Where reviews live
 
 Review state is a per-user store at `$XDG_CONFIG_HOME/diffect/` (default
-`~/.config/diffect/`). Repo threads live in
-`workspaces/<hash>/threads.jsonl`; space-level threads live in
-`spaces/<hash>/threads.jsonl`; attachments live in `attachments/`; and
-`workspaces.json` records known workspace paths. The hashes are derived from
-absolute paths, but the files stay host-private and are not committed with your
-code.
+`~/.config/diffect/`). Each repository owns a clean, versioned event log at
+`workspaces/<hash>/reviews/v1/events.jsonl`; `workspaces.json` records known
+workspace paths. The hash is derived from the canonical primary-checkout path,
+but every Review also records its repository and selected-worktree locators.
 
-The CLI, daemon, desktop app, and agents all read/write that same store. A
-legacy in-tree `.reviews/threads.jsonl` from older versions is migrated into the
-central store on first access; the original is left as a backup.
+The CLI, daemon, desktop app, and Pi read the same Review store. Pre-reset
+feedback files are inert local backups: Diffect does not read, migrate, watch,
+count, display, or delete them.
 
 ## Networking and security
 
@@ -146,8 +138,7 @@ privately; see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Vendored editor icons are attributed in
-[third-party assets](docs/third-party-assets.md).
+Apache-2.0. See [LICENSE](LICENSE).
 
 ## Related projects
 

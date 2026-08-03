@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "pnpm --filter @diffect/shared build && pnpm --filter @diffect/core build && pnpm --filter @diffect/web build && playwright test"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",

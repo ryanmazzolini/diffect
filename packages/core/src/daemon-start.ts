@@ -10,7 +10,7 @@ import { addWorkspaceToRegistry } from "./store/registry.js";
 export interface DaemonArgs {
   /** Workspace to seed and register at boot; null serves registry-only. */
   workspace: string | null;
-  /** Requested port; 0 asks the OS for a free one. */
+  /** Requested port; production uses the canonical 7421, while tests may use 0. */
   port: number;
   host: string;
   /** Explicit web asset dir; omitted falls back to the monorepo layout. */
@@ -90,9 +90,8 @@ interface RunDaemonIo {
 
 /**
  * Start diffectd from CLI args and announce readiness on stdout. The first
- * line is the machine-readable contract `DIFFECTD_READY <url>` carrying the
- * *resolved* port — embedders start us with `--port 0` and parse it to learn
- * where to point their webview.
+ * line is the machine-readable contract `DIFFECTD_READY <url>`. Production
+ * launchers use the canonical loopback port 7421; tests may still request 0.
  */
 export async function runDaemon(
   argv: string[],

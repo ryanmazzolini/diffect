@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -62,6 +62,25 @@ describe("workspace discovery", () => {
     expect(names).toContain("proj-feature");
     expect(resolveRepoRoot(w, repo.name, "proj-feature")).toBe(
       join(ws, "proj-feature"),
+    );
+  });
+
+  it("keeps primary repository ownership when opened from a linked worktree", async () => {
+    const primary = join(ws, "proj");
+    const linked = join(ws, "proj-feature");
+    await initRepo(primary);
+    await git(primary, ["branch", "feature"]);
+    await git(primary, ["worktree", "add", linked, "feature"]);
+
+    const discovered = await discoverWorkspace(linked);
+    expect(discovered.repos).toHaveLength(1);
+    expect(discovered.repos[0]!.root).toBe(await realpath(primary));
+    expect(
+      await Promise.all(
+        discovered.repos[0]!.worktrees.map((worktree) => realpath(worktree.root)),
+      ),
+    ).toEqual(
+      expect.arrayContaining([await realpath(primary), await realpath(linked)]),
     );
   });
 

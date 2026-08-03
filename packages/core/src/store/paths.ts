@@ -32,32 +32,22 @@ export function repoStoreDir(repoRoot: string): string {
   return join(configDir(), "workspaces", hashRepoPath(repoRoot));
 }
 
-/** Per-space central store directory: `<configDir>/spaces/<hash>/`. */
-export function spaceStoreDir(spaceRoot: string): string {
-  return join(configDir(), "spaces", hashPath(spaceRoot));
+/** Root containing every repository-owned store. */
+export function repositoryStoresDir(): string {
+  return join(configDir(), "workspaces");
 }
 
-/** The append-only thread event log for a repo. */
-export function threadsLogPath(repoRoot: string): string {
-  return join(repoStoreDir(repoRoot), "threads.jsonl");
+/** Clean, versioned Review namespace for one repository. */
+export function reviewStoreDir(repoRoot: string): string {
+  return join(repoStoreDir(repoRoot), "reviews", "v1");
 }
 
-/** The append-only thread event log for a review space. */
-export function spaceThreadsLogPath(spaceRoot: string): string {
-  return join(spaceStoreDir(spaceRoot), "threads.jsonl");
+/** Append-only clean Review event log for one repository. */
+export function reviewEventsPath(repoRoot: string): string {
+  return join(reviewStoreDir(repoRoot), "events.jsonl");
 }
 
 /** Persisted list of known workspace paths (consumed by the workspace registry). */
 export function workspacesRegistryPath(): string {
   return join(configDir(), "workspaces.json");
-}
-
-/** Durable, user-controlled host settings shared by every Diffect frontend. */
-export function settingsPath(): string {
-  return join(configDir(), "settings.json");
-}
-
-/** Host-local UI preferences shared across desktop daemon ports. */
-export function uiStatePath(): string {
-  return join(configDir(), "ui-state.json");
 }

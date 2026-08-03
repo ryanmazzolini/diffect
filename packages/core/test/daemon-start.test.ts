@@ -6,7 +6,10 @@ import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { git } from "../src/git/exec.js";
 import { formatUrl, parseArgs, resolveWebRoot, runDaemon } from "../src/daemon-start.js";
-import { readWorkspaceRegistry } from "../src/store/registry.js";
+import {
+  readWorkspaceRegistry,
+  removeWorkspaceFromRegistry,
+} from "../src/store/registry.js";
 
 let parent: string;
 let workspace: string;
@@ -19,6 +22,7 @@ beforeEach(async () => {
   await git(workspace, ["config", "user.name", "T"]);
 });
 afterEach(async () => {
+  await removeWorkspaceFromRegistry(workspace);
   await rm(parent, { recursive: true, force: true });
 });
 
@@ -114,7 +118,7 @@ describe("runDaemon", () => {
     const url = ready.replace("DIFFECTD_READY ", "");
     expect(url).not.toContain(":0");
 
-    const res = await fetch(`${url}/workspace`);
+    const res = await fetch(`${url}/api/workspace`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/json");
   });
@@ -161,7 +165,7 @@ describe("runDaemon", () => {
     server = await runDaemon(["--port", "0", "--no-workspace"], io);
     expect(await readWorkspaceRegistry()).not.toContain(process.cwd());
     const url = lines[0].replace("DIFFECTD_READY ", "");
-    const res = await fetch(`${url}/workspace`);
+    const res = await fetch(`${url}/api/workspace`);
     expect(res.status).toBe(200);
   });
 });

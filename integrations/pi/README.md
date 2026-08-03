@@ -1,137 +1,38 @@
-# Diffect ⇄ pi
+# Diffect ⇄ Pi
 
-Diffect review state is a local append-only event log under
-`$XDG_CONFIG_HOME/diffect/` (default `~/.config/diffect/`). The CLI, daemon, UI,
-and agents are equal peers over those files.
+Diffect Reviews live in the clean, repository-owned store under
+`$XDG_CONFIG_HOME/diffect/` (default `~/.config/diffect/`). Review IDs are opaque
+and remain stable across daemon restarts.
 
-## Slash command
-
-Install this local pi package, then `/reload` and use:
-
-```text
-/diffect
-```
-
-It finds the current Diffect workspace, reuses the running `diffectd` from
-`~/.config/diffect/daemon.json` when present (including the Tauri app's ephemeral
-port), otherwise starts one, registers the workspace, and opens Diffect at:
-
-```text
-/?repo=<repo>&worktree=<worktree>&target=work
-```
-
-Workspace resolution is daemon-owned. Pi sends its native session ID, session
-file, session cwd, and current cwd to `POST /workspace-resolution`. Diffect then
-checks enabled sources in settings order, prefers saved external-workspace
-bindings and exact agent-session matches, validates every candidate through the
-same workspace discovery path, and falls through when a provider is unavailable.
-An explicit `--workspace` path remains the highest-priority override.
-
-When equally ranked candidates remain, interactive commands show a picker.
-`/diffect-space` asks the daemon for a manual choice without applying the current
-binding, then forces the picker. Cancelling preserves the binding; choosing an
-external workspace replaces it with a durable Diffect settings binding rather
-than a Pi session entry. Existing `diffect-workspace` session entries are not
-migrated or deleted, but new entries are no longer written. Use `/diffect
-staged`, `/diffect unstaged`, or `/diffect main..feature` to open a specific
-review target.
-
-Use `/diffect-review` to ask the agent to read open Diffect feedback for the
-inferred workspace. Use `/diffect-review proactive` to ask it to inspect changes
-and leave Diffect comments without editing files.
-
-## Feedback watch
-
-Connect the current Pi session after choosing the workspace:
-
-```text
-/diffect-connect
-```
-
-The first connection is explicit. It reuses or starts `diffectd` without opening
-another application window, then reconnects automatically when this Pi session
-reloads, resumes, or forks. The daemon resolver's validated workspace is
-authoritative; terminal focus alone does not override an exact session match or
-saved binding.
-
-By default, only new user-authored threads and replies trigger the agent. Existing
-feedback becomes the connection baseline and does not trigger a turn. Events are
-filtered and batched before the model runs, and the agent receives only the
-affected thread ids.
-
-For a conductor that should also receive feedback from other agents:
-
-```text
-/diffect-connect --agent conductor --include-agents
-```
-
-Each Pi session adds a short session suffix to its author label, such as
-`conductor/1a2b3c4d`. Conductor mode ignores that exact identity while accepting
-other named agents. Use `--users-only` to return to user-only feedback.
-
-Stop automatic feedback turns with:
-
-```text
-/diffect-disconnect
-```
-
-Short connection interruptions replay a bounded set of recent feedback events.
-Feedback received while the daemon is fully stopped is not replayed automatically.
-Use `/diffect-review` as the manual fallback. The watch is independent of Herdr,
-Ghostty, and other terminal hosts.
-
-It reuses the daemon for whichever app is already running, then opens the UI
-with this launcher order:
-
-- `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set (use this to opt into a local dev build)
-- `diffect-desktop` on `PATH`, including a stable release installed by mise
-- macOS app lookup (`open -b app.diffect.desktop`, then `open -a Diffect`)
-
-The desktop app's single-instance hook makes the installed launcher focus and
-navigate an already-running dev or stable window. A stale local build is never
-started implicitly. If no app launcher works, it falls back to the browser.
-
-For global use:
-
-```sh
-pi install /path/to/diffect/integrations/pi
-```
-
-Put `diffect`/`diffectd` on `PATH` or run it from a built Diffect checkout.
-
-## Agent tools
-
-The extension also registers minimal tools:
+Install this local Pi package and reload Pi. The extension registers:
 
 ```text
 diffect_open
-diffect_list_feedback   # optional ids array limits output to affected threads
-diffect_comment
-diffect_reply
-diffect_resolve
+diffect_list_feedback
 diffect_pr
 ```
 
-The normal loop stays boring:
+`diffect_open` resolves the current Git checkout, starts or reuses the Review
+daemon at `http://127.0.0.1:7421`, registers the workspace, and returns its
+Current changes URL. Pass `open: true` to open the URL.
 
-```sh
-diffect list --status open --json
-# fix code
-diffect reply <thread-id> --agent pi --body "Fixed by ..."
-diffect resolve <thread-id> --agent pi --summary "Fixed in this change."
-```
-
-Agents can create their own normal comments too:
-
-```sh
-diffect comment --file src/api.ts --line 42 --severity must-fix \
-  --agent pi --body "This dereferences a possibly-null user."
-```
-
-`diffect_pr` reads or updates the local PR Draft packet. Pass `repo` in multi-repo workspaces:
+After the first inline comment creates a Review, copy its `rvw_…` ID or canonical
+link and read it exactly:
 
 ```json
-{ "action": "update", "repo": "web", "title": "Fix auth redirect", "body": "## Summary\n..." }
+{ "reviewId": "rvw_0123456789abcdef0123456789abcdef" }
 ```
 
-No apply daemon, no cloud runner, no separate AI findings store.
+Exact reads call:
+
+```sh
+diffect review show <review-id> --json
+```
+
+They do not reconstruct Git scopes, start a daemon, scan old thread files, or
+return unrelated feedback. Clean Pi reply, resolve, proactive-comment, and watch
+operations will be added on the Review mutation service in later changes.
+
+`diffect_pr` remains available for the independent local PR Draft packet. Put
+`diffect` and `diffectd` on `PATH`, or build the checkout containing this
+extension before use.

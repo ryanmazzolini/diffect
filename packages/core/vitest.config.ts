@@ -6,10 +6,16 @@ import { defineConfig } from "vitest/config";
 const sharedSrc = fileURLToPath(
   new URL("../shared/src/index.ts", import.meta.url),
 );
+const typeboxStub = fileURLToPath(
+  new URL("./test/typebox-stub.ts", import.meta.url),
+);
 
 export default defineConfig({
   resolve: {
-    alias: { "@diffect/shared": sharedSrc },
+    alias: {
+      "@diffect/shared": sharedSrc,
+      typebox: typeboxStub,
+    },
   },
   test: {
     include: ["test/**/*.test.ts"],

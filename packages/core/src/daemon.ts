@@ -1,1384 +1,603 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { createServer as createHttpServer, type Server } from "node:http";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { realpath, stat } from "node:fs/promises";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { extname, join, resolve, sep } from "node:path";
-import {
-  DAEMON_EVENTS,
-  type AddCommentRequest,
-  type CreateThreadRequest,
-  type DeleteThreadRequest,
-  type OpenRequest,
-  type OpenUrlRequest,
-  type PrDraftUpdateRequest,
-  type ResolveThreadRequest,
-  type UiStateUpdate,
-  type WorkspaceEntry,
-  type WorkspaceMutationRequest,
-  type WriteFileContentRequest,
+import type {
+  CreateReviewRequest,
+  CurrentChangesResponse,
+  ReviewDiff,
+  ReviewResponse,
+  WorkspaceMutationRequest,
 } from "@diffect/shared";
-import { readTargetFileContent, writeWorktreeFileContent } from "./git/content.js";
-import { resolveCurrentBranch, resolveWorkBase } from "./git/diff.js";
-import { listRefs, listTrackedFiles, searchRefs } from "./git/refs.js";
-import { computeTargetDiff, normalizeTarget } from "./git/target.js";
-import { buildAnchor, computeAnchor, readSideLines } from "./reviews/anchors.js";
-import { discoverOpenReviews } from "./reviews/open-reviews.js";
+import { readWorkFileContent } from "./git/content.js";
+import { computeWorkDiff } from "./git/diff.js";
+import { GitChangeStream } from "./events.js";
 import {
-  resolveScope,
-  legacySessionIdForScope,
-  sessionIdForScope,
-  snapshotIdForState,
-} from "./reviews/scope.js";
+  DuplicateReviewIdError,
+  DuplicateReviewThreadIdError,
+  DuplicateWritableReviewError,
+  ExistingWritableReviewError,
+  InvalidFirstReviewCommentError,
+  ReviewService,
+  UnknownReviewError,
+  UnknownReviewThreadError,
+  type ReviewContext,
+} from "./reviews/service.js";
 import {
-  addComment,
-  createThread,
-  deleteThread,
-  resolveThread,
-  spaceThreadStore,
-  UnknownThreadError,
-  type ThreadStoreRef,
-} from "./reviews/event-log.js";
-import {
-  findStoreForThread,
-  findThreadKeysByStoredSession,
-  loadAllThreads,
-  loadRefreshedThreads,
-  threadMatchesStoredSession,
-  workspacePaths,
-} from "./reviews/refresh.js";
-import { EventHub } from "./events.js";
-import {
-  detectEditors,
-  openInEditor,
-  openWorkspaceInEditor,
-  PathEscapeError,
-  UnknownEditorError,
-} from "./editor.js";
-import { openExternalUrl, UnsupportedUrlError } from "./open-url.js";
-import {
-  discoverWorkspace,
-  findRepo,
-  mergeWorkspaces,
-  resolveRepoRoot,
-  summarizeRepos,
-  summarizeWorkspace,
-  type DiscoveredRepo,
-  type Workspace,
-} from "./workspace.js";
+  ReviewStoreCorruptError,
+  validReviewLocation,
+} from "./reviews/store.js";
 import {
   addWorkspaceToRegistry,
   readWorkspaceRegistry,
   removeWorkspaceFromRegistry,
 } from "./store/registry.js";
 import {
-  attachmentMime,
-  attachmentPath,
-  isValidAttachmentId,
-  storeAttachment,
-} from "./store/attachments.js";
-import { readPrDraft, updatePrDraft, type PrDraftScope } from "./store/pr-draft.js";
-import { readUiState, updateUiState } from "./store/ui-state.js";
-import {
-  readSettings,
-  replaceSettings,
-  SettingsBusyError,
-  SettingsConflictError,
-  SettingsReadError,
-  settingsRevision,
-  SettingsValidationError,
-} from "./store/settings.js";
-import { FsBrowseError, listDir, recommendations } from "./store/discovery.js";
-import { listSpaceFiles, readSpaceFileLines } from "./space-files.js";
-import {
-  parseWorkspaceResolutionRequest,
-  resolveWorkspace,
-  WorkspaceResolutionError,
-} from "./workspace-providers/resolve.js";
+  discoverWorkspace,
+  findRepo,
+  mergeWorkspaces,
+  summarizeRepos,
+  summarizeWorkspace,
+  type DiscoveredRepo,
+  type DiscoveredWorktree,
+  type Workspace,
+} from "./workspace.js";
 
 export interface DaemonOptions {
-  /** Workspace to serve at boot, always included even if not yet registered. */
   workspacePath?: string;
-  /** Directory of built web assets to serve; omit to run API-only. */
   webRoot?: string;
-  /** Bind host; gates workspace-mutation routes to loopback. */
   host?: string;
-  /** Clock injection for deterministic tests. */
-  now?: () => string;
+  reviewService?: ReviewService;
 }
 
 interface RouteContext {
-  /** Per-path discovered workspaces (source of the /workspaces breakdown). */
   workspaces: Workspace[];
-  /** Aggregate view (union of all repos, globally deduped) used by repo routes. */
-  ws: Workspace;
-  /** Boot workspace, always re-included on rebuild even if not in the registry. */
+  workspace: Workspace;
   seed: string | null;
   host: string;
-  now: () => string;
   webRoot?: string;
-  events: EventHub;
-  editors: string[];
+  reviews: ReviewService;
+  events: GitChangeStream;
 }
 
-/** Discover every registered workspace plus the boot seed; skip unreadable ones. */
 async function loadWorkspaces(seed: string | null): Promise<Workspace[]> {
   const paths = await readWorkspaceRegistry();
   if (seed && !paths.includes(seed)) paths.push(seed);
+  const uniquePaths = [...new Set(paths.map((path) => resolve(path)))];
   const discovered = await Promise.all(
-    paths.map((p) =>
-      discoverWorkspace(p).catch((err) => {
+    uniquePaths.map((path) =>
+      discoverWorkspace(path).catch((error) => {
         process.stderr.write(
-          `diffectd: skipping workspace ${p}: ${err?.message ?? err}\n`,
+          `diffectd: skipping workspace ${path}: ${error?.message ?? error}\n`,
         );
         return null;
       }),
     ),
   );
-  return discovered.filter((w): w is Workspace => w !== null);
+  return discovered.filter((workspace): workspace is Workspace => workspace !== null);
 }
 
-/** Re-read the registry and rebuild the aggregate + watchers after a change. */
-async function rebuildWorkspaces(ctx: RouteContext): Promise<void> {
-  ctx.workspaces = await loadWorkspaces(ctx.seed);
-  ctx.ws = mergeWorkspaces(ctx.workspaces);
-  await ctx.events.rebuild(ctx.ws);
+async function rebuildWorkspaces(context: RouteContext): Promise<void> {
+  context.workspaces = await loadWorkspaces(context.seed);
+  context.workspace = mergeWorkspaces(context.workspaces);
+  context.events.rebuild(context.workspace);
 }
 
-/**
- * Build the diffectd HTTP server. The daemon is a thin wrapper over `git diff`
- * and the central review event log — the file store remains the source of truth,
- * so the CLI and agents work the same whether or not this is running.
- */
-export async function createServer(opts: DaemonOptions): Promise<Server> {
-  const seed = opts.workspacePath ? resolve(opts.workspacePath) : null;
+export async function createServer(options: DaemonOptions = {}): Promise<Server> {
+  const seed = options.workspacePath ? resolve(options.workspacePath) : null;
   const workspaces = await loadWorkspaces(seed);
-  const ws = mergeWorkspaces(workspaces);
-  const events = new EventHub(ws);
-  await events.start();
-  const editors = await detectEditors();
-  const ctx: RouteContext = {
+  const workspace = mergeWorkspaces(workspaces);
+  const events = new GitChangeStream(workspace);
+  events.start();
+  const context: RouteContext = {
     workspaces,
-    ws,
+    workspace,
     seed,
-    host: opts.host ?? "127.0.0.1",
-    now: opts.now ?? (() => new Date().toISOString()),
-    webRoot: opts.webRoot,
+    host: options.host ?? "127.0.0.1",
+    webRoot: options.webRoot,
+    reviews: options.reviewService ?? new ReviewService(),
     events,
-    editors,
   };
 
-  const server = createHttpServer((req, res) => {
-    handle(ctx, req, res).catch((err) => {
-      if (err instanceof BodyTooLargeError) {
-        // Close the connection after responding: the client may still be
-        // uploading, and we've stopped reading, so keep-alive would stall.
-        if (!res.headersSent) {
-          const json = JSON.stringify({ error: "request body too large" });
-          res.writeHead(413, {
-            "content-type": "application/json; charset=utf-8",
-            "content-length": Buffer.byteLength(json),
-            connection: "close",
-          });
-          res.end(json);
-        }
+  const server = createHttpServer((request, response) => {
+    handle(context, request, response).catch((error) => {
+      if (response.headersSent) return;
+      if (error instanceof BodyTooLargeError) {
+        sendJson(response, 413, { error: "request body too large" }, true);
         return;
       }
-      if (err instanceof UnsupportedMediaTypeError) {
-        sendJson(res, 415, { error: "content-type must be application/json" });
+      if (error instanceof UnsupportedMediaTypeError) {
+        sendJson(response, 415, { error: "content-type must be application/json" });
         return;
       }
-      // Don't leak internals (paths, stack traces) to the client; log instead.
-      process.stderr.write(`diffectd: ${err?.stack ?? err}\n`);
-      sendJson(res, 500, { error: "internal error" });
+      if (
+        error instanceof UnknownReviewError ||
+        error instanceof UnknownReviewThreadError
+      ) {
+        sendJson(response, 404, { error: error.message });
+        return;
+      }
+      if (error instanceof ExistingWritableReviewError) {
+        sendJson(response, 409, {
+          error: error.message,
+          review: error.review,
+          link: context.reviews.linkFor(error.review.id),
+        });
+        return;
+      }
+      if (error instanceof InvalidFirstReviewCommentError) {
+        sendJson(response, 400, { error: error.message });
+        return;
+      }
+      if (
+        error instanceof ReviewStoreCorruptError ||
+        error instanceof DuplicateReviewIdError ||
+        error instanceof DuplicateReviewThreadIdError ||
+        error instanceof DuplicateWritableReviewError
+      ) {
+        process.stderr.write(`diffectd: ${error.stack ?? error}\n`);
+        sendJson(response, 500, { error: "Review store is corrupt" });
+        return;
+      }
+      process.stderr.write(`diffectd: ${error?.stack ?? error}\n`);
+      sendJson(response, 500, { error: "internal error" });
     });
   });
-
-  // Tear down filesystem watchers when the server closes.
-  server.on("close", () => ctx.events.close());
+  server.on("close", () => events.close());
   return server;
 }
 
 async function handle(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
+  context: RouteContext,
+  request: IncomingMessage,
+  response: ServerResponse,
 ): Promise<void> {
-  const url = new URL(req.url ?? "/", "http://localhost");
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const method = request.method ?? "GET";
   const path = url.pathname;
-  const method = req.method ?? "GET";
 
-  if (isLoopback(ctx.host) && !isLoopbackRequest(req)) {
-    sendJson(res, 403, { error: "loopback daemon requires a loopback host and origin" });
+  if (isLoopback(context.host) && !isLoopbackRequest(request)) {
+    sendJson(response, 403, {
+      error: "loopback daemon requires a loopback host and origin",
+    });
     return;
   }
 
-  // --- Live updates (SSE) -------------------------------------------------
-  if (method === "GET" && path === "/events") {
-    const rawLastEventId = req.headers["last-event-id"];
-    const lastEventId = Array.isArray(rawLastEventId) ? rawLastEventId[0] : rawLastEventId;
-    const dispose = ctx.events.addClient(res, lastEventId);
-    req.on("close", dispose);
-    return; // keep the connection open
+  if (method === "GET" && path === "/api/health") {
+    sendJson(response, 200, { ok: true, model: "review" });
+    return;
   }
 
-  // Delegate to route groups; each returns true once it has sent a response.
-  if (await settingsRoutes(ctx, req, res, method, path)) return;
-  if (await workspaceResolutionRoutes(ctx, req, res, method, path)) return;
-  if (await uiStateRoutes(req, res, method, path)) return;
-  if (await workspaceRoutes(ctx, req, res, url, method, path)) return;
-  if (await openReviewRoutes(ctx, res, url, method, path)) return;
-  if (await threadCollectionRoutes(ctx, req, res, url, method, path)) return;
-  if (await threadItemRoutes(ctx, req, res, method, path)) return;
-  if (await prDraftRoutes(ctx, req, res, url, method, path)) return;
-  if (await spaceFileRoutes(ctx, res, url, method, path)) return;
-  if (await repoRoutes(ctx, res, url, method, path)) return;
-  if (await fileContentRoute(ctx, req, res, url, method, path)) return;
-  if (await fileRoute(ctx, res, url, method, path)) return;
-  if (await editorRoute(ctx, req, res, method, path)) return;
-  if (await externalUrlRoute(ctx, req, res, method, path)) return;
-  if (await attachmentRoutes(ctx, req, res, method, path)) return;
-  if (await discoveryRoutes(ctx, res, url, method, path)) return;
-
-  // --- Static web assets --------------------------------------------------
-  if (method === "GET" && ctx.webRoot) {
-    return serveStatic(ctx.webRoot, path, res);
+  if (method === "GET" && path === "/api/events") {
+    const dispose = context.events.addClient(response);
+    request.on("close", dispose);
+    return;
   }
 
-  sendJson(res, 404, { error: "not found" });
-}
-
-/** Durable host settings; paths and executable configuration stay loopback-only. */
-async function settingsRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (path !== "/settings" || (method !== "GET" && method !== "PUT")) return false;
-  if (!isLoopback(ctx.host)) {
-    sendJson(res, 403, {
-      error: "settings are only available on a loopback-bound daemon",
-    });
-    return true;
+  if (method === "GET" && path === "/api/workspace") {
+    sendJson(response, 200, await summarizeWorkspace(context.workspace));
+    return;
   }
 
-  if (method === "GET") {
+  if (method === "POST" && path === "/api/workspaces") {
+    const body = await readJson<WorkspaceMutationRequest>(request);
+    if (!body || typeof body.path !== "string" || !body.path.trim()) {
+      sendJson(response, 400, { error: "path is required" });
+      return;
+    }
     try {
-      const settings = await readSettings();
-      setSettingsEtag(res, settingsRevision(settings));
-      sendJson(res, 200, settings);
+      await discoverWorkspace(body.path);
     } catch (error) {
-      if (error instanceof SettingsValidationError) {
-        sendJson(res, 500, { error: "settings file is invalid", issues: error.issues });
-      } else if (error instanceof SettingsReadError) {
-        sendJson(res, 500, { error: error.message });
-      } else {
-        throw error;
-      }
+      sendJson(response, 400, {
+        error: error instanceof Error ? error.message : "invalid workspace",
+      });
+      return;
     }
-    return true;
+    await addWorkspaceToRegistry(body.path);
+    await rebuildWorkspaces(context);
+    sendJson(response, 200, await summarizeWorkspace(context.workspace));
+    return;
   }
 
-  const ifRevision = settingsIfMatchRevision(req.headers["if-match"]);
-  if (ifRevision === null) {
-    sendJson(res, 400, { error: "if-match must contain one Diffect settings ETag" });
-    return true;
+  if (method === "DELETE" && path === "/api/workspaces") {
+    const body = await readJson<WorkspaceMutationRequest>(request);
+    if (!body || typeof body.path !== "string" || !body.path.trim()) {
+      sendJson(response, 400, { error: "path is required" });
+      return;
+    }
+    await removeWorkspaceFromRegistry(body.path);
+    await rebuildWorkspaces(context);
+    sendJson(response, 200, await summarizeWorkspace(context.workspace));
+    return;
   }
-  const body = await readJsonDocument(req);
-  if (!body.ok) {
-    sendJson(res, 400, { error: "a valid settings document is required" });
-    return true;
+
+  if (method === "GET" && path === "/api/current-changes") {
+    const selected = selectWorkingContext(
+      context.workspace,
+      url.searchParams.get("repo"),
+      url.searchParams.get("worktree"),
+    );
+    if ("error" in selected) {
+      sendJson(response, selected.status, { error: selected.error });
+      return;
+    }
+    sendJson(response, 200, await currentChanges(context, selected));
+    return;
   }
-  try {
-    const settings = await replaceSettings(body.value, {
-      ...(ifRevision === undefined ? {} : { ifRevision }),
+
+  if (method === "POST" && path === "/api/reviews") {
+    const body = await readJson<CreateReviewRequest>(request);
+    if (!validCreateRequest(body)) {
+      sendJson(response, 400, { error: "invalid first Review comment" });
+      return;
+    }
+    const selected = selectWorkingContext(
+      context.workspace,
+      body.repo,
+      body.worktree,
+    );
+    if ("error" in selected) {
+      sendJson(response, selected.status, { error: selected.error });
+      return;
+    }
+    const diff = await reviewDiff(selected);
+    const file = diff.files.find((candidate) => candidate.path === body.location.path);
+    if (!file || !rangeExists(file, body.location.side, body.location.startLine, body.location.endLine)) {
+      sendJson(response, 400, {
+        error: "selected line range is not present in Current changes",
+      });
+      return;
+    }
+    const review = await context.reviews.promoteFirstComment(
+      reviewContext(selected),
+      body,
+    );
+    sendJson(response, 201, {
+      review,
+      link: context.reviews.linkFor(review.id),
+    } satisfies ReviewResponse);
+    return;
+  }
+
+  const reviewDiffMatch = /^\/api\/reviews\/([^/]+)\/diff$/.exec(path);
+  if (method === "GET" && reviewDiffMatch) {
+    const review = await context.reviews.getReview(reviewDiffMatch[1]!);
+    const selected = await locateReviewContext(context.workspace, review);
+    if (!selected) {
+      sendJson(response, 409, {
+        error: "Review code is unavailable; its conversation is still readable",
+      });
+      return;
+    }
+    sendJson(response, 200, await reviewDiff(selected));
+    return;
+  }
+
+  const reviewMatch = /^\/api\/reviews\/([^/]+)$/.exec(path);
+  if (method === "GET" && reviewMatch) {
+    const review = await context.reviews.getReview(reviewMatch[1]!);
+    sendJson(response, 200, {
+      review,
+      link: context.reviews.linkFor(review.id),
+    } satisfies ReviewResponse);
+    return;
+  }
+
+  const threadMatch = /^\/api\/review-threads\/([^/]+)$/.exec(path);
+  if (method === "GET" && threadMatch) {
+    const exact = await context.reviews.getThread(threadMatch[1]!);
+    sendJson(response, 200, {
+      ...exact,
+      reviewLink: context.reviews.linkFor(exact.review.id),
     });
-    setSettingsEtag(res, settingsRevision(settings));
-    sendJson(res, 200, settings);
-  } catch (error) {
-    if (error instanceof SettingsValidationError) {
-      sendJson(res, 400, { error: error.message, issues: error.issues });
-      return true;
-    }
-    if (error instanceof SettingsConflictError) {
-      setSettingsEtag(res, error.currentRevision);
-      sendJson(res, 412, { error: error.message });
-      return true;
-    }
-    if (error instanceof SettingsBusyError) {
-      sendJson(res, 503, { error: error.message });
-      return true;
-    }
-    throw error;
+    return;
   }
-  return true;
+
+  if (path.startsWith("/api/") || isRemovedLegacyPath(path)) {
+    sendJson(response, 404, { error: "not found" });
+    return;
+  }
+
+  await serveStatic(context.webRoot, path, method, response);
 }
 
-/** Resolve caller context through the configured providers without registering it. */
-async function workspaceResolutionRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method !== "POST" || path !== "/workspace-resolution") return false;
-  if (!isLoopback(ctx.host)) {
-    sendJson(res, 403, {
-      error: "workspace resolution is only available on a loopback-bound daemon",
-    });
-    return true;
-  }
-
-  const body = await readJsonDocument(req);
-  if (!body.ok) {
-    sendJson(res, 400, { error: "a valid workspace resolution request is required" });
-    return true;
-  }
-  try {
-    const request = parseWorkspaceResolutionRequest(body.value);
-    sendJson(res, 200, await resolveWorkspace(request, await readSettings()));
-  } catch (error) {
-    if (error instanceof WorkspaceResolutionError) {
-      sendJson(res, 400, { error: error.message, issues: error.issues });
-    } else if (error instanceof SettingsValidationError) {
-      sendJson(res, 500, { error: "settings file is invalid", issues: error.issues });
-    } else if (error instanceof SettingsReadError) {
-      sendJson(res, 500, { error: error.message });
-    } else {
-      throw error;
-    }
-  }
-  return true;
+interface SelectedContext {
+  repo: DiscoveredRepo;
+  worktree: DiscoveredWorktree;
+  worktreeName: string | null;
 }
 
-/** Host-local UI state that survives desktop daemon port changes. */
-async function uiStateRoutes(
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method === "GET" && path === "/ui-state") {
-    sendJson(res, 200, await readUiState());
-    return true;
-  }
-  if (method === "POST" && path === "/ui-state") {
-    const body = (await readJsonBody<UiStateUpdate>(req)) ?? {};
-    sendJson(res, 200, await updateUiState(body));
-    return true;
-  }
-  return false;
-}
+type SelectionResult = SelectedContext | { error: string; status: 400 | 404 };
 
-/** `/workspace` summary + `/workspaces` list/add/remove. */
-async function workspaceRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method === "GET" && path === "/workspace") {
-    const requested = url.searchParams.get("workspace");
-    const workspace = requested ? workspaceView(ctx, requested) : ctx.ws;
-    if (!workspace) {
-      sendJson(res, 404, { error: `unknown workspace: ${requested}` });
-      return true;
-    }
-    const threads = await loadAllThreads(workspace);
-    const open = threads.filter((t) => t.status === "open").length;
-    sendJson(res, 200, await summarizeWorkspace(workspace, open, ctx.editors));
-    return true;
-  }
-  if (method === "GET" && path === "/workspaces") {
-    sendJson(res, 200, await listWorkspaces(ctx));
-    return true;
-  }
-  if ((method === "POST" || method === "DELETE") && path === "/workspaces") {
-    return mutateWorkspaceRoute(ctx, req, res, method, url.searchParams);
-  }
-  return false;
-}
-
-function workspaceView(ctx: RouteContext, requested: string): Workspace | null {
-  const root = resolve(requested);
-  const source = ctx.workspaces.find((candidate) => resolve(candidate.root) === root);
-  if (!source) return null;
-  // Repo API paths always resolve against the aggregate workspace (`ctx.ws`),
-  // where colliding repo basenames are globally deduped. Return those same names
-  // for a scoped workspace summary so the browser does not request `/repos/api`
-  // when the reachable route is `/repos/team-b-api`.
-  const repos = ctx.ws.repos.filter((repo) => repo.workspacePath && resolve(repo.workspacePath) === root);
-  return { root: source.root, repos };
-}
-
-/** Exact open review groups for one registered workspace and visible repo. */
-async function openReviewRoutes(
-  ctx: RouteContext,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method !== "GET" || path !== "/open-reviews") return false;
-  const requestedWorkspace = url.searchParams.get("workspace")?.trim();
-  const repoName = url.searchParams.get("repo")?.trim();
-  if (!requestedWorkspace || !repoName) {
-    sendJson(res, 400, { error: "workspace and repo are required" });
-    return true;
-  }
-
-  const workspaceRoot = resolve(requestedWorkspace);
-  const source = ctx.workspaces.find(
-    (workspace) => resolve(workspace.root) === workspaceRoot,
-  );
-  if (!source) {
-    sendJson(res, 404, { error: `unknown workspace: ${requestedWorkspace}` });
-    return true;
-  }
-  const repo = ctx.ws.repos.find(
-    (candidate) =>
-      candidate.name === repoName &&
-      candidate.workspacePath !== undefined &&
-      resolve(candidate.workspacePath) === workspaceRoot,
-  );
-  if (!repo) {
-    sendJson(res, 404, { error: `unknown repo in workspace: ${repoName}` });
-    return true;
-  }
-
-  const sourceRepo = source.repos.find(
-    (candidate) => resolve(candidate.root) === resolve(repo.root),
-  );
-  const storedRepoNames = new Set([repo.name]);
-  if (sourceRepo) storedRepoNames.add(sourceRepo.name);
-  sendJson(
-    res,
-    200,
-    await discoverOpenReviews({
-      workspaceRoot,
-      repo,
-      storedRepoNames,
-    }),
-  );
-  return true;
-}
-
-async function mutateWorkspaceRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  searchParams: URLSearchParams,
-): Promise<boolean> {
-  if (!isLoopback(ctx.host)) {
-    // Adding/removing a workspace opens an arbitrary host path; only allow it
-    // when the daemon is bound to loopback, never over a shared network.
-    sendJson(res, 403, {
-      error: "workspace management is only allowed on a loopback-bound daemon",
-    });
-    return true;
-  }
-  const body = await readJsonBody<WorkspaceMutationRequest>(req);
-  if (!body || typeof body.path !== "string" || !body.path.trim()) {
-    sendJson(res, 400, { error: "path is required" });
-    return true;
-  }
-  const workspacePath = resolve(body.path);
-  const summary = searchParams.get("summary") !== "0";
-  if (method === "POST") {
-    const alreadyLoaded = ctx.workspaces.some((workspace) => resolve(workspace.root) === workspacePath);
-    if (!alreadyLoaded) {
-      // Validate it's a real workspace (has a git repo) before registering.
-      try {
-        await discoverWorkspace(workspacePath);
-      } catch (err) {
-        sendJson(res, 400, { error: (err as Error).message });
-        return true;
-      }
-    }
-    await addWorkspaceToRegistry(workspacePath);
-    if (!alreadyLoaded) await rebuildWorkspaces(ctx);
-  } else {
-    await removeWorkspaceFromRegistry(workspacePath);
-    await rebuildWorkspaces(ctx);
-  }
-  if (!summary) {
-    res.writeHead(204);
-    res.end();
-    return true;
-  }
-  sendJson(res, 200, await listWorkspaces(ctx));
-  return true;
-}
-
-/** `GET /threads` (filtered) and `POST /threads` (create). */
-async function threadCollectionRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method === "GET" && path === "/threads") {
-    const rawStatus = url.searchParams.get("status");
-    // "resolved" stays accepted as a silent alias for the renamed "closed" status.
-    const status = rawStatus === "resolved" ? "closed" : rawStatus;
-    const repoFilter = url.searchParams.get("repo");
-    const spaceFilter = url.searchParams.get("space");
-    const worktreeFilter = url.searchParams.get("worktree");
-    const sessionFilter = url.searchParams.get("session");
-    let threads = await loadRefreshedThreads(ctx.ws);
-    if (status) threads = threads.filter((t) => t.status === status);
-    if (repoFilter) threads = threads.filter((t) => t.repo === repoFilter);
-    if (spaceFilter) threads = threads.filter((t) => t.spacePath === resolve(spaceFilter));
-    if (worktreeFilter)
-      threads = threads.filter((t) => t.worktree === worktreeFilter);
-    if (sessionFilter) {
-      // Canonical ids are exact. Only fall back to the old kind/base/head alias
-      // when no canonical group matches; that alias may intentionally span the
-      // checkouts or range modes that the old identity used to collapse.
-      const exact = threads.filter((t) => t.sessionId === sessionFilter);
-      if (exact.length > 0) {
-        threads = exact;
-      } else {
-        const storedAliases = await findThreadKeysByStoredSession(
-          ctx.ws,
-          sessionFilter,
-        );
-        threads = threads.filter(
-          (t) =>
-            threadMatchesStoredSession(t, storedAliases) ||
-            (t.scope !== null &&
-              legacySessionIdForScope(t.scope) === sessionFilter),
-        );
-      }
-    }
-    sendJson(res, 200, threads);
-    return true;
-  }
-  if (method === "POST" && path === "/threads") {
-    return createThreadRoute(ctx, req, res);
-  }
-  return false;
-}
-
-async function createThreadRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<boolean> {
-  const body = await readJsonBody<CreateThreadRequest>(req);
-  if (!body || typeof body.body !== "string" || !body.body.trim()) {
-    sendJson(res, 400, { error: "body is required" });
-    return true;
-  }
-  const targetLevel = body.file
-    ? "file"
-    : body.targetLevel === "space"
-      ? "space"
-      : "repo";
-  const spacePath = body.spacePath
-    ? resolveSpacePath(ctx, res, body.spacePath)
-    : null;
-  if (body.spacePath && !spacePath) return true;
-
-  if (targetLevel === "space") {
-    if (!spacePath) {
-      sendJson(res, 400, { error: "spacePath is required for space comments" });
-      return true;
-    }
-    const thread = await createThread(
-      spaceThreadStore(spacePath),
-      {
-        ...body,
-        repo: null,
-        worktree: null,
-        targetLevel,
-        file: null,
-        side: null,
-        line: null,
-        endLine: null,
-        anchor: null,
-        scope: null,
-        sessionId: null,
-        snapshotId: null,
-      },
-      ctx.now(),
-    );
-    thread.spacePath = spacePath;
-    ctx.events.notify(DAEMON_EVENTS.threadChanged);
-    sendJson(res, 201, thread);
-    return true;
-  }
-
-  if (targetLevel === "file" && !body.repo && spacePath && body.file) {
-    const lines = await readSpaceFileLines(spacePath, body.file);
-    if (!lines) {
-      sendJson(res, 404, { error: "file not found or binary" });
-      return true;
-    }
-    const anchor = body.line
-      ? computeAnchor(lines, body.line, body.endLine ?? null, null)
-      : null;
-    const thread = await createThread(
-      spaceThreadStore(spacePath),
-      {
-        ...body,
-        repo: null,
-        worktree: null,
-        targetLevel,
-        anchor,
-        scope: null,
-        sessionId: null,
-        snapshotId: null,
-      },
-      ctx.now(),
-    );
-    thread.spacePath = spacePath;
-    ctx.events.notify(DAEMON_EVENTS.threadChanged);
-    sendJson(res, 201, thread);
-    return true;
-  }
-
-  const resolved = resolveRepoTarget(ctx, res, body.repo ?? undefined, body.worktree ?? null);
-  if (!resolved) return true;
-  const { repo, treeRoot } = resolved;
-  // Bind repo/file comments to the changeset they were filed under: resolve the
-  // scope (target spec → base/head + session) server-side, anchor file comments
-  // against the scope's base, and persist both so the comment belongs to the
-  // branch/scope, not the worktree directory.
-  const scope = await resolveScope(
-    treeRoot,
-    normalizeTarget(body.target),
-    body.worktree ?? null,
-  );
-  const anchor = await buildAnchor(treeRoot, scope.baseSha, body);
-  // Record which snapshot (iteration) of the scope the comment was filed against.
-  const snapshotId = await snapshotIdForState(treeRoot, scope);
-  const store = spacePath ? spaceThreadStore(spacePath) : repo.root;
-  const thread = await createThread(
-    store,
-    {
-      ...body,
-      repo: repo.name,
-      targetLevel,
-      anchor,
-      scope,
-      sessionId: sessionIdForScope(scope, body.worktree ?? null),
-      snapshotId,
-    },
-    ctx.now(),
-  );
-  if (spacePath) {
-    thread.spacePath = spacePath;
-    ctx.events.notify(DAEMON_EVENTS.threadChanged);
-  }
-  sendJson(res, 201, thread);
-  return true;
-}
-
-/** `POST /threads/:id/{comments,resolve,delete}`. */
-async function threadItemRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method !== "POST") return false;
-
-  const commentMatch = /^\/threads\/([^/]+)\/comments$/.exec(path);
-  if (commentMatch) {
-    const id = decodeURIComponent(commentMatch[1]!);
-    const body = await readJsonBody<AddCommentRequest>(req);
-    if (!body || typeof body.body !== "string" || !body.body.trim()) {
-      sendJson(res, 400, { error: "body is required" });
-      return true;
-    }
-    await withThread(res, async () =>
-      addComment(await requireThreadStore(ctx, id), id, body, ctx.now()),
-    );
-    return true;
-  }
-
-  const resolveMatch = /^\/threads\/([^/]+)\/resolve$/.exec(path);
-  if (resolveMatch) {
-    const id = decodeURIComponent(resolveMatch[1]!);
-    const body = (await readJsonBody<ResolveThreadRequest>(req)) ?? {};
-    await withThread(res, async () =>
-      resolveThread(await requireThreadStore(ctx, id), id, body, ctx.now()),
-    );
-    return true;
-  }
-
-  const deleteMatch = /^\/threads\/([^/]+)\/delete$/.exec(path);
-  if (deleteMatch) {
-    return deleteThreadRoute(ctx, req, res, decodeURIComponent(deleteMatch[1]!));
-  }
-  return false;
-}
-
-async function deleteThreadRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  id: string,
-): Promise<boolean> {
-  const body = (await readJsonBody<DeleteThreadRequest>(req)) ?? {};
-  try {
-    await deleteThread(await requireThreadStore(ctx, id), id, body, ctx.now());
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    if (err instanceof UnknownThreadError) {
-      sendJson(res, 404, { error: err.message });
-    } else {
-      throw err;
-    }
-  }
-  return true;
-}
-
-/** `GET/PUT /pr-draft` — repo-scoped local PR draft packet. */
-async function prDraftRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (path !== "/pr-draft" || (method !== "GET" && method !== "PUT")) return false;
-  const workspacePath = resolveSpacePath(ctx, res, url.searchParams.get("workspace") ?? ctx.ws.root);
-  if (!workspacePath) return true;
-
-  const target = await resolvePrDraftTarget(
-    ctx,
-    res,
-    workspacePath,
-    url.searchParams.get("repo") ?? undefined,
-    url.searchParams.get("worktree"),
-  );
-  if (!target) return true;
-
-  if (method === "GET") {
-    sendJson(res, 200, await readPrDraft(target));
-    return true;
-  }
-  const body = (await readJsonBody<PrDraftUpdateRequest>(req)) ?? {};
-  if (body.title !== undefined && typeof body.title !== "string") {
-    sendJson(res, 400, { error: "title must be a string" });
-    return true;
-  }
-  if (body.body !== undefined && typeof body.body !== "string") {
-    sendJson(res, 400, { error: "body must be a string" });
-    return true;
-  }
-  const next = await updatePrDraft(target, body, ctx.now());
-  ctx.events.notify(DAEMON_EVENTS.threadChanged);
-  sendJson(res, 200, next);
-  return true;
-}
-
-/** `GET /space/files` and `GET /space/file` — non-repo files under a review space. */
-async function spaceFileRoutes(
-  ctx: RouteContext,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method !== "GET" || (path !== "/space/files" && path !== "/space/file")) {
-    return false;
-  }
-  const workspacePath = resolveSpacePath(ctx, res, url.searchParams.get("workspace") ?? ctx.ws.root);
-  if (!workspacePath) return true;
-
-  if (path === "/space/files") {
-    const repos = ctx.ws.repos.filter((r) => (r.workspacePath ?? ctx.ws.root) === workspacePath);
-    sendJson(
-      res,
-      200,
-      await listSpaceFiles(workspacePath, repos.flatMap((r) => r.worktrees.map((w) => w.root))),
-    );
-    return true;
-  }
-
-  const file = url.searchParams.get("path");
-  const from = Number(url.searchParams.get("from"));
-  const to = Number(url.searchParams.get("to"));
-  if (!file || !Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
-    sendJson(res, 400, { error: "path, from, and to (from<=to, from>=1) required" });
-    return true;
-  }
-  const all = await readSpaceFileLines(workspacePath, file);
-  if (!all) {
-    sendJson(res, 404, { error: "file not found or binary" });
-    return true;
-  }
-  sendJson(res, 200, { from, lines: all.slice(from - 1, Math.min(to, from - 1 + 2000)) });
-  return true;
-}
-
-/** `GET /repos/:repo/diff` and `GET /repos/:repo/refs`. */
-async function repoRoutes(
-  ctx: RouteContext,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method !== "GET") return false;
-  const worktree = url.searchParams.get("worktree");
-
-  const diffMatch = /^\/repos\/(.+)\/diff$/.exec(path);
-  if (diffMatch) {
-    const repoName = decodeURIComponent(diffMatch[1]!);
-    const treeRoot = resolveRepoTreeOr404(ctx, res, repoName, worktree);
-    if (!treeRoot) return true;
-    const target = normalizeTarget(url.searchParams.get("target"));
-    const includeIgnored = url.searchParams.get("includeIgnored") === "1";
-    const diff = await computeTargetDiff(treeRoot, target, { includeIgnored });
-    // Stamp the resolved scope/session so the client can bind and filter threads
-    // to the current review without resolving git refs itself.
-    const scope = await resolveScope(treeRoot, target, worktree);
-    sendJson(res, 200, {
-      ...diff,
-      repo: repoName,
-      worktree,
-      scope,
-      sessionId: sessionIdForScope(scope, worktree),
-      // The live snapshot the client compares each thread's snapshotId against to
-      // flag threads filed in an earlier iteration of this scope. Omit (not null)
-      // when none can be computed (unborn HEAD), matching the optional field.
-      currentSnapshotId: (await snapshotIdForState(treeRoot, scope)) ?? undefined,
-    });
-    return true;
-  }
-
-  const refSearchMatch = /^\/repos\/(.+)\/refs\/search$/.exec(path);
-  if (refSearchMatch) {
-    const treeRoot = resolveRepoTreeOr404(
-      ctx,
-      res,
-      decodeURIComponent(refSearchMatch[1]!),
-      worktree,
-    );
-    if (!treeRoot) return true;
-    const numberParam = (name: string) => {
-      const raw = url.searchParams.get(name);
-      return raw ? Number(raw) : undefined;
-    };
-    sendJson(
-      res,
-      200,
-      await searchRefs(
-        treeRoot,
-        url.searchParams.get("q") ?? "",
-        numberParam("limit"),
-        {
-          branchOffset: numberParam("branchOffset"),
-          branchLimit: numberParam("branchLimit"),
-          remoteOffset: numberParam("remoteOffset"),
-          remoteLimit: numberParam("remoteLimit"),
-          commitOffset: numberParam("commitOffset"),
-          commitLimit: numberParam("commitLimit"),
-        },
-      ),
-    );
-    return true;
-  }
-
-  const refsMatch = /^\/repos\/(.+)\/refs$/.exec(path);
-  if (refsMatch) {
-    const treeRoot = resolveRepoTreeOr404(
-      ctx,
-      res,
-      decodeURIComponent(refsMatch[1]!),
-      worktree,
-    );
-    if (!treeRoot) return true;
-    sendJson(res, 200, await listRefs(treeRoot));
-    return true;
-  }
-
-  const filesMatch = /^\/repos\/(.+)\/files$/.exec(path);
-  if (filesMatch) {
-    const treeRoot = resolveRepoTreeOr404(
-      ctx,
-      res,
-      decodeURIComponent(filesMatch[1]!),
-      worktree,
-    );
-    if (!treeRoot) return true;
-    const includeIgnored = url.searchParams.get("includeIgnored") === "1";
-    sendJson(res, 200, await listTrackedFiles(treeRoot, includeIgnored));
-    return true;
-  }
-  return false;
-}
-
-/**
- * `GET /repos/:repo/file/content?path=&oldPath=&target=&worktree=` — full old/new
- * content for the diff's two sides under a target. Lets the client render
- * expandable collapsed context and the diff library validate without
- * reconstructing the file (which otherwise warns in dev for any normal diff).
- */
-async function fileContentRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  const m = /^\/repos\/(.+)\/file\/content$/.exec(path);
-  if (!m || (method !== "GET" && method !== "PUT")) return false;
-  const q = url.searchParams;
-  const treeRoot = resolveRepoTreeOr404(
-    ctx,
-    res,
-    decodeURIComponent(m[1]!),
-    q.get("worktree"),
-  );
-  if (!treeRoot) return true;
-  const file = q.get("path");
-  if (!file) {
-    sendJson(res, 400, { error: "path required" });
-    return true;
-  }
-  const target = normalizeTarget(q.get("target"));
-
-  if (method === "GET") {
-    const content = await readTargetFileContent(treeRoot, target, file, q.get("oldPath") || file);
-    sendJson(res, 200, content);
-    return true;
-  }
-
-  if (!isLoopback(ctx.host)) {
-    sendJson(res, 403, { error: "editing files is only allowed on a loopback-bound daemon" });
-    return true;
-  }
-  if (target.kind !== "work" && target.kind !== "unstaged" && target.kind !== "ref") {
-    sendJson(res, 400, { error: "only working-tree targets are editable" });
-    return true;
-  }
-  const body = await readJsonBody<WriteFileContentRequest>(req);
-  if (!body || typeof body.content !== "string") {
-    sendJson(res, 400, { error: "content is required" });
-    return true;
-  }
-  if (!(await writeWorktreeFileContent(treeRoot, file, body.content))) {
-    sendJson(res, 404, { error: "file not found or not editable" });
-    return true;
-  }
-  sendJson(res, 200, { ok: true });
-  return true;
-}
-
-/** `GET /repos/:repo/file?path=&side=&from=&to=` — lines for unfolding context. */
-async function fileRoute(
-  ctx: RouteContext,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  const m = /^\/repos\/(.+)\/file$/.exec(path);
-  if (!(method === "GET" && m)) return false;
-  const q = url.searchParams;
-  const treeRoot = resolveRepoTreeOr404(
-    ctx,
-    res,
-    decodeURIComponent(m[1]!),
-    q.get("worktree"),
-  );
-  if (!treeRoot) return true;
-  const file = q.get("path");
-  const side = q.get("side") === "old" ? "old" : "new";
-  const from = Number(q.get("from"));
-  const to = Number(q.get("to"));
-  if (!file || !Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
-    sendJson(res, 400, { error: "path, from, and to (from<=to, from>=1) required" });
-    return true;
-  }
-  const base = side === "old" ? await resolveWorkBase(treeRoot) : null;
-  const all = await readSideLines(treeRoot, file, side, base);
-  if (!all) {
-    sendJson(res, 404, { error: "file not found or binary" });
-    return true;
-  }
-  // Clamp the span so a huge `to` can't return an enormous payload.
-  const lines = all.slice(from - 1, Math.min(to, from - 1 + 2000));
-  sendJson(res, 200, { from, lines });
-  return true;
-}
-
-/** Resolve repo+worktree to a tree root, sending a 404 and returning null on miss. */
-function resolveRepoTreeOr404(
-  ctx: RouteContext,
-  res: ServerResponse,
-  repoName: string,
-  worktree: string | null,
-): string | null {
-  const repo = findRepo(ctx.ws, repoName);
-  if (!repo) {
-    sendJson(res, 404, { error: `unknown repo: ${repoName}` });
-    return null;
-  }
-  const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
-  if (!treeRoot) {
-    sendJson(res, 404, { error: `unknown worktree: ${worktree}` });
-    return null;
-  }
-  return treeRoot;
-}
-
-/** `POST /open` editor handoff. */
-async function editorRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (!(method === "POST" && path === "/open")) return false;
-  const body = await readJsonBody<OpenRequest>(req);
-  if (!body?.editor) {
-    sendJson(res, 400, { error: "editor is required" });
-    return true;
-  }
-  try {
-    if (body.workspacePath) {
-      const workspacePath = resolve(body.workspacePath);
-      const workspace = ctx.workspaces.find((w) => w.root === workspacePath);
-      if (!workspace) {
-        sendJson(res, 404, { error: `unknown workspace: ${body.workspacePath}` });
-        return true;
-      }
-      if (body.file) {
-        await openInEditor(workspace.root, body.file, body.line ?? 1, body.editor);
-      } else {
-        await openWorkspaceInEditor(workspace.root, body.editor);
-      }
-    } else {
-      if (!body.repo) {
-        sendJson(res, 400, { error: "repo or workspacePath is required" });
-        return true;
-      }
-      const target = resolveRepoTarget(ctx, res, body.repo, body.worktree ?? null);
-      if (!target) return true;
-      if (body.file) {
-        await openInEditor(target.treeRoot, body.file, body.line ?? 1, body.editor);
-      } else {
-        await openWorkspaceInEditor(target.treeRoot, body.editor);
-      }
-    }
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    // Bad input (unsupported editor, path escaping the repo) is a 400, not a 500.
-    if (err instanceof UnknownEditorError || err instanceof PathEscapeError) {
-      sendJson(res, 400, { error: err.message });
-    } else {
-      throw err;
-    }
-  }
-  return true;
-}
-
-/** `POST /open-url` opens a web URL in the host browser. */
-async function externalUrlRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (!(method === "POST" && path === "/open-url")) return false;
-  if (!isLoopback(ctx.host)) {
-    sendJson(res, 403, { error: "opening URLs is only allowed on a loopback-bound daemon" });
-    return true;
-  }
-  const body = await readJsonBody<OpenUrlRequest>(req);
-  if (!body || typeof body.url !== "string") {
-    sendJson(res, 400, { error: "url is required" });
-    return true;
-  }
-  try {
-    await openExternalUrl(body.url);
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    if (err instanceof UnsupportedUrlError) {
-      sendJson(res, 400, { error: err.message });
-    } else {
-      throw err;
-    }
-  }
-  return true;
-}
-
-/**
- * `POST /attachments` (upload, loopback-only) and `GET /attachments/:id` (serve).
- * The body is raw file bytes with the mime in Content-Type and an optional
- * X-Filename header; the response gives back a content-addressed URL to embed.
- */
-async function attachmentRoutes(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (method === "POST" && path === "/attachments") {
-    return uploadAttachmentRoute(ctx, req, res);
-  }
-  const m = /^\/attachments\/(.+)$/.exec(path);
-  if (method === "GET" && m) {
-    return serveAttachmentRoute(res, decodeURIComponent(m[1]!));
-  }
-  return false;
-}
-
-async function uploadAttachmentRoute(
-  ctx: RouteContext,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<boolean> {
-  if (!isLoopback(ctx.host)) {
-    // Uploading writes host files; only over loopback, never a shared network.
-    sendJson(res, 403, { error: "uploads are only allowed on a loopback-bound daemon" });
-    return true;
-  }
-  let bytes: Buffer;
-  try {
-    bytes = await readRawBody(req, MAX_ATTACHMENT_BYTES);
-  } catch (err) {
-    if (!(err instanceof BodyTooLargeError)) throw err;
-    sendJson(res, 413, { error: "attachment too large" });
-    return true;
-  }
-  if (bytes.length === 0) {
-    sendJson(res, 400, { error: "empty attachment" });
-    return true;
-  }
-  const mime = (req.headers["content-type"] ?? "").split(";")[0]!.trim();
-  const filename = decodeHeader(header(req.headers["x-filename"]));
-  const { id } = await storeAttachment(bytes, mime, filename);
-  sendJson(res, 200, { url: `/attachments/${id}`, name: filename ?? id });
-  return true;
-}
-
-async function serveAttachmentRoute(
-  res: ServerResponse,
-  id: string,
-): Promise<boolean> {
-  if (!isValidAttachmentId(id)) {
-    // Reject anything but `<sha>.<ext>` — closes path traversal on the id.
-    sendJson(res, 400, { error: "bad attachment id" });
-    return true;
-  }
-  const info = await stat(attachmentPath(id)).catch(() => null);
-  if (!info) {
-    sendJson(res, 404, { error: "not found" });
-    return true;
-  }
-  const mime = attachmentMime(id);
-  // Real raster images may render inline (so <img> embeds work); everything else
-  // — including SVG, which can carry script — downloads instead of rendering on a
-  // direct hit. <img> requests ignore Content-Disposition, so embeds still work.
-  const inline = mime.startsWith("image/") && mime !== "image/svg+xml";
-  res.writeHead(200, {
-    "content-type": mime,
-    "content-length": info.size,
-    "content-disposition": inline ? "inline" : "attachment",
-    // Defang any uploaded active content (e.g. scripted SVG) on direct hits.
-    "content-security-policy": "default-src 'none'; sandbox",
-    "x-content-type-options": "nosniff",
-  });
-  createReadStream(attachmentPath(id)).pipe(res);
-  return true;
-}
-
-/** The client percent-encodes the filename so non-ASCII survives the header. */
-function decodeHeader(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value; // keep raw if it isn't valid percent-encoding
-  }
-}
-
-/**
- * `GET /fs/list?path=` (folder browser) and `GET /recommendations` (recent
- * Claude/pi project roots). Both read host directories, so they're loopback-only.
- */
-async function discoveryRoutes(
-  ctx: RouteContext,
-  res: ServerResponse,
-  url: URL,
-  method: string,
-  path: string,
-): Promise<boolean> {
-  if (!(method === "GET" && (path === "/fs/list" || path === "/recommendations"))) {
-    return false;
-  }
-  if (!isLoopback(ctx.host)) {
-    sendJson(res, 403, { error: "discovery is only allowed on a loopback-bound daemon" });
-    return true;
-  }
-  if (path === "/recommendations") {
-    sendJson(res, 200, await recommendations());
-    return true;
-  }
-  try {
-    sendJson(res, 200, await listDir(url.searchParams.get("path") ?? undefined));
-  } catch (err) {
-    if (err instanceof FsBrowseError) sendJson(res, 400, { error: err.message });
-    else throw err;
-  }
-  return true;
-}
-
-/** First value of a possibly-array header, trimmed; undefined if absent/empty. */
-function header(value: string | string[] | undefined): string | undefined {
-  const v = Array.isArray(value) ? value[0] : value;
-  const trimmed = v?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-/**
- * Resolve the central store (repo root) that owns a thread id, scanning every
- * repo in the workspace. Throws UnknownThreadError (→ 404 via withThread) when
- * no repo claims it, so mutations carrying only an id route to the right log.
- */
-async function requireThreadStore(
-  ctx: RouteContext,
-  id: string,
-): Promise<ThreadStoreRef> {
-  const store = await findStoreForThread(ctx.ws, id);
-  if (!store) throw new UnknownThreadError(id);
-  return store;
-}
-
-function resolveSpacePath(
-  ctx: RouteContext,
-  res: ServerResponse,
-  path: string,
-): string | null {
-  const abs = resolve(path);
-  if (!workspacePaths(ctx.ws).includes(abs)) {
-    sendJson(res, 400, { error: `unknown space: ${path}` });
-    return null;
-  }
-  return abs;
-}
-
-async function resolvePrDraftTarget(
-  ctx: RouteContext,
-  res: ServerResponse,
-  workspacePath: string,
-  repoName: string | undefined,
-  worktree: string | null,
-): Promise<PrDraftScope | null> {
-  const repos = ctx.ws.repos.filter((candidate) => (candidate.workspacePath ?? ctx.ws.root) === workspacePath);
-  const repo = repoName
-    ? repos.find((candidate) => candidate.name === repoName)
-    : repos.length === 1
-      ? repos[0]
+function selectWorkingContext(
+  workspace: Workspace,
+  requestedRepo: string | null,
+  requestedWorktree: string | null,
+): SelectionResult {
+  const repo = requestedRepo
+    ? findRepo(workspace, requestedRepo)
+    : workspace.repos.length === 1
+      ? workspace.repos[0]
       : undefined;
   if (!repo) {
-    sendJson(res, 400, {
-      error: repoName ? `unknown repo: ${repoName}` : "repo is required for multi-repo workspaces",
-    });
-    return null;
+    return {
+      status: requestedRepo ? 404 : 400,
+      error: requestedRepo ? `unknown repository: ${requestedRepo}` : "repo is required",
+    };
   }
-  const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
-  const repoRoot = resolveRepoRoot(ctx.ws, repo.name, null);
-  if (!treeRoot || !repoRoot) {
-    sendJson(res, 400, { error: `unknown worktree: ${worktree}` });
-    return null;
+  const worktree = requestedWorktree
+    ? repo.worktrees.find((candidate) => candidate.name === requestedWorktree)
+    : repo.worktrees.find((candidate) => candidate.root === repo.root);
+  if (!worktree) {
+    return {
+      status: 404,
+      error: `unknown worktree: ${requestedWorktree ?? "primary"}`,
+    };
   }
   return {
-    workspacePath,
-    repo: repo.name,
-    repoRoot,
+    repo,
     worktree,
-    branch: await resolveCurrentBranch(treeRoot),
+    worktreeName: worktree.root === repo.root ? null : worktree.name,
   };
 }
 
-/**
- * Resolve a repo name + worktree to its repo and working-tree root, sending a 400
- * and returning null on bad input. Shared by the create-thread and open routes.
- */
-function resolveRepoTarget(
-  ctx: RouteContext,
-  res: ServerResponse,
-  repoName: string | undefined,
-  worktree: string | null,
-): { repo: DiscoveredRepo; treeRoot: string } | null {
-  const repo = repoName ? findRepo(ctx.ws, repoName) : undefined;
-  if (!repo) {
-    sendJson(res, 400, { error: `unknown repo: ${repoName}` });
-    return null;
-  }
-  const treeRoot = resolveRepoRoot(ctx.ws, repo.name, worktree);
-  if (!treeRoot) {
-    sendJson(res, 400, { error: `unknown worktree: ${worktree}` });
-    return null;
-  }
-  return { repo, treeRoot };
+function reviewContext(selected: SelectedContext): ReviewContext {
+  return {
+    repositoryRoot: selected.repo.root,
+    worktreeRoot: selected.worktree.root,
+  };
 }
 
-/** Run a thread mutation, mapping a missing thread to 404. */
-async function withThread(
-  res: ServerResponse,
-  op: () => Promise<unknown>,
-): Promise<void> {
-  try {
-    sendJson(res, 200, await op());
-  } catch (err) {
-    if (err instanceof UnknownThreadError) {
-      sendJson(res, 404, { error: err.message });
-    } else {
-      throw err;
+async function currentChanges(
+  context: RouteContext,
+  selected: SelectedContext,
+): Promise<CurrentChangesResponse> {
+  const repository = (await summarizeRepos([selected.repo]))[0]!;
+  const worktree = repository.worktrees.find(
+    (candidate) => candidate.root === selected.worktree.root,
+  )!;
+  const [review, diff] = await Promise.all([
+    context.reviews.findWritable(reviewContext(selected)),
+    reviewDiff(selected),
+  ]);
+  return { repository, worktree, review, diff };
+}
+
+async function reviewDiff(selected: SelectedContext): Promise<ReviewDiff> {
+  const diff = await computeWorkDiff(selected.worktree.root);
+  const files = await Promise.all(
+    diff.files.map(async (file) => ({
+      ...file,
+      ...(await readWorkFileContent(
+        selected.worktree.root,
+        file.path,
+        file.oldPath ?? file.path,
+      )),
+    })),
+  );
+  return {
+    repo: selected.repo.name,
+    worktree: selected.worktreeName,
+    target: "work",
+    files,
+  };
+}
+
+async function locateReviewContext(
+  workspace: Workspace,
+  review: { repository: { root: string }; worktree: { root: string } },
+): Promise<SelectedContext | null> {
+  for (const repo of workspace.repos) {
+    let repositoryRoot: string;
+    try {
+      repositoryRoot = await realpath(repo.root);
+    } catch {
+      continue;
+    }
+    if (repositoryRoot !== review.repository.root) continue;
+    for (const worktree of repo.worktrees) {
+      try {
+        if ((await realpath(worktree.root)) === review.worktree.root) {
+          return {
+            repo,
+            worktree,
+            worktreeName: worktree.root === repo.root ? null : worktree.name,
+          };
+        }
+      } catch {
+        // Continue looking; exact Review metadata remains readable.
+      }
     }
   }
+  return null;
 }
 
-/** Group the aggregate repos back by their source workspace path. */
-async function listWorkspaces(ctx: RouteContext): Promise<WorkspaceEntry[]> {
-  const byPath = new Map<string, DiscoveredRepo[]>();
-  for (const repo of ctx.ws.repos) {
-    const key = repo.workspacePath ?? ctx.ws.root;
-    const list = byPath.get(key);
-    if (list) list.push(repo);
-    else byPath.set(key, [repo]);
-  }
-  return Promise.all(
-    [...byPath].map(async ([path, repos]) => ({
-      path,
-      repos: await summarizeRepos(repos),
-    })),
+function validCreateRequest(value: unknown): value is CreateReviewRequest {
+  if (!value || typeof value !== "object") return false;
+  const request = value as Partial<CreateReviewRequest>;
+  return (
+    typeof request.repo === "string" &&
+    request.repo.length > 0 &&
+    (request.worktree === null || typeof request.worktree === "string") &&
+    validReviewLocation(request.location) &&
+    (request.severity === null ||
+      request.severity === "must-fix" ||
+      request.severity === "suggestion" ||
+      request.severity === "nit" ||
+      request.severity === "question") &&
+    !!request.author &&
+    (request.author.type === "user" || request.author.type === "agent") &&
+    (request.author.name === undefined ||
+      (typeof request.author.name === "string" && request.author.name.trim().length > 0)) &&
+    typeof request.body === "string" &&
+    request.body.trim().length > 0
   );
 }
 
-/** Loopback hosts may manage workspaces; a network-bound daemon may not. */
+function rangeExists(
+  file: { old: string | null; new: string | null },
+  side: "old" | "new",
+  startLine: number,
+  endLine: number,
+): boolean {
+  const content = file[side];
+  if (content === null) return false;
+  const lineCount = content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
+  return startLine > 0 && endLine >= startLine && endLine <= lineCount;
+}
+
+class BodyTooLargeError extends Error {}
+class UnsupportedMediaTypeError extends Error {}
+
+async function readJson<T>(request: IncomingMessage): Promise<T> {
+  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim();
+  if (contentType !== "application/json") throw new UnsupportedMediaTypeError();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > 1_048_576) throw new BodyTooLargeError();
+    chunks.push(buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+  } catch {
+    throw new InvalidFirstReviewCommentError("request body must be valid JSON");
+  }
+}
+
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  value: unknown,
+  close = false,
+): void {
+  const body = JSON.stringify(value);
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+    ...(close ? { connection: "close" } : {}),
+  });
+  response.end(body);
+}
+
+async function serveStatic(
+  webRoot: string | undefined,
+  requestPath: string,
+  method: string,
+  response: ServerResponse,
+): Promise<void> {
+  if (method !== "GET" && method !== "HEAD") {
+    sendJson(response, 405, { error: "method not allowed" });
+    return;
+  }
+  if (!webRoot) {
+    sendJson(response, 404, { error: "not found" });
+    return;
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(requestPath);
+  } catch {
+    sendJson(response, 400, { error: "invalid path" });
+    return;
+  }
+  const relative = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
+  let candidate = resolve(webRoot, relative);
+  const root = resolve(webRoot);
+  if (candidate !== root && !candidate.startsWith(`${root}${sep}`)) {
+    sendJson(response, 404, { error: "not found" });
+    return;
+  }
+
+  let file = await fileStat(candidate);
+  if (!file && !extname(relative)) {
+    candidate = join(root, "index.html");
+    file = await fileStat(candidate);
+  }
+  if (!file?.isFile()) {
+    sendJson(response, 404, { error: "not found" });
+    return;
+  }
+
+  response.writeHead(200, {
+    "content-type": mimeType(candidate),
+    "content-length": file.size,
+  });
+  if (method === "HEAD") {
+    response.end();
+    return;
+  }
+  createReadStream(candidate).pipe(response);
+}
+
+async function fileStat(path: string) {
+  try {
+    return await stat(path);
+  } catch {
+    return null;
+  }
+}
+
+function mimeType(path: string): string {
+  switch (extname(path)) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function isRemovedLegacyPath(path: string): boolean {
+  return (
+    path === "/workspace" ||
+    path === "/workspaces" ||
+    path === "/events" ||
+    path === "/threads" ||
+    path === "/open-reviews" ||
+    path === "/settings" ||
+    path === "/ui-state" ||
+    path === "/workspace-resolution" ||
+    path === "/pr-draft" ||
+    path === "/space/files" ||
+    path === "/space/file" ||
+    path === "/open" ||
+    path === "/open-url" ||
+    path === "/attachments" ||
+    path === "/recommendations" ||
+    path === "/fs/list" ||
+    path.startsWith("/repos/") ||
+    path.startsWith("/threads/") ||
+    path.startsWith("/attachments/")
+  );
+}
+
 function isLoopback(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 
-function isLoopbackRequest(req: IncomingMessage): boolean {
-  const host = req.headers.host;
+function isLoopbackRequest(request: IncomingMessage): boolean {
+  const host = request.headers.host;
   if (!host || !isLoopbackAuthority(host)) return false;
-
-  const origin = req.headers.origin;
+  const origin = request.headers.origin;
   return !origin || isLoopbackOrigin(origin);
 }
 
@@ -1412,136 +631,4 @@ function isLoopbackOrigin(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function setSettingsEtag(res: ServerResponse, revision: string): void {
-  res.setHeader("etag", `"${revision}"`);
-}
-
-function settingsIfMatchRevision(
-  value: string | string[] | undefined,
-): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (Array.isArray(value)) return null;
-  const match = /^"([a-f0-9]{64})"$/.exec(value);
-  return match?.[1] ?? null;
-}
-
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  // A streamed static response may already be in flight; never double-send.
-  if (res.headersSent) {
-    res.end();
-    return;
-  }
-  const json = JSON.stringify(payload);
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(json),
-    "cache-control": "no-store",
-  });
-  res.end(json);
-}
-
-/** Max accepted request body. Review comments are small; cap to avoid OOM. */
-const MAX_BODY_BYTES = 1024 * 1024;
-
-class BodyTooLargeError extends Error {}
-class UnsupportedMediaTypeError extends Error {}
-
-/** Buffer the request body up to `maxBytes`, throwing past the cap. */
-async function readRawBody(
-  req: IncomingMessage,
-  maxBytes: number,
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > maxBytes) {
-      // Stop reading but leave the socket intact so the 413 response can flush;
-      // pausing avoids buffering the rest of an oversize upload.
-      req.pause();
-      throw new BodyTooLargeError();
-    }
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks);
-}
-
-type JsonDocument =
-  | { ok: true; value: unknown }
-  | { ok: false };
-
-/** Distinguish malformed/empty input from a successfully parsed JSON `null`. */
-async function readJsonDocument(req: IncomingMessage): Promise<JsonDocument> {
-  const contentType = (req.headers["content-type"] ?? "")
-    .split(";", 1)[0]!
-    .trim()
-    .toLowerCase();
-  if (contentType !== "application/json") throw new UnsupportedMediaTypeError();
-
-  const raw = (await readRawBody(req, MAX_BODY_BYTES)).toString("utf8");
-  if (!raw.trim()) return { ok: false };
-  try {
-    return { ok: true, value: JSON.parse(raw) as unknown };
-  } catch {
-    return { ok: false };
-  }
-}
-
-async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
-  const body = await readJsonDocument(req);
-  return body.ok ? (body.value as T) : null;
-}
-
-/** Attachments can be images, so allow a larger body than JSON comments. */
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-
-const MIME: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-};
-
-async function serveStatic(
-  webRoot: string,
-  urlPath: string,
-  res: ServerResponse,
-): Promise<void> {
-  const root = resolve(webRoot);
-  // Decode percent-escapes so `%2e%2e` can't smuggle a `..` past the check, then
-  // resolve and confirm the result stays inside webRoot. Use a path-boundary
-  // compare (root, or root + separator) so a sibling dir sharing the prefix
-  // (e.g. `/a/web-secret` for root `/a/web`) cannot escape.
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(urlPath);
-  } catch {
-    return sendJson(res, 400, { error: "bad path" });
-  }
-  const rel = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
-  let filePath = resolve(root, rel);
-  if (filePath !== root && !filePath.startsWith(root + sep)) {
-    return sendJson(res, 403, { error: "forbidden" });
-  }
-  let info = await stat(filePath).catch(() => null);
-  if (!info || info.isDirectory()) {
-    // SPA fallback: unknown client routes serve index.html.
-    filePath = join(root, "index.html");
-    info = await stat(filePath).catch(() => null);
-    if (!info) return sendJson(res, 404, { error: "not found" });
-  }
-  res.writeHead(200, {
-    "content-type": MIME[extname(filePath)] ?? "application/octet-stream",
-    "content-length": info.size,
-  });
-  const stream = createReadStream(filePath);
-  // If the file vanishes mid-stream or the client aborts, tear down cleanly
-  // instead of leaking an unhandled stream error or a dangling fd.
-  stream.on("error", () => res.destroy());
-  res.on("close", () => stream.destroy());
-  stream.pipe(res);
 }
