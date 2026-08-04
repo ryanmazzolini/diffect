@@ -8,23 +8,13 @@ interface RegisteredTool {
   promptSnippet?: string;
   promptGuidelines?: string[];
   parameters: unknown;
-}
-
-function schemaShape(parameters: unknown) {
-  const schema = parameters as {
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
-  return {
-    properties: Object.keys(schema.properties ?? {}),
-    required: schema.required ?? [],
-  };
+  execute?: unknown;
 }
 
 describe("Pi integration surface", () => {
   it("keeps the current commands, tools, schemas, prompts, and lifecycle hooks registered", () => {
     const commands: Array<{ name: string; description: string }> = [];
-    const tools: RegisteredTool[] = [];
+    const tools: Array<Omit<RegisteredTool, "execute">> = [];
     const events: string[] = [];
     const pi = {
       on(event: string) {
@@ -37,7 +27,8 @@ describe("Pi integration surface", () => {
         commands.push({ name, description: command.description });
       },
       registerTool(tool: RegisteredTool) {
-        tools.push(tool);
+        const { execute: _execute, ...surface } = tool;
+        tools.push(surface);
       },
     } as unknown as Parameters<typeof diffectExtension>[0];
 
@@ -67,78 +58,217 @@ describe("Pi integration surface", () => {
         description: "Ask the agent to review Diffect feedback",
       },
     ]);
-    expect(
-      tools.map((tool) => ({
-        name: tool.name,
-        label: tool.label,
-        promptSnippet: tool.promptSnippet ?? null,
-        promptGuidelines: tool.promptGuidelines ?? [],
-        ...schemaShape(tool.parameters),
-      })),
-    ).toEqual([
-      {
-        name: "diffect_open",
-        label: "Diffect Open",
-        promptSnippet: "Open the current workspace in Diffect's local review UI",
-        promptGuidelines: [],
-        properties: ["target", "workspace", "open"],
-        required: [],
-      },
-      {
-        name: "diffect_list_feedback",
-        label: "Diffect Feedback",
-        promptSnippet: "List open Diffect review feedback before making review fixes",
-        promptGuidelines: [
-          "Use diffect_list_feedback when the user asks to address Diffect review feedback, comments, or threads.",
-        ],
-        properties: ["status", "ids", "repo", "worktree", "workspace"],
-        required: [],
-      },
-      {
-        name: "diffect_reply",
-        label: "Diffect Reply",
-        promptSnippet: null,
-        promptGuidelines: [],
-        properties: ["id", "body", "agent", "workspace"],
-        required: ["id", "body"],
-      },
-      {
-        name: "diffect_resolve",
-        label: "Diffect Resolve",
-        promptSnippet: null,
-        promptGuidelines: [],
-        properties: ["id", "summary", "agent", "workspace"],
-        required: ["id", "summary"],
-      },
-      {
-        name: "diffect_pr",
-        label: "Diffect PR",
-        promptSnippet: "Get or update Diffect's local PR Draft title/body",
-        promptGuidelines: [],
-        properties: ["action", "title", "body", "repo", "worktree", "workspace"],
-        required: [],
-      },
-      {
-        name: "diffect_comment",
-        label: "Diffect Comment",
-        promptSnippet: "Create a Diffect review comment on a file line/range",
-        promptGuidelines: ["Use diffect_comment for proactive Diffect review comments."],
-        properties: [
-          "file",
-          "line",
-          "endLine",
-          "side",
-          "severity",
-          "target",
-          "repo",
-          "worktree",
-          "workspace",
-          "body",
-          "agent",
-        ],
-        required: ["file", "line", "body"],
-      },
-    ]);
-    expect(tools.every(({ description }) => description.length > 0)).toBe(true);
+    expect(tools).toMatchInlineSnapshot(`
+      [
+        {
+          "description": "Start/reuse diffectd and return the current workspace's Diffect URL.",
+          "label": "Diffect Open",
+          "name": "diffect_open",
+          "parameters": {
+            "properties": {
+              "open": {
+                "description": "Also ask the OS to open the URL",
+                "type": "boolean",
+              },
+              "target": {
+                "description": "Review target, default: work",
+                "type": "string",
+              },
+              "workspace": {
+                "description": "Workspace/space path; inferred when omitted",
+                "type": "string",
+              },
+            },
+            "type": "object",
+          },
+          "promptSnippet": "Open the current workspace in Diffect's local review UI",
+        },
+        {
+          "description": "List Diffect review feedback as JSON using the local store.",
+          "label": "Diffect Feedback",
+          "name": "diffect_list_feedback",
+          "parameters": {
+            "properties": {
+              "ids": {
+                "description": "Return only these thread ids",
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "repo": {
+                "type": "string",
+              },
+              "status": {
+                "description": "open, closed, or all; default: open",
+                "type": "string",
+              },
+              "workspace": {
+                "description": "Workspace/space path; inferred when omitted",
+                "type": "string",
+              },
+              "worktree": {
+                "type": "string",
+              },
+            },
+            "type": "object",
+          },
+          "promptGuidelines": [
+            "Use diffect_list_feedback when the user asks to address Diffect review feedback, comments, or threads.",
+          ],
+          "promptSnippet": "List open Diffect review feedback before making review fixes",
+        },
+        {
+          "description": "Reply to a Diffect review thread/comment as an agent.",
+          "label": "Diffect Reply",
+          "name": "diffect_reply",
+          "parameters": {
+            "properties": {
+              "agent": {
+                "description": "Agent author name; defaults to this Pi session",
+                "type": "string",
+              },
+              "body": {
+                "description": "Reply body",
+                "type": "string",
+              },
+              "id": {
+                "description": "Diffect thread id",
+                "type": "string",
+              },
+              "workspace": {
+                "description": "Workspace/space path; inferred when omitted",
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "body",
+            ],
+            "type": "object",
+          },
+        },
+        {
+          "description": "Resolve a Diffect review thread/comment as an agent.",
+          "label": "Diffect Resolve",
+          "name": "diffect_resolve",
+          "parameters": {
+            "properties": {
+              "agent": {
+                "description": "Agent author name; defaults to this Pi session",
+                "type": "string",
+              },
+              "id": {
+                "description": "Diffect thread id",
+                "type": "string",
+              },
+              "summary": {
+                "description": "What changed / why it is resolved",
+                "type": "string",
+              },
+              "workspace": {
+                "description": "Workspace/space path; inferred when omitted",
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "summary",
+            ],
+            "type": "object",
+          },
+        },
+        {
+          "description": "Get or update the local PR Draft packet for a Diffect repo.",
+          "label": "Diffect PR",
+          "name": "diffect_pr",
+          "parameters": {
+            "properties": {
+              "action": {
+                "description": "get, update, or copy_body; default get",
+                "type": "string",
+              },
+              "body": {
+                "type": "string",
+              },
+              "repo": {
+                "description": "Repo name; required when the workspace has multiple repos",
+                "type": "string",
+              },
+              "title": {
+                "type": "string",
+              },
+              "workspace": {
+                "description": "Workspace/space path; inferred when omitted",
+                "type": "string",
+              },
+              "worktree": {
+                "description": "Worktree name",
+                "type": "string",
+              },
+            },
+            "type": "object",
+          },
+          "promptSnippet": "Get or update Diffect's local PR Draft title/body",
+        },
+        {
+          "description": "Create a Diffect review comment on a file line/range as an agent.",
+          "label": "Diffect Comment",
+          "name": "diffect_comment",
+          "parameters": {
+            "properties": {
+              "agent": {
+                "description": "Agent author name; defaults to this Pi session",
+                "type": "string",
+              },
+              "body": {
+                "type": "string",
+              },
+              "endLine": {
+                "type": "number",
+              },
+              "file": {
+                "type": "string",
+              },
+              "line": {
+                "type": "number",
+              },
+              "repo": {
+                "type": "string",
+              },
+              "severity": {
+                "description": "must-fix, suggestion, nit, or question",
+                "type": "string",
+              },
+              "side": {
+                "description": "new or old; default: new",
+                "type": "string",
+              },
+              "target": {
+                "description": "Review target, default: work",
+                "type": "string",
+              },
+              "workspace": {
+                "description": "Workspace/space path; inferred when omitted",
+                "type": "string",
+              },
+              "worktree": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "file",
+              "line",
+              "body",
+            ],
+            "type": "object",
+          },
+          "promptGuidelines": [
+            "Use diffect_comment for proactive Diffect review comments.",
+          ],
+          "promptSnippet": "Create a Diffect review comment on a file line/range",
+        },
+      ]
+    `);
   });
 });
