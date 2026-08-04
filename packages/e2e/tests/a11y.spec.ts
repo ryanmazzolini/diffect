@@ -46,6 +46,23 @@ test("review task picker has no serious/critical a11y violations", async ({ page
   expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join("\n")).toEqual([]);
 });
 
+test("PR Draft has no serious/critical a11y violations", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "PR Draft" }).click();
+  await expect(page.getByRole("region", { name: "PR Draft" })).toBeVisible();
+
+  const result = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa"])
+    .analyze();
+  const blocking = result.violations.filter(
+    (violation) => violation.impact === "serious" || violation.impact === "critical",
+  );
+  expect(
+    blocking,
+    blocking.map((violation) => `${violation.id}: ${violation.help}`).join("\n"),
+  ).toEqual([]);
+});
+
 test("no serious/critical a11y violations in split view", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Options" }).click();
