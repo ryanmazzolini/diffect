@@ -38,9 +38,13 @@ const configuredBase = process.env.GITHUB_BASE_REF
   ? revision(`origin/${process.env.GITHUB_BASE_REF}`)
   : revision("origin/main");
 const firstParent = revision("HEAD^1");
-const base = configuredBase
+const configuredMergeBase = configuredBase
   ? mergeBase("HEAD", configuredBase)
-  : firstParent;
+  : null;
+let base = configuredMergeBase ?? firstParent;
+if (process.env.GITHUB_ACTIONS && base === head) {
+  base = firstParent;
+}
 
 if (head && base && head !== base) {
   git(["diff", "--check", `${base}...HEAD`]);
