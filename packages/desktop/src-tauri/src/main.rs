@@ -1142,6 +1142,59 @@ mod tests {
             &"file:///tmp/index.html".parse().unwrap()
         ));
     }
+
+    #[test]
+    fn direct_launch_uses_only_the_first_loopback_url() {
+        let args = vec![
+            "diffect-desktop".to_string(),
+            "https://example.com/review".to_string(),
+            "http://127.0.0.1:7421/?repo=diffect".to_string(),
+            "http://localhost:7422/?repo=other".to_string(),
+        ];
+        assert_eq!(
+            requested_loopback_url(&args).unwrap().as_str(),
+            "http://127.0.0.1:7421/?repo=diffect"
+        );
+        assert!(requested_loopback_url(&["diffect-desktop".to_string()]).is_none());
+    }
+
+    #[test]
+    fn desktop_url_preserves_existing_navigation_parameters() {
+        let url: Url = "http://127.0.0.1:7421/?workspace=%2Ftmp%2Frepo&repo=diffect"
+            .parse()
+            .unwrap();
+        let url = desktop_url(url);
+        let query = url
+            .query_pairs()
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            query.get("workspace").map(String::as_str),
+            Some("/tmp/repo")
+        );
+        assert_eq!(query.get("repo").map(String::as_str), Some("diffect"));
+        assert_eq!(query.get("shell").map(String::as_str), Some("desktop"));
+        assert_eq!(
+            query.get("platform").map(String::as_str),
+            Some(std::env::consts::OS)
+        );
+    }
+
+    #[test]
+    fn website_configuration_normalizes_domains_and_rejects_tiny_views() {
+        assert_eq!(
+            normalize_allowed_domains(vec![
+                " .Example.com ".to_string(),
+                "example.com".to_string(),
+                "".to_string(),
+            ]),
+            vec!["example.com"]
+        );
+        assert!(review_size(99.0, 200.0).is_err());
+        let size = review_size(800.0, 600.0).unwrap();
+        assert_eq!(size.width, 800.0);
+        assert_eq!(size.height, 600.0);
+    }
 }
 
 fn main() {

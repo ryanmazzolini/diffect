@@ -6,20 +6,17 @@ Thanks for helping improve Diffect.
 
 ```sh
 mise install
-pnpm install
-mise run build
-mise run test
-mise run desktop:check
+pnpm install --frozen-lockfile
+mise run validate
 ```
 
 ## Before opening a PR
 
-Run the broad checks, not targeted one-offs:
+Run the broad parity gate, not targeted one-offs:
 
 ```sh
-mise run build
-mise run test
-mise run desktop:check
+pnpm install --frozen-lockfile
+mise run validate
 ```
 
 ## Dependencies

@@ -20,14 +20,19 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: corepack enable
       - run: corepack prepare pnpm@11.9.0 --activate
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check:diff
       - run: pnpm check:release-version
       - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm --filter @diffect/core test
       - run: pnpm --filter @diffect/web test
       - run: pnpm --filter @diffect/e2e test
 
@@ -46,3 +51,4 @@ jobs:
             patchelf
       - run: rustup toolchain install 1.94.1 --profile minimal
       - run: cargo +1.94.1 check --manifest-path packages/desktop/src-tauri/Cargo.toml
+      - run: cargo +1.94.1 test --manifest-path packages/desktop/src-tauri/Cargo.toml

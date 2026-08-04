@@ -30,6 +30,10 @@ run = "cargo run --manifest-path {{config_root}}/packages/desktop/src-tauri/Carg
 description = "Check the Tauri desktop shell"
 run = "cargo check --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml"
 
+[tasks."desktop:test"]
+description = "Run the Tauri desktop shell unit tests"
+run = "cargo test --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml"
+
 [tasks."desktop:bundle"]
 description = "Package the desktop app: SEA sidecar + bundled web assets + installer"
 depends = ["build"]
@@ -47,3 +51,15 @@ run = "pnpm --filter @diffect/web dev"
 [tasks.test]
 description = "Run the test suite"
 run = "pnpm test"
+
+[tasks.validate]
+description = "Run the complete local parity gate"
+run = '''
+pnpm check:release-version
+pnpm build
+pnpm typecheck
+pnpm test
+cargo check --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml
+cargo test --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml
+pnpm check:diff
+'''

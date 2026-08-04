@@ -9,6 +9,7 @@
   },
   "packageManager": "pnpm@11.9.0",
   "scripts": {
+    "check:diff": "node scripts/check-diff.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
