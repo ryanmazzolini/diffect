@@ -15,6 +15,7 @@ describe("Pi integration surface", () => {
   it("keeps the current commands, tools, schemas, prompts, and lifecycle hooks registered", () => {
     const commands: Array<{ name: string; description: string }> = [];
     const tools: Array<Omit<RegisteredTool, "execute">> = [];
+    const executableTools: string[] = [];
     const events: string[] = [];
     const pi = {
       on(event: string) {
@@ -27,7 +28,8 @@ describe("Pi integration surface", () => {
         commands.push({ name, description: command.description });
       },
       registerTool(tool: RegisteredTool) {
-        const { execute: _execute, ...surface } = tool;
+        const { execute, ...surface } = tool;
+        if (typeof execute === "function") executableTools.push(tool.name);
         tools.push(surface);
       },
     } as unknown as Parameters<typeof diffectExtension>[0];
@@ -58,6 +60,7 @@ describe("Pi integration surface", () => {
         description: "Ask the agent to review Diffect feedback",
       },
     ]);
+    expect(executableTools).toEqual(tools.map(({ name }) => name));
     expect(tools).toMatchInlineSnapshot(`
       [
         {
