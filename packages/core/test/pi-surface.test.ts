@@ -14,6 +14,7 @@ interface RegisteredTool {
 describe("Pi integration surface", () => {
   it("keeps the current commands, tools, schemas, prompts, and lifecycle hooks registered", () => {
     const commands: Array<{ name: string; description: string }> = [];
+    const executableCommands: string[] = [];
     const tools: Array<Omit<RegisteredTool, "execute">> = [];
     const executableTools: string[] = [];
     const events: string[] = [];
@@ -23,8 +24,9 @@ describe("Pi integration surface", () => {
       },
       registerCommand(
         name: string,
-        command: { description: string },
+        command: { description: string; handler?: unknown },
       ) {
+        if (typeof command.handler === "function") executableCommands.push(name);
         commands.push({ name, description: command.description });
       },
       registerTool(tool: RegisteredTool) {
@@ -41,6 +43,7 @@ describe("Pi integration surface", () => {
       "agent_settled",
       "session_shutdown",
     ]);
+    expect(executableCommands).toEqual(commands.map(({ name }) => name));
     expect(commands).toEqual([
       {
         name: "diffect-connect",
