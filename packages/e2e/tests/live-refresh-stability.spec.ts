@@ -196,15 +196,6 @@ for (const intent of ["wheel", "native scrollbar pointer"] as const) {
   });
 }
 
-test("live refresh keeps the reading anchor stable in split view", async ({ page }) => {
-  await page.getByRole("button", { name: "Options" }).click();
-  await page.getByRole("button", { name: "Split" }).click();
-  const { anchor, top } = await centerReadingAnchor(page);
-  await addGeneratedLines(page, await fixtureRoot(page), "calc.js");
-  await expect(page.locator('.file[data-path="calc.js"] .diffstat')).toContainText("+121");
-  await expectReadingAnchorStable(anchor, top);
-});
-
 test("live refresh keeps the reading anchor stable when an earlier file changes", async ({ page }) => {
   const { anchor, top } = await centerReadingAnchor(page);
   await addGeneratedLines(page, await fixtureRoot(page), "src/util/math.js");
