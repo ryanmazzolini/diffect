@@ -86,6 +86,7 @@ export function MarkdownEditor({
   ariaLabel,
   disabled,
 }: Props) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<RefMDEditor>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const valueRef = useRef(value);
@@ -104,6 +105,12 @@ export function MarkdownEditor({
       ta.focus();
       ta.setSelectionRange(pendingSel.current[0], pendingSel.current[1]);
       pendingSel.current = null;
+    }
+    // The third-party toolbar gives its SVGs role=img even though the enclosing
+    // buttons already carry the useful accessible names. Hide those decorative
+    // SVGs so screen readers announce each command once.
+    for (const icon of rootRef.current?.querySelectorAll("button[aria-label] svg") ?? []) {
+      icon.setAttribute("aria-hidden", "true");
     }
   });
 
@@ -154,6 +161,7 @@ export function MarkdownEditor({
 
   return (
     <div
+      ref={rootRef}
       className={`md-editor${draggingFiles ? " is-dragging" : ""}`}
       onKeyDown={(e) => {
         if (e.key === "Home" || e.key === "End") e.stopPropagation();
