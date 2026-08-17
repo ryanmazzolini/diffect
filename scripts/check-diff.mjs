@@ -34,6 +34,9 @@ git(["diff", "--check"]);
 git(["diff", "--cached", "--check"]);
 
 const head = revision("HEAD");
+const pushBase = process.env.GITHUB_DIFF_BASE
+  ? revision(process.env.GITHUB_DIFF_BASE)
+  : null;
 const configuredBase = process.env.GITHUB_BASE_REF
   ? revision(`origin/${process.env.GITHUB_BASE_REF}`)
   : revision("origin/main");
@@ -41,11 +44,12 @@ const firstParent = revision("HEAD^1");
 const configuredMergeBase = configuredBase
   ? mergeBase("HEAD", configuredBase)
   : null;
-let base = configuredMergeBase ?? firstParent;
-if (process.env.GITHUB_ACTIONS && base === head) {
+let base = pushBase ?? configuredMergeBase ?? firstParent;
+if (!pushBase && process.env.GITHUB_ACTIONS && base === head) {
   base = firstParent;
 }
 
 if (head && base && head !== base) {
-  git(["diff", "--check", `${base}...HEAD`]);
+  const range = pushBase ? `${pushBase}..HEAD` : `${base}...HEAD`;
+  git(["diff", "--check", range]);
 }
