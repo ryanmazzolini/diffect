@@ -18,8 +18,10 @@ describe("Pi integration surface", () => {
     const tools: Array<Omit<RegisteredTool, "execute">> = [];
     const executableTools: string[] = [];
     const events: string[] = [];
+    const executableEvents: string[] = [];
     const pi = {
-      on(event: string) {
+      on(event: string, callback?: unknown) {
+        if (typeof callback === "function") executableEvents.push(event);
         events.push(event);
       },
       registerCommand(
@@ -38,6 +40,7 @@ describe("Pi integration surface", () => {
 
     diffectExtension(pi);
 
+    expect(executableEvents).toEqual(events);
     expect(events).toEqual([
       "session_start",
       "agent_settled",
