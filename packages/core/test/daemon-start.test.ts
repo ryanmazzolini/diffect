@@ -106,6 +106,41 @@ describe("runDaemon", () => {
     };
   }
 
+  it("rejects a managed child outside its manager-selected origin", async () => {
+    const { io } = captured();
+    await expect(
+      runDaemon(
+        ["--port", "0", "--no-workspace", "--web-root", parent],
+        io,
+        {
+          version: "1.0.0",
+          buildId: "release-1",
+          webAssetId: "0".repeat(64),
+          origin: "http://127.0.0.1:13433",
+        },
+      ),
+    ).rejects.toThrow(/must bind to http:\/\/127\.0\.0\.1:13433/);
+  });
+
+  it("rejects managed web assets from another build", async () => {
+    const webRoot = join(parent, "managed-web");
+    await mkdir(webRoot, { recursive: true });
+    await writeFile(join(webRoot, "index.html"), "<title>Tampered</title>");
+    const { io } = captured();
+    await expect(
+      runDaemon(
+        ["--port", "13433", "--no-workspace", "--web-root", webRoot],
+        io,
+        {
+          version: "1.0.0",
+          buildId: "release-1",
+          webAssetId: "0".repeat(64),
+          origin: "http://127.0.0.1:13433",
+        },
+      ),
+    ).rejects.toThrow(/web assets do not match/);
+  });
+
   it("announces the resolved port with DIFFECTD_READY on --port 0", async () => {
     const { lines, io } = captured();
     server = await runDaemon(["--port", "0", "--workspace", workspace], io);

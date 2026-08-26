@@ -1,7 +1,7 @@
 [package]
 name = "diffect-desktop"
 version = "0.2.1"
-description = "Diffect desktop shell: a Tauri window over a private diffectd"
+description = "Diffect desktop client for the persistent local daemon"
 license = "Apache-2.0"
 edition = "2021"
 publish = false

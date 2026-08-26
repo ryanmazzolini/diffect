@@ -1,221 +1,236 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! Diffect desktop shell: spawn a private diffectd on an ephemeral loopback
-//! port, wait for its `DIFFECTD_READY <url>` line, and point the webview at
-//! that origin. The web UI uses relative URLs throughout, so it needs no
-//! changes; review state stays in the shared per-user store, where the CLI,
-//! agents, and any manually run daemon see it too.
+//! Diffect desktop shell: synchronously ensure the installed persistent
+//! daemon, then attach a Tauri window to its canonical loopback origin.
+//! Desktop is a client and never owns or reaps the daemon process.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, RunEvent, Url, WebviewUrl,
-    WebviewWindowBuilder,
+    AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_opener::OpenerExt;
 
-/// The spawned diffectd. Emptied on shutdown, which also stands the crash
-/// watcher down; the daemon's `--exit-on-stdin-close` pipe is the backstop
-/// that reaps it even when this process dies without running cleanup.
-struct Daemon(Arc<Mutex<Option<Child>>>);
-
 struct WebsiteAllowedDomains(Arc<Mutex<Vec<String>>>);
 
-const READY_PREFIX: &str = "DIFFECTD_READY ";
-const READY_TIMEOUT: Duration = Duration::from_secs(15);
-/// Crashes after at least this much uptime earn a fresh respawn allowance.
-const CRASH_WINDOW: Duration = Duration::from_secs(60);
-const MAX_RAPID_RESPAWNS: u32 = 3;
+const CANONICAL_LOCAL_ORIGIN: &str = "http://127.0.0.1:13433";
+const DAEMON_COMMANDS: &[&str] = &["activate", "ensure", "restart", "status", "stop"];
 
-/// How to start diffectd: either the bundled SEA sidecar (packaged app) or
-/// the monorepo's built daemon via the system `node` (dev).
-#[derive(Clone)]
-struct DaemonLaunch {
-    program: PathBuf,
-    /// `daemon-bin.js` for the dev path; the sidecar needs no script arg.
-    script: Option<PathBuf>,
+struct InstalledBundle {
+    sidecar: PathBuf,
     web_root: PathBuf,
+    current_exe: PathBuf,
 }
 
-/// Dev layout: this crate lives at packages/desktop/src-tauri, so the built
-/// daemon and web assets sit under the monorepo root three levels up.
-fn monorepo_root() -> Result<PathBuf, String> {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..")
-        .canonicalize()
-        .map_err(|e| format!("could not resolve monorepo root: {e}"))
+struct LauncherIdentity {
+    path: PathBuf,
+    source: &'static str,
 }
 
-/// Prefer the packaged layout (a `diffectd` sidecar beside this executable,
-/// web assets in the resource dir); fall back to the dev monorepo.
-fn resolve_daemon(handle: &AppHandle) -> Result<DaemonLaunch, String> {
-    let sidecar = std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
-            Some(
-                exe.parent()?
-                    .join(format!("diffectd{}", std::env::consts::EXE_SUFFIX)),
-            )
-        })
-        .filter(|p| p.exists());
-    if let Some(sidecar) = sidecar {
-        let res = handle
-            .path()
-            .resource_dir()
-            .map_err(|e| format!("no resource dir: {e}"))?;
-        let web_root = [res.join("web"), res.join("web/dist")]
-            .into_iter()
-            .find(|p| p.join("index.html").exists())
-            .ok_or("bundled web assets not found in resource dir")?;
-        return Ok(DaemonLaunch {
-            program: sidecar,
-            script: None,
-            web_root,
-        });
-    }
-    let root = monorepo_root()?;
-    let daemon_js = root.join("packages/core/dist/daemon-bin.js");
-    let web_root = root.join("packages/web/dist");
-    for missing in [&daemon_js, &web_root].into_iter().filter(|p| !p.exists()) {
-        return Err(format!(
-            "not built: {} (run `mise run build` first)",
-            missing.display()
-        ));
-    }
-    Ok(DaemonLaunch {
-        program: "node".into(),
-        script: Some(daemon_js),
+#[derive(serde::Deserialize)]
+struct EnsureResult {
+    daemon: EnsuredDaemon,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsuredDaemon {
+    service: String,
+    origin: String,
+    lifecycle: String,
+    web: bool,
+}
+
+fn packaged_resource_dir(package_info: &tauri::PackageInfo) -> Result<PathBuf, String> {
+    tauri::utils::platform::resource_dir(package_info, &tauri::Env::default())
+        .map_err(|e| format!("could not resolve the packaged resource directory: {e}"))
+}
+
+fn resolve_installed_bundle(
+    package_info: &tauri::PackageInfo,
+) -> Result<InstalledBundle, String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("could not resolve the desktop executable: {e}"))?;
+    let sidecar = current_exe
+        .parent()
+        .map(|parent| parent.join(format!("diffectd{}", std::env::consts::EXE_SUFFIX)))
+        .filter(|path| path.is_file())
+        .ok_or("the installed diffectd sidecar is missing")?;
+    let resources = packaged_resource_dir(package_info)?;
+    let web_root = [resources.join("web"), resources.join("web/dist")]
+        .into_iter()
+        .find(|path| path.join("index.html").is_file())
+        .ok_or("the installed Diffect web assets are missing")?;
+    Ok(InstalledBundle {
+        sidecar,
         web_root,
+        current_exe,
     })
 }
 
-fn spawn_daemon(launch: &DaemonLaunch) -> Result<(Child, String), String> {
-    // --no-workspace: the app serves registered workspaces only; it must not
-    // register its own cwd as something to review. The piped stdin is held
-    // open for the daemon's whole life; the OS closes it when this process
-    // dies — however it dies — and the daemon exits on that EOF.
-    let mut cmd = Command::new(&launch.program);
-    if let Some(script) = &launch.script {
-        cmd.arg(script);
-    }
-    let mut child = cmd
-        .args([
-            "--port",
-            "0",
-            "--no-workspace",
-            "--exit-on-stdin-close",
-            "--web-root",
-        ])
-        .arg(&launch.web_root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("could not spawn {}: {e}", launch.program.display()))?;
-
-    // One thread owns the child's stdout for the daemon's whole life: it
-    // hands the ready URL back over a channel, then keeps draining (and
-    // forwarding) output so the pipe never fills and blocks the daemon.
-    let stdout = child.stdout.take().expect("stdout was piped");
-    let (tx, rx) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        let mut tx = Some(tx);
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if let Some(url) = line.strip_prefix(READY_PREFIX) {
-                if let Some(tx) = tx.take() {
-                    let _ = tx.send(url.trim().to_string());
-                    continue;
-                }
-            }
-            println!("{line}");
+fn installed_launcher(current_exe: &Path) -> Result<LauncherIdentity, String> {
+    if let Some(path) = std::env::var_os("DIFFECT_APP_PATH") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() || !path.is_file() {
+            return Err("DIFFECT_APP_PATH must name an absolute desktop executable".into());
         }
-        // Dropping an unused sender closes the channel, failing the wait
-        // below as soon as the daemon dies before becoming ready.
-    });
-
-    match rx.recv_timeout(READY_TIMEOUT) {
-        Ok(url) => Ok((child, url)),
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            Err(format!("diffectd did not become ready: {e}"))
-        }
+        return Ok(LauncherIdentity {
+            path,
+            source: "explicit",
+        });
     }
+
+    #[cfg(target_os = "linux")]
+    if let Some(path) = std::env::var_os("APPIMAGE") {
+        let path = PathBuf::from(path);
+        if !path.is_absolute() || !path.is_file() {
+            return Err("APPIMAGE must name the original AppImage executable".into());
+        }
+        return Ok(LauncherIdentity {
+            path,
+            source: "appimage",
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let in_system_applications = current_exe.starts_with("/Applications");
+        let in_user_applications = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .is_some_and(|home| current_exe.starts_with(home.join("Applications")));
+        if !in_system_applications && !in_user_applications {
+            return Err(
+                "move Diffect.app to /Applications or ~/Applications, or set DIFFECT_APP_PATH"
+                    .into(),
+            );
+        }
+        return Ok(LauncherIdentity {
+            path: current_exe.to_path_buf(),
+            source: "macos-app",
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Ok(LauncherIdentity {
+        path: current_exe.to_path_buf(),
+        source: "package-manager",
+    })
 }
 
-/// Replace the window contents with a terminal error state. There is no IPC
-/// bridge to retry from, so the message tells the user to relaunch.
-fn show_error(handle: &AppHandle, message: &str) {
+fn sidecar_command(bundle: &InstalledBundle, args: &[String]) -> Command {
+    let mut command = Command::new(&bundle.sidecar);
+    command
+        .args(args)
+        .env_remove("DIFFECT_TEST_MANAGED_PORT")
+        .env_remove("NODE_ENV")
+        .env_remove("NODE_OPTIONS")
+        .env_remove("NODE_PATH");
+    command
+}
+
+fn manager_command(
+    bundle: &InstalledBundle,
+    launcher: &LauncherIdentity,
+    args: &[String],
+) -> Command {
+    let mut command = sidecar_command(bundle, args);
+    command
+        .env("DIFFECT_INSTALL_SOURCE", launcher.source)
+        .env("DIFFECT_LAUNCHER_PATH", &launcher.path)
+        .env("DIFFECT_WEB_ROOT", &bundle.web_root);
+    command
+}
+
+fn run_desktop_daemon_command(
+    package_info: &tauri::PackageInfo,
+    args: &[String],
+) -> Result<i32, String> {
+    let Some(command) = args.first() else {
+        return Err(format!(
+            "expected one of: {}",
+            DAEMON_COMMANDS.join(", ")
+        ));
+    };
+    if !DAEMON_COMMANDS.contains(&command.as_str()) {
+        return Err(format!("unknown daemon command: {command}"));
+    }
+    let bundle = resolve_installed_bundle(package_info)?;
+    let status = if command == "status" {
+        sidecar_command(&bundle, args).status()
+    } else {
+        let launcher = installed_launcher(&bundle.current_exe)?;
+        manager_command(&bundle, &launcher, args).status()
+    }
+    .map_err(|e| format!("could not run installed diffectd: {e}"))?;
+    Ok(status.code().unwrap_or(1))
+}
+
+fn parse_ensured_origin(stdout: &[u8]) -> Result<Url, String> {
+    let result: EnsureResult = serde_json::from_slice(stdout)
+        .map_err(|e| format!("installed diffectd returned invalid JSON: {e}"))?;
+    if result.daemon.service != "diffect"
+        || result.daemon.origin != CANONICAL_LOCAL_ORIGIN
+        || result.daemon.lifecycle != "ready"
+        || !result.daemon.web
+    {
+        return Err("installed diffectd did not return a ready canonical UI/API service".into());
+    }
+    result
+        .daemon
+        .origin
+        .parse()
+        .map_err(|e| format!("installed diffectd returned an invalid origin: {e}"))
+}
+
+fn ensure_installed_daemon(package_info: &tauri::PackageInfo) -> Result<Url, String> {
+    let bundle = resolve_installed_bundle(package_info)?;
+    let output = match installed_launcher(&bundle.current_exe) {
+        Ok(launcher) => manager_command(&bundle, &launcher, &["ensure".to_string()])
+            .output(),
+        Err(authority_error) => {
+            let output = sidecar_command(&bundle, &["attach".to_string()]).output();
+            if let Ok(output) = &output {
+                if !output.status.success() {
+                    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    return Err(format!("{authority_error}; {detail}"));
+                }
+            }
+            output
+        }
+    }
+    .map_err(|e| format!("could not run installed diffectd: {e}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            "installed diffectd could not start".into()
+        } else {
+            detail
+        });
+    }
+    parse_ensured_origin(&output.stdout)
+}
+
+fn show_startup_error(handle: &AppHandle, message: &str) {
     eprintln!("diffect-desktop: {message}");
-    if let Some(w) = handle.get_webview_window("main") {
-        let html = format!(
-            "<body style=\"font-family:system-ui;background:#1e293b;color:#e2e8f0;\
-             display:grid;place-items:center;height:100vh;margin:0\">\
-             <div style=\"max-width:32rem\"><h1>Diffect hit a problem</h1>\
-             <p>{message}</p><p>Quit and relaunch to try again.</p></div></body>"
-        );
-        let _ = w.eval(&format!(
-            "document.open(); document.write({}); document.close();",
-            serde_json::to_string(&html).unwrap_or_default()
+    if let Some(window) = handle.get_webview_window("main") {
+        let message = serde_json::to_string(message).unwrap_or_else(|_| "\"unknown error\"".into());
+        let _ = window.eval(&format!(
+            r#"document.body.innerHTML = '<main style="max-width:32rem"><h1>Diffect hit a problem</h1><p id="message"></p><p>Quit and relaunch to try again.</p></main>';
+               document.body.style.cssText = 'font-family:system-ui;background:#1e293b;color:#e2e8f0;display:grid;place-items:center;height:100vh;margin:0';
+               document.getElementById('message').textContent = {message};"#
         ));
     }
 }
 
-/// Respawn the daemon if it dies underneath the window; give up (with a
-/// visible error) when it crashloops.
-fn watch_daemon(handle: AppHandle, launch: DaemonLaunch, daemon: Arc<Mutex<Option<Child>>>) {
-    thread::spawn(move || {
-        let mut rapid = 0u32;
-        let mut last_spawn = Instant::now();
-        loop {
-            thread::sleep(Duration::from_secs(1));
-            {
-                let mut guard = daemon.lock().unwrap();
-                let Some(child) = guard.as_mut() else { return }; // shutting down
-                if !matches!(child.try_wait(), Ok(Some(_))) {
-                    continue;
-                }
-                *guard = None;
-            }
-            rapid = if last_spawn.elapsed() > CRASH_WINDOW {
-                1
-            } else {
-                rapid + 1
-            };
-            if rapid > MAX_RAPID_RESPAWNS {
-                show_error(
-                    &handle,
-                    "diffectd keeps crashing; check the terminal output.",
-                );
-                return;
-            }
-            eprintln!("diffectd exited unexpectedly; respawning ({rapid}/{MAX_RAPID_RESPAWNS})");
-            last_spawn = Instant::now();
-            match spawn_daemon(&launch) {
-                Ok((child, url)) => {
-                    *daemon.lock().unwrap() = Some(child);
-                    if let Some(w) = handle.get_webview_window("main") {
-                        let url = url.parse().expect("ready line carries a valid URL");
-                        let _ = w.navigate(desktop_url(url));
-                    }
-                }
-                Err(e) => {
-                    show_error(&handle, &format!("could not restart diffectd: {e}"));
-                    return;
-                }
-            }
-        }
-    });
+fn is_main_window_navigation(url: &Url, app_origin: &url::Origin) -> bool {
+    url.origin() == *app_origin
 }
 
 fn is_loopback(url: &Url) -> bool {
@@ -231,13 +246,52 @@ fn requested_loopback_url(args: &[String]) -> Option<Url> {
     args.iter()
         .skip(1)
         .filter_map(|arg| arg.parse::<Url>().ok())
-        .find(is_loopback)
+        .find(|url| url.scheme() == "http" && is_loopback(url))
+}
+
+fn development_startup_origin(
+    debug: bool,
+    configured: Option<&str>,
+    requested: Option<Url>,
+) -> Result<Option<Url>, String> {
+    if !debug {
+        return Ok(None);
+    }
+    if let Some(value) = configured.filter(|value| !value.trim().is_empty()) {
+        let url = value
+            .parse::<Url>()
+            .map_err(|e| format!("DIFFECT_DESKTOP_URL is invalid: {e}"))?;
+        if url.scheme() != "http" || !is_loopback(&url) {
+            return Err("DIFFECT_DESKTOP_URL must use loopback HTTP".into());
+        }
+        return Ok(Some(url));
+    }
+    requested
+        .map(Some)
+        .ok_or("source desktop runs require DIFFECT_DESKTOP_URL or a loopback URL".into())
+}
+
+fn route_at_origin(origin: &Url, requested: &Url) -> Url {
+    let mut url = origin.clone();
+    url.set_path(requested.path());
+    url.set_query(requested.query());
+    url.set_fragment(requested.fragment());
+    url
 }
 
 fn desktop_url(mut url: Url) -> Url {
-    url.query_pairs_mut()
+    let retained = url
+        .query_pairs()
+        .filter(|(key, _)| key != "shell" && key != "platform")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    url.set_query(None);
+    let mut query = url.query_pairs_mut();
+    query.extend_pairs(retained);
+    query
         .append_pair("shell", "desktop")
         .append_pair("platform", std::env::consts::OS);
+    drop(query);
     url
 }
 
@@ -1025,6 +1079,7 @@ fn set_website_review_tool(handle: AppHandle, tool: String) -> Result<(), String
 #[tauri::command]
 fn capture_website_area(
     handle: AppHandle,
+    webview: tauri::Webview,
     x: f64,
     y: f64,
     width: f64,
@@ -1032,6 +1087,9 @@ fn capture_website_area(
     viewport_width: f64,
     viewport_height: f64,
 ) -> Result<Vec<u8>, String> {
+    if webview.label() != WEBSITE_REVIEW_LABEL {
+        return Err("area capture may only come from the Website Review webview".into());
+    }
     if width < 2.0 || height < 2.0 || viewport_width <= 0.0 || viewport_height <= 0.0 {
         return Err("capture area is too small".into());
     }
@@ -1090,6 +1148,7 @@ fn capture_website_area(
 #[tauri::command]
 fn capture_website_area(
     _handle: AppHandle,
+    webview: tauri::Webview,
     _x: f64,
     _y: f64,
     _width: f64,
@@ -1097,6 +1156,9 @@ fn capture_website_area(
     _viewport_width: f64,
     _viewport_height: f64,
 ) -> Result<Vec<u8>, String> {
+    if webview.label() != WEBSITE_REVIEW_LABEL {
+        return Err("area capture may only come from the Website Review webview".into());
+    }
     Err("area screenshot capture is only implemented on macOS in this tracer".into())
 }
 
@@ -1144,6 +1206,15 @@ mod tests {
     }
 
     #[test]
+    fn main_window_rejects_other_loopback_origins() {
+        let app: Url = "http://127.0.0.1:13433/reviews/one".parse().unwrap();
+        let same: Url = "http://127.0.0.1:13433/reviews/two".parse().unwrap();
+        let other: Url = "http://127.0.0.1:9999/attacker".parse().unwrap();
+        assert!(is_main_window_navigation(&same, &app.origin()));
+        assert!(!is_main_window_navigation(&other, &app.origin()));
+    }
+
+    #[test]
     fn direct_launch_uses_only_the_first_loopback_url() {
         let args = vec![
             "diffect-desktop".to_string(),
@@ -1181,6 +1252,60 @@ mod tests {
     }
 
     #[test]
+    fn release_startup_ignores_development_origins() {
+        let requested = "http://127.0.0.1:5173/attacker".parse().ok();
+        assert!(development_startup_origin(
+            false,
+            Some("http://127.0.0.1:5173"),
+            requested,
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(
+            development_startup_origin(true, Some("http://127.0.0.1:5173"), None)
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1:5173/",
+        );
+    }
+
+    #[test]
+    fn installed_routes_use_the_canonical_origin_without_losing_location() {
+        let origin: Url = CANONICAL_LOCAL_ORIGIN.parse().unwrap();
+        let requested: Url = "http://localhost:7421/reviews/review-1?repo=diffect#thread-2"
+            .parse()
+            .unwrap();
+        let url = desktop_url(route_at_origin(&origin, &requested));
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert_eq!(url.port(), Some(13433));
+        assert_eq!(url.path(), "/reviews/review-1");
+        assert_eq!(url.fragment(), Some("thread-2"));
+        let query = url.query_pairs().collect::<Vec<_>>();
+        assert!(query.iter().any(|pair| pair == &("repo".into(), "diffect".into())));
+        assert_eq!(query.iter().filter(|(key, _)| key == "shell").count(), 1);
+        assert_eq!(query.iter().filter(|(key, _)| key == "platform").count(), 1);
+    }
+
+    #[test]
+    fn ensure_output_requires_a_ready_canonical_ui_and_api() {
+        let valid = br#"{"daemon":{"service":"diffect","origin":"http://127.0.0.1:13433","lifecycle":"ready","web":true}}"#;
+        assert_eq!(
+            parse_ensured_origin(valid).unwrap().as_str(),
+            "http://127.0.0.1:13433/"
+        );
+        for invalid in [
+            br#"not json"#.as_slice(),
+            br#"{"daemon":{"service":"diffect","origin":"http://127.0.0.1:7421","lifecycle":"ready","web":true}}"#.as_slice(),
+            br#"{"daemon":{"service":"diffect","origin":"http://127.0.0.1:13433","lifecycle":"draining","web":true}}"#.as_slice(),
+            br#"{"daemon":{"service":"diffect","origin":"http://127.0.0.1:13433","lifecycle":"ready","web":false}}"#.as_slice(),
+        ] {
+            assert!(parse_ensured_origin(invalid).is_err());
+        }
+    }
+
+    #[test]
     fn website_configuration_normalizes_domains_and_rejects_tiny_views() {
         assert_eq!(
             normalize_allowed_domains(vec![
@@ -1198,6 +1323,43 @@ mod tests {
 }
 
 fn main() {
+    let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+    let argv = std::env::args().collect::<Vec<_>>();
+    if argv.get(1).is_some_and(|arg| arg == "daemon") {
+        match run_desktop_daemon_command(context.package_info(), &argv[2..]) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("diffect-desktop: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let requested = requested_loopback_url(&argv);
+    let configured = std::env::var("DIFFECT_DESKTOP_URL").ok();
+    let startup = match development_startup_origin(
+        cfg!(debug_assertions),
+        configured.as_deref(),
+        requested.clone(),
+    ) {
+        Ok(Some(url)) => Ok(url),
+        Ok(None) => ensure_installed_daemon(context.package_info()),
+        Err(error) => Err(error),
+    };
+    let startup_base = startup.as_ref().ok().cloned();
+    let initial_url = startup_base
+        .as_ref()
+        .map(|origin| {
+            desktop_url(match requested.as_ref() {
+                Some(route) => route_at_origin(origin, route),
+                None => origin.clone(),
+            })
+        })
+        .unwrap_or_else(|| "about:blank".parse().expect("about:blank is a valid URL"));
+    let startup_error = startup.err();
+
+    let second_launch_origin = startup_base.clone();
+    let setup_error = startup_error.clone();
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             open_website_review,
@@ -1209,70 +1371,47 @@ fn main() {
             report_website_pick,
             import_browser_bookmarks
         ])
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // A second launch focuses the existing window instead of racing
-            // a second daemon into the same store. If pi passed a loopback URL,
-            // navigate the app there instead of opening a browser.
-            focus_window(app, requested_loopback_url(&argv));
+        .plugin(tauri_plugin_single_instance::init(move |app, argv, _cwd| {
+            let requested = requested_loopback_url(&argv);
+            let route = match (second_launch_origin.as_ref(), requested.as_ref()) {
+                (Some(origin), Some(requested)) => Some(route_at_origin(origin, requested)),
+                _ => None,
+            };
+            focus_window(app, route);
         }))
         .plugin(tauri_plugin_opener::init())
         .manage(WebsiteAllowedDomains(Arc::new(Mutex::new(Vec::new()))))
-        .setup(|app| {
-            // Escape hatch for UI development: point the window at an
-            // existing origin (Vite dev server or a manual daemon) instead
-            // of spawning one.
-            let argv: Vec<String> = std::env::args().collect();
-            let url = match requested_loopback_url(&argv) {
-                Some(url) => url.to_string(),
-                None => match std::env::var("DIFFECT_DESKTOP_URL") {
-                    Ok(u) if !u.is_empty() => u,
-                    _ => {
-                        let launch = resolve_daemon(app.handle())?;
-                        let (child, url) = spawn_daemon(&launch)?;
-                        let daemon = Arc::new(Mutex::new(Some(child)));
-                        app.manage(Daemon(daemon.clone()));
-                        watch_daemon(app.handle().clone(), launch, daemon);
-                        url
-                    }
-                },
-            };
-            let url: Url = desktop_url(url.parse()?);
-            // The app's own origins stay in the webview: any loopback port
-            // (respawns get new ones) plus whatever origin the window was
-            // started on. Everything else — links in comments, markdown —
-            // opens in the system browser.
-            let app_origin = url.origin();
+        .setup(move |app| {
+            let app_origin = initial_url.origin();
             let handle = app.handle().clone();
-            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-                .title("Diffect")
-                .inner_size(1280.0, 860.0)
-                .disable_drag_drop_handler()
-                .on_navigation(move |target| {
-                    if is_loopback(target) || target.origin() == app_origin {
-                        return true;
-                    }
-                    let _ = handle.opener().open_url(target.as_str(), None::<&str>);
-                    false
-                });
+            let builder = WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::External(initial_url.clone()),
+            )
+            .title("Diffect")
+            .inner_size(1280.0, 860.0)
+            .disable_drag_drop_handler()
+            .on_navigation(move |target| {
+                if is_main_window_navigation(target, &app_origin) {
+                    return true;
+                }
+                let _ = handle.opener().open_url(target.as_str(), None::<&str>);
+                false
+            });
             #[cfg(target_os = "macos")]
             let builder = builder
                 .hidden_title(true)
                 .title_bar_style(TitleBarStyle::Overlay)
                 .traffic_light_position(LogicalPosition::new(14.0, 14.0));
             builder.build()?;
+            if let Some(error) = &setup_error {
+                show_startup_error(app.handle(), error);
+            }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Diffect");
 
-    app.run(|handle, event| {
-        if let RunEvent::Exit = event {
-            if let Some(daemon) = handle.try_state::<Daemon>() {
-                if let Some(mut child) = daemon.0.lock().unwrap().take() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-            }
-        }
-    });
+    app.run(|_, _| {});
 }

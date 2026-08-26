@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "sidecar": "node scripts/build-sidecar.mjs",
-    "bundle": "pnpm sidecar && tauri build --config src-tauri/tauri.bundle.conf.json"
+    "bundle": "pnpm sidecar && tauri build --config src-tauri/tauri.bundle.conf.json",
+    "smoke:bundle": "node scripts/smoke-bundle.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.3",

@@ -3,7 +3,8 @@
 // packaged app runs on machines without Node. Output lands where Tauri's
 // `externalBin` expects it: src-tauri/binaries/diffectd-<target-triple>.
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -11,6 +12,7 @@ import { inject } from "postject";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = resolve(here, "..");
+const root = resolve(desktop, "../..");
 const coreDist = resolve(desktop, "../core/dist");
 const work = join(desktop, "src-tauri/target/sidecar");
 const outDir = join(desktop, "src-tauri/binaries");
@@ -19,6 +21,47 @@ if (!existsSync(join(coreDist, "daemon-bin.js"))) {
   console.error(`daemon not built: ${coreDist} (run \`mise run build\` first)`);
   process.exit(1);
 }
+
+const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+let buildId = process.env.DIFFECT_BUILD_ID?.trim();
+if (!buildId) {
+  const dirty = execFileSync(
+    "git",
+    ["status", "--porcelain", "--untracked-files=all"],
+    { cwd: root, encoding: "utf8" },
+  ).trim();
+  if (dirty) {
+    throw new Error("dirty desktop bundles require an explicit DIFFECT_BUILD_ID");
+  }
+  buildId = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+}
+if (!/^[A-Za-z0-9._-]{1,128}$/.test(buildId)) {
+  throw new Error("DIFFECT_BUILD_ID must use 1-128 letters, digits, dots, underscores, or hyphens");
+}
+
+function webAssetId(webRoot) {
+  const files = [];
+  const visit = (directory, prefix = "") => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path, relative);
+      else if (entry.isFile()) files.push([relative, path]);
+    }
+  };
+  visit(webRoot);
+  const hash = createHash("sha256");
+  files.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  for (const [relative, path] of files) {
+    hash.update(relative, "utf8");
+    hash.update("\0");
+    hash.update(readFileSync(path));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+const assetId = webAssetId(join(root, "packages/web/dist"));
 
 /** The suffix Tauri strips when bundling, matching the Rust compile target. */
 function targetTriple() {
@@ -60,7 +103,12 @@ await build({
   banner: {
     js: "const import_meta_url = require('node:url').pathToFileURL(__filename).href;",
   },
-  define: { "import.meta.url": "import_meta_url" },
+  define: {
+    "import.meta.url": "import_meta_url",
+    "process.env.DIFFECT_RELEASE_VERSION": JSON.stringify(version),
+    "process.env.DIFFECT_BUILD_ID": JSON.stringify(buildId),
+    "process.env.DIFFECT_WEB_ASSET_ID": JSON.stringify(assetId),
+  },
   logLevel: "warning",
 });
 

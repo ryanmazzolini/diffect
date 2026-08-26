@@ -109,6 +109,7 @@ jobs:
       attestations: write # Store the signed build provenance.
     env:
       VERSION: ${{ needs.release.outputs.version }}
+      DIFFECT_BUILD_ID: ${{ needs.release.outputs.sha }}
       BUNDLE: ${{ matrix.bundle }}
       PLATFORM: ${{ matrix.platform }}
       ARCH: ${{ matrix.arch }}
@@ -176,6 +177,9 @@ jobs:
           pnpm --filter @diffect/desktop exec tauri build \
             --config src-tauri/tauri.bundle.conf.json \
             --bundles "$BUNDLE"
+
+      - name: Smoke test the packaged daemon lifecycle
+        run: pnpm --filter @diffect/desktop smoke:bundle
 
       - name: Stage the Linux release asset
         if: matrix.platform == 'linux'
