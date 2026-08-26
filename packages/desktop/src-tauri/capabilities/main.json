@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Allow the desktop shell's loopback web UI to use native window chrome interactions.",
-  "windows": ["main"],
+  "description": "Allow only the installed main UI to use desktop commands.",
+  "webviews": ["main"],
+  "local": false,
   "remote": {
-    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+    "urls": ["http://127.0.0.1:13433"]
   },
   "permissions": [
     "core:window:default",
@@ -13,9 +14,7 @@
     "allow-position-website-review",
     "allow-set-website-review-visible",
     "allow-set-website-review-tool",
-    "allow-capture-website-area",
     "allow-close-website-review",
-    "allow-report-website-pick",
     "allow-import-browser-bookmarks"
   ]
 }

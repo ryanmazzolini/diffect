@@ -1,8 +1,10 @@
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { extname, join, resolve, sep } from "node:path";
+import type { Socket } from "node:net";
+import { extname, join, relative, resolve, sep } from "node:path";
 import {
   DAEMON_EVENTS,
   type AddCommentRequest,
@@ -104,6 +106,28 @@ export interface DaemonOptions {
   host?: string;
   /** Clock injection for deterministic tests. */
   now?: () => string;
+  /** Load production assets before readiness instead of reading them per request. */
+  preloadWebAssets?: boolean;
+  /** Present only for the persistent installed daemon. */
+  lifecycle?: {
+    version: string;
+    buildId: string;
+    webAssetId: string;
+    instanceId: string;
+    stopToken: string;
+  };
+}
+
+export type DaemonLifecycleState = "starting" | "ready" | "draining";
+
+export interface ManagedDaemonServer extends Server {
+  markReady(origin: string): void;
+  drainAndClose(): Promise<void>;
+}
+
+interface WebAsset {
+  content: Buffer;
+  contentType: string;
 }
 
 interface RouteContext {
@@ -116,8 +140,20 @@ interface RouteContext {
   host: string;
   now: () => string;
   webRoot?: string;
+  webAssets?: Map<string, WebAsset>;
   events: EventHub;
   editors: string[];
+  lifecycle?: {
+    version: string;
+    buildId: string;
+    webAssetId: string;
+    instanceId: string;
+    stopToken: string;
+    origin: string | null;
+    state: DaemonLifecycleState;
+  };
+  requestShutdown(): void;
+  activeMutations(): number;
 }
 
 /** Discover every registered workspace plus the boot seed; skip unreadable ones. */
@@ -149,13 +185,28 @@ async function rebuildWorkspaces(ctx: RouteContext): Promise<void> {
  * and the central review event log — the file store remains the source of truth,
  * so the CLI and agents work the same whether or not this is running.
  */
-export async function createServer(opts: DaemonOptions): Promise<Server> {
+export async function createServer(opts: DaemonOptions): Promise<ManagedDaemonServer> {
   const seed = opts.workspacePath ? resolve(opts.workspacePath) : null;
+  const webAssets = opts.preloadWebAssets && opts.webRoot
+    ? await loadWebAssets(opts.webRoot)
+    : undefined;
+  if (
+    opts.lifecycle &&
+    (!webAssets || webAssetId(webAssets) !== opts.lifecycle.webAssetId)
+  ) {
+    throw new Error("installed Diffect web assets do not match this daemon build");
+  }
   const workspaces = await loadWorkspaces(seed);
   const ws = mergeWorkspaces(workspaces);
   const events = new EventHub(ws);
   await events.start();
   const editors = await detectEditors();
+  const lifecycle: RouteContext["lifecycle"] = opts.lifecycle
+    ? { ...opts.lifecycle, origin: null, state: "starting" }
+    : undefined;
+  let activeMutations = 0;
+  let mutationWaiters: Array<() => void> = [];
+  let shutdown: Promise<void> | null = null;
   const ctx: RouteContext = {
     workspaces,
     ws,
@@ -163,39 +214,130 @@ export async function createServer(opts: DaemonOptions): Promise<Server> {
     host: opts.host ?? "127.0.0.1",
     now: opts.now ?? (() => new Date().toISOString()),
     webRoot: opts.webRoot,
+    webAssets,
     events,
     editors,
+    lifecycle,
+    requestShutdown: () => {},
+    activeMutations: () => activeMutations,
   };
 
   const server = createHttpServer((req, res) => {
-    handle(ctx, req, res).catch((err) => {
-      if (err instanceof BodyTooLargeError) {
-        // Close the connection after responding: the client may still be
-        // uploading, and we've stopped reading, so keep-alive would stall.
-        if (!res.headersSent) {
-          const json = JSON.stringify({ error: "request body too large" });
-          res.writeHead(413, {
-            "content-type": "application/json; charset=utf-8",
-            "content-length": Buffer.byteLength(json),
-            connection: "close",
-          });
-          res.end(json);
+    const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    const lifecycleRoute = path === "/health" ||
+      path === "/daemon/prove" ||
+      path === "/daemon/stop";
+    if (lifecycle && lifecycle.state !== "ready" && !lifecycleRoute) {
+      res.setHeader("connection", "close");
+      res.once("finish", () => req.socket.destroy());
+      sendJson(res, 503, { error: `diffectd is ${lifecycle.state}` });
+      req.resume();
+      return;
+    }
+
+    const mutation = isMutationRequest(req, path);
+    const responseSettled = mutation ? waitForResponseSettlement(res) : null;
+    if (mutation) activeMutations += 1;
+    handle(ctx, req, res)
+      .catch((err) => handleRequestError(res, err))
+      .finally(async () => {
+        if (!mutation) return;
+        await responseSettled;
+        activeMutations -= 1;
+        if (activeMutations === 0) {
+          const waiters = mutationWaiters;
+          mutationWaiters = [];
+          for (const resolveWaiter of waiters) resolveWaiter();
         }
-        return;
-      }
-      if (err instanceof UnsupportedMediaTypeError) {
-        sendJson(res, 415, { error: "content-type must be application/json" });
-        return;
-      }
-      // Don't leak internals (paths, stack traces) to the client; log instead.
-      process.stderr.write(`diffectd: ${err?.stack ?? err}\n`);
-      sendJson(res, 500, { error: "internal error" });
-    });
+      });
+  }) as ManagedDaemonServer;
+  const sockets = new Set<Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
   });
+
+  server.markReady = (origin) => {
+    if (!lifecycle || lifecycle.state !== "starting") return;
+    lifecycle.origin = origin;
+    lifecycle.state = "ready";
+  };
+  server.drainAndClose = () => {
+    if (shutdown) return shutdown;
+    shutdown = (async () => {
+      if (lifecycle) lifecycle.state = "draining";
+      events.closeClients();
+      if (activeMutations > 0) {
+        await new Promise<void>((resolveWaiter) => mutationWaiters.push(resolveWaiter));
+      }
+      if (!server.listening) return;
+      const closed = new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+      server.closeIdleConnections();
+      for (const socket of sockets) socket.end();
+      await closed;
+    })();
+    return shutdown;
+  };
+  ctx.requestShutdown = () => {
+    if (lifecycle) lifecycle.state = "draining";
+    events.closeClients();
+    setImmediate(() => void server.drainAndClose().catch((error) => {
+      process.stderr.write(`diffectd: graceful shutdown failed: ${error?.message ?? error}\n`);
+    }));
+  };
 
   // Tear down filesystem watchers when the server closes.
   server.on("close", () => ctx.events.close());
   return server;
+}
+
+function waitForResponseSettlement(res: ServerResponse): Promise<void> {
+  return new Promise((resolveSettlement) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      res.removeListener("finish", settle);
+      res.removeListener("close", settle);
+      resolveSettlement();
+    };
+    res.once("finish", settle);
+    res.once("close", settle);
+  });
+}
+
+function isMutationRequest(req: IncomingMessage, path: string): boolean {
+  const method = req.method ?? "GET";
+  return method !== "GET" &&
+    method !== "HEAD" &&
+    method !== "OPTIONS" &&
+    path !== "/daemon/stop";
+}
+
+function handleRequestError(res: ServerResponse, err: unknown): void {
+  if (err instanceof BodyTooLargeError) {
+    // Close the connection after responding: the client may still be
+    // uploading, and we've stopped reading, so keep-alive would stall.
+    if (!res.headersSent) {
+      const json = JSON.stringify({ error: "request body too large" });
+      res.writeHead(413, {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": Buffer.byteLength(json),
+        connection: "close",
+      });
+      res.end(json);
+    }
+    return;
+  }
+  if (err instanceof UnsupportedMediaTypeError) {
+    sendJson(res, 415, { error: "content-type must be application/json" });
+    return;
+  }
+  // Don't leak internals (paths, stack traces) to the client; log instead.
+  process.stderr.write(`diffectd: ${(err as Error)?.stack ?? err}\n`);
+  sendJson(res, 500, { error: "internal error" });
 }
 
 async function handle(
@@ -209,6 +351,56 @@ async function handle(
 
   if (isLoopback(ctx.host) && !isLoopbackRequest(req)) {
     sendJson(res, 403, { error: "loopback daemon requires a loopback host and origin" });
+    return;
+  }
+
+  if (method === "GET" && path === "/health") {
+    sendJson(res, 200, {
+      service: "diffect",
+      version: ctx.lifecycle?.version ?? null,
+      buildId: ctx.lifecycle?.buildId ?? null,
+      webAssetId: ctx.lifecycle?.webAssetId ?? null,
+      instanceId: ctx.lifecycle?.instanceId ?? null,
+      origin: ctx.lifecycle?.origin ?? null,
+      lifecycle: ctx.lifecycle?.state ?? "ready",
+      activeMutations: ctx.activeMutations(),
+      web: Boolean(ctx.webRoot),
+    });
+    return;
+  }
+  if (method === "POST" && path === "/daemon/prove") {
+    if (!ctx.lifecycle) {
+      sendJson(res, 409, { error: "diffectd is not managed" });
+      return;
+    }
+    const challenge = req.headers["x-diffect-daemon-challenge"];
+    const nonce = Array.isArray(challenge) ? challenge[0] : challenge;
+    if (!nonce || !/^[a-f0-9]{64}$/.test(nonce)) {
+      sendJson(res, 400, { error: "invalid daemon lifecycle challenge" });
+      return;
+    }
+    sendJson(res, 200, {
+      proof: lifecycleProof(ctx.lifecycle.stopToken, ctx.lifecycle.instanceId, nonce),
+    });
+    return;
+  }
+  if (method === "POST" && path === "/daemon/stop") {
+    if (!ctx.lifecycle) {
+      sendJson(res, 409, { error: "diffectd is not managed" });
+      return;
+    }
+    const supplied = req.headers["x-diffect-daemon-token"];
+    if (!constantTimeEqual(
+      Array.isArray(supplied) ? supplied[0] : supplied,
+      ctx.lifecycle.stopToken,
+    )) {
+      sendJson(res, 403, { error: "invalid daemon lifecycle credential" });
+      return;
+    }
+    ctx.lifecycle.state = "draining";
+    res.once("finish", ctx.requestShutdown);
+    res.once("close", ctx.requestShutdown);
+    sendJson(res, 202, { lifecycle: "draining" });
     return;
   }
 
@@ -240,6 +432,9 @@ async function handle(
   if (await discoveryRoutes(ctx, res, url, method, path)) return;
 
   // --- Static web assets --------------------------------------------------
+  if (method === "GET" && ctx.webAssets) {
+    return servePreloadedStatic(ctx.webAssets, path, res);
+  }
   if (method === "GET" && ctx.webRoot) {
     return serveStatic(ctx.webRoot, path, res);
   }
@@ -1414,6 +1609,22 @@ function isLoopbackOrigin(value: string): boolean {
   }
 }
 
+function lifecycleProof(token: string, instanceId: string, nonce: string): string {
+  return createHmac("sha256", Buffer.from(token, "hex"))
+    .update(`${instanceId}:${nonce}`, "utf8")
+    .digest("hex");
+}
+
+function constantTimeEqual(
+  supplied: string | undefined,
+  expected: string,
+): boolean {
+  if (!supplied) return false;
+  const left = Buffer.from(supplied, "utf8");
+  const right = Buffer.from(expected, "utf8");
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 function setSettingsEtag(res: ServerResponse, revision: string): void {
   res.setHeader("etag", `"${revision}"`);
 }
@@ -1505,6 +1716,67 @@ const MIME: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
+
+async function loadWebAssets(webRoot: string): Promise<Map<string, WebAsset>> {
+  const root = resolve(webRoot);
+  const assets = new Map<string, WebAsset>();
+
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(path);
+      } else if (entry.isFile()) {
+        const key = relative(root, path).split(sep).join("/");
+        assets.set(key, {
+          content: await readFile(path),
+          contentType: MIME[extname(path)] ?? "application/octet-stream",
+        });
+      }
+    }
+  }
+
+  await visit(root);
+  if (!assets.has("index.html")) {
+    throw new Error(`web root has no index.html: ${root}`);
+  }
+  return assets;
+}
+
+function webAssetId(assets: Map<string, WebAsset>): string {
+  const hash = createHash("sha256");
+  for (const key of [...assets.keys()].sort()) {
+    hash.update(key, "utf8");
+    hash.update("\0");
+    hash.update(assets.get(key)!.content);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function servePreloadedStatic(
+  assets: Map<string, WebAsset>,
+  urlPath: string,
+  res: ServerResponse,
+): void {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(urlPath);
+  } catch {
+    return sendJson(res, 400, { error: "bad path" });
+  }
+  const rel = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
+  if (rel.includes("\\") || rel.split("/").includes("..")) {
+    return sendJson(res, 403, { error: "forbidden" });
+  }
+  const asset = assets.get(rel) ?? assets.get("index.html");
+  if (!asset) return sendJson(res, 404, { error: "not found" });
+  res.writeHead(200, {
+    "content-type": asset.contentType,
+    "content-length": asset.content.length,
+  });
+  res.end(asset.content);
+}
 
 async function serveStatic(
   webRoot: string,

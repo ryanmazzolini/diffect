@@ -274,8 +274,15 @@ export class EventHub {
     }
   }
 
-  /** Stop all watchers and timers. Does not close client connections. */
+  /** End every live stream so a managed daemon can drain and restart. */
+  closeClients(): void {
+    for (const response of this.clients) response.end();
+    this.clients.clear();
+  }
+
+  /** Stop all watchers, timers, and client connections. */
   close(): void {
+    this.closeClients();
     this.detachWatches();
     this.reviewPositions.clear();
     this.reviewScans.clear();

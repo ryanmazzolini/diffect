@@ -22,9 +22,9 @@ depends = ["build"]
 run = "node {{config_root}}/packages/core/dist/daemon-bin.js"
 
 [tasks.desktop]
-description = "Build everything and run the desktop app (Tauri shell over diffectd)"
-depends = ["build"]
+description = "Run the source desktop client against the explicit Vite development origin"
 run = "cargo run --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml"
+env = { DIFFECT_DESKTOP_URL = "http://127.0.0.1:5173" }
 
 [tasks."desktop:check"]
 description = "Check the Tauri desktop shell"
@@ -38,11 +38,6 @@ run = "cargo test --manifest-path {{config_root}}/packages/desktop/src-tauri/Car
 description = "Package the desktop app: SEA sidecar + bundled web assets + installer"
 depends = ["build"]
 run = "pnpm --filter @diffect/desktop bundle"
-
-[tasks."desktop:dev"]
-description = "Desktop shell against the Vite dev server (run `mise run dev` + `mise run daemon` separately)"
-run = "cargo run --manifest-path {{config_root}}/packages/desktop/src-tauri/Cargo.toml"
-env = { DIFFECT_DESKTOP_URL = "http://127.0.0.1:5173" }
 
 [tasks.dev]
 description = "Web UI dev server (Vite, hot reload)"

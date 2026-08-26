@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "website-review",
+  "description": "Allow the isolated Website Review webview to report a pick or capture its own selected area.",
+  "webviews": ["website-review"],
+  "local": false,
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*",
+      "http://*",
+      "https://*"
+    ]
+  },
+  "permissions": [
+    "allow-capture-website-area",
+    "allow-report-website-pick"
+  ]
+}

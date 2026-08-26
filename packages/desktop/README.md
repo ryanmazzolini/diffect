@@ -1,50 +1,35 @@
 # Diffect Desktop
 
-A Tauri shell over diffectd. On launch it spawns a private daemon with
-`--port 0 --no-workspace` (ephemeral loopback port, registered workspaces
-only), waits for the daemon's `DIFFECTD_READY <url>` stdout line, and opens
-the main window at that origin. The web UI is served by the daemon and uses
-relative URLs, so it runs unmodified; review state lives in the same per-user
-store (`~/.config/diffect/`) the CLI, agents, and any manually run daemon
-share — the daemon's store watcher pushes their writes into the window live.
+Diffect Desktop is a Tauri client for the persistent local Diffect daemon. A packaged launch synchronously ensures the installed daemon at `http://127.0.0.1:13433`, then opens the main window on that origin. The daemon serves both the web UI and API.
 
-Lifecycle: the daemon is spawned with `--exit-on-stdin-close` and a pipe the
-shell holds open, so it dies with the app even if the app is killed without
-cleanup; a normal quit also kills it explicitly. If the daemon dies under a
-running window it is respawned (up to 3 times per minute, then a visible
-error). A second app launch focuses the existing window. Navigation stays
-in-window for loopback origins; anything else (links in comments) opens in
-the system browser.
+Desktop does not own the daemon process. Quitting the app leaves the daemon and browser links running. Reopening the app attaches to the same process. If the daemon crashes, the next app launch starts it again. A second app launch focuses the existing window and preserves the requested route while normalizing it to the canonical origin.
+
+The installed desktop executable also exposes the machine-readable lifecycle commands used by other local clients:
 
 ```sh
-mise run desktop        # build the monorepo, then launch the app
+diffect-desktop daemon activate --json
+diffect-desktop daemon ensure --json
+diffect-desktop daemon status --json
+diffect-desktop daemon restart --json
+diffect-desktop daemon stop --json
 ```
 
-The dev build runs the daemon from `packages/core/dist` with the system
-`node`. A packaged build is self-contained — no Node on the host:
+A packaged build is self-contained and needs no system Node installation:
 
 ```sh
 mise run desktop:bundle   # → src-tauri/target/release/bundle/<format>/…
 ```
 
-`scripts/build-sidecar.mjs` esbuild-bundles the built daemon to one CJS file
-and injects it into the running Node binary as a SEA (single executable
-application), emitting `src-tauri/binaries/diffectd-<target-triple>`; `tauri
-build --config src-tauri/tauri.bundle.conf.json` then bundles that sidecar
-plus `packages/web/dist` (as a resource) into platform installers. At
-runtime the shell prefers a `diffectd` sidecar sitting beside the app
-executable and falls back to the monorepo layout, so dev and packaged builds
-share one code path. macOS signing is ad-hoc for now; notarization and an
-updater are future release work.
+`scripts/build-sidecar.mjs` bundles the built daemon into a Node SEA, embedding the release version and immutable build ID. Tauri packages that sidecar and the matching `packages/web/dist` assets with the desktop executable. The desktop passes its stable launcher path and bundled web root to the sidecar manager.
 
-For UI work with hot reload, point the shell at an existing origin instead of
-spawning a daemon:
+On macOS, move `Diffect.app` to `/Applications` or `~/Applications` before its first managed launch. Set `DIFFECT_APP_PATH` to an absolute desktop executable path for an explicit installation, including local package smoke tests. Linux AppImages record the original `$APPIMAGE` path instead of the temporary mount.
+
+Source development never claims the production daemon implicitly. Run the API and Vite server explicitly, then attach the source desktop client:
 
 ```sh
-mise run daemon         # terminal 1: API on :7421
-mise run dev            # terminal 2: Vite on :5173 (proxies to the daemon)
-mise run desktop:dev    # terminal 3: window on the Vite origin
+mise run daemon    # terminal 1: API on :7421
+mise run dev       # terminal 2: Vite on :5173, proxying to the API
+mise run desktop   # terminal 3: desktop client on the Vite origin
 ```
 
-(`desktop:dev` sets `DIFFECT_DESKTOP_URL=http://127.0.0.1:5173`; set it
-manually to any URL to do the same.)
+`mise run desktop` sets `DIFFECT_DESKTOP_URL=http://127.0.0.1:5173`. An explicit loopback URL passed on the command line works as well. These source origins are for UI development and receive no native desktop capabilities; use a packaged build for native integration testing. Release builds ignore `DIFFECT_DESKTOP_URL`.

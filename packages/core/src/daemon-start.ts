@@ -1,10 +1,12 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "./daemon.js";
-import { clearDaemonMarker, writeDaemonMarker } from "./store/daemon-marker.js";
+import { createServer, type ManagedDaemonServer } from "./daemon.js";
+import { writeDaemonMarker } from "./store/daemon-marker.js";
+import { writeManagedDaemon } from "./store/managed-daemon.js";
 import { addWorkspaceToRegistry } from "./store/registry.js";
 
 export interface DaemonArgs {
@@ -81,6 +83,18 @@ export function formatUrl(host: string, port: number): string {
   return `http://${h}:${port}`;
 }
 
+interface ManagedRunOptions {
+  version: string;
+  buildId: string;
+  webAssetId: string;
+  origin: string;
+}
+
+interface ManagedDaemonIdentity extends Omit<ManagedRunOptions, "origin"> {
+  instanceId: string;
+  stopToken: string;
+}
+
 interface RunDaemonIo {
   stdout?: { write(chunk: string): unknown };
   stderr?: { write(chunk: string): unknown };
@@ -91,12 +105,13 @@ interface RunDaemonIo {
 /**
  * Start diffectd from CLI args and announce readiness on stdout. The first
  * line is the machine-readable contract `DIFFECTD_READY <url>` carrying the
- * *resolved* port — embedders start us with `--port 0` and parse it to learn
- * where to point their webview.
+ * resolved port. Managed production launchers use 13433; tests and explicit
+ * development commands may request 0.
  */
 export async function runDaemon(
   argv: string[],
   io: RunDaemonIo = {},
+  managed?: ManagedRunOptions,
 ): Promise<Server> {
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
@@ -118,10 +133,30 @@ export async function runDaemon(
     );
   }
   const webRoot = resolveWebRoot(args.webRoot);
-  const server = await createServer({
+  if (managed && !webRoot) {
+    throw new Error("managed diffectd requires a web root");
+  }
+  if (managed && args.host !== "127.0.0.1") {
+    throw new Error("managed diffectd must bind to 127.0.0.1");
+  }
+  if (managed && (args.port === 0 || formatUrl(args.host, args.port) !== managed.origin)) {
+    throw new Error(`managed diffectd must bind to ${managed.origin}`);
+  }
+  const identity: ManagedDaemonIdentity | undefined = managed
+    ? {
+        version: managed.version,
+        buildId: managed.buildId,
+        webAssetId: managed.webAssetId,
+        instanceId: randomUUID(),
+        stopToken: randomBytes(32).toString("hex"),
+      }
+    : undefined;
+  const server: ManagedDaemonServer = await createServer({
     workspacePath: args.workspace ?? undefined,
     webRoot,
     host: args.host,
+    preloadWebAssets: Boolean(managed),
+    lifecycle: identity,
   });
   await new Promise<void>((res, rej) => {
     server.once("error", rej);
@@ -129,12 +164,21 @@ export async function runDaemon(
   });
   const { port } = server.address() as AddressInfo;
   const url = formatUrl(args.host, port);
-  await writeDaemonMarker(url).catch((err) =>
-    stderr.write(`diffectd: could not write daemon marker: ${err?.message ?? err}\n`),
+  if (identity) {
+    try {
+      await writeManagedDaemon({ origin: url, ...identity });
+    } catch (error) {
+      await server.drainAndClose().catch(() => {});
+      throw new Error(`could not write managed daemon lifecycle record: ${(error as Error)?.message ?? error}`);
+    }
+  }
+  await writeDaemonMarker(url).catch((error) =>
+    stderr.write(`diffectd: could not write daemon marker: ${(error as Error)?.message ?? error}\n`),
   );
-  server.on("close", () => {
-    void clearDaemonMarker(url).catch(() => {});
-  });
+  server.markReady(url);
+  // Markers are intentionally retained after exit. They are diagnostic only,
+  // and the next launcher live-probes before reuse and atomically replaces them.
+  if (managed) attachManagedSignals(server);
   const where = webRoot ? "browser + API" : "API only";
   stdout.write(`DIFFECTD_READY ${url}\n`);
   stdout.write(
@@ -142,4 +186,16 @@ export async function runDaemon(
       `  ${where} on ${url}\n`,
   );
   return server;
+}
+
+function attachManagedSignals(server: ManagedDaemonServer): void {
+  const shutdown = () => void server.drainAndClose().catch((error) => {
+    process.stderr.write(`diffectd: graceful shutdown failed: ${error?.message ?? error}\n`);
+  });
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  server.once("close", () => {
+    process.removeListener("SIGINT", shutdown);
+    process.removeListener("SIGTERM", shutdown);
+  });
 }
