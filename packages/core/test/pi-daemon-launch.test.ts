@@ -17,6 +17,7 @@ let workspace: string;
 let explicit: string;
 let previousAppPath: string | undefined;
 let previousConfigHome: string | undefined;
+let previousHome: string | undefined;
 const execFileAsync = promisify(execFile);
 const packagedLauncher = process.env.DIFFECT_PACKAGED_LAUNCHER;
 const packagedSource = process.env.DIFFECT_PACKAGED_SOURCE;
@@ -30,8 +31,10 @@ beforeEach(async () => {
   await writeFile(explicit, "launcher");
   previousAppPath = process.env.DIFFECT_APP_PATH;
   previousConfigHome = process.env.XDG_CONFIG_HOME;
+  previousHome = process.env.HOME;
   delete process.env.DIFFECT_APP_PATH;
   process.env.XDG_CONFIG_HOME = join(root, "config");
+  process.env.HOME = join(root, "home");
 });
 
 afterEach(async () => {
@@ -39,6 +42,8 @@ afterEach(async () => {
   else process.env.DIFFECT_APP_PATH = previousAppPath;
   if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = previousConfigHome;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -66,9 +71,12 @@ describe.sequential("Pi installed daemon launcher", () => {
   });
 
   it("prefers DIFFECT_APP_PATH, then PATH, then the authority record", async () => {
-    const pathLauncher = join(root, "path/diffect-desktop");
+    const pathLauncher = join(
+      process.env.HOME!,
+      ".local/share/mise/installs/diffect/1.0.0/bin/diffect-desktop",
+    );
     const recordedLauncher = join(root, "recorded/Diffect.AppImage");
-    await mkdir(join(root, "path"), { recursive: true });
+    await mkdir(join(pathLauncher, ".."), { recursive: true });
     await mkdir(join(root, "recorded"), { recursive: true });
     await writeFile(pathLauncher, "path launcher");
     await writeFile(recordedLauncher, "original AppImage");
@@ -123,6 +131,38 @@ describe.sequential("Pi installed daemon launcher", () => {
     );
   });
 
+  it("rejects sibling-repository and workspace-level PATH launchers", async () => {
+    const space = join(root, "space");
+    const repo = join(space, "repo-a");
+    const siblingLauncher = join(space, "repo-b/bin/diffect-desktop");
+    const workspaceLauncher = join(space, "bin/diffect-desktop");
+    const recordedLauncher = join(root, "installed/diffect-desktop");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(join(space, "repo-b/.git"), { recursive: true });
+    await mkdir(join(siblingLauncher, ".."), { recursive: true });
+    await mkdir(join(workspaceLauncher, ".."), { recursive: true });
+    await mkdir(join(recordedLauncher, ".."), { recursive: true });
+    await writeFile(siblingLauncher, "sibling launcher");
+    await writeFile(workspaceLauncher, "workspace launcher");
+    await writeFile(recordedLauncher, "installed launcher");
+    await mkdir(join(process.env.XDG_CONFIG_HOME!, "diffect"), { recursive: true });
+    await writeFile(
+      join(process.env.XDG_CONFIG_HOME!, "diffect/installation.json"),
+      JSON.stringify({ launcherPath: recordedLauncher }),
+    );
+
+    for (const launcher of [siblingLauncher, workspaceLauncher]) {
+      const exec = vi.fn(async () => ({
+        code: 0,
+        stdout: `${launcher}\n`,
+        stderr: "",
+      }));
+      expect((await resolveDesktopLauncher(piWithExec(exec), repo)).command).toBe(
+        await realpath(recordedLauncher),
+      );
+    }
+  });
+
   it("runs the installed manager synchronously and returns its canonical origin", async () => {
     process.env.DIFFECT_APP_PATH = explicit;
     const exec = vi.fn(async (_command: string, args: string[]) => ({
@@ -155,9 +195,9 @@ describe.sequential("Pi installed daemon launcher", () => {
     "cold-starts and rediscovers the packaged launcher through its authority record",
     async () => {
       const launcher = packagedLauncher!;
-      let advertiseOnPath = packagedSource !== "explicit";
-      if (packagedSource === "explicit") process.env.DIFFECT_APP_PATH = launcher;
-      else delete process.env.DIFFECT_APP_PATH;
+      let advertiseOnPath = packagedSource === "path";
+      if (packagedSource === "path") delete process.env.DIFFECT_APP_PATH;
+      else process.env.DIFFECT_APP_PATH = launcher;
       const exec = async (command: string, args: string[]) => {
         if (command === "bash") {
           return advertiseOnPath

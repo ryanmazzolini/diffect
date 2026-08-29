@@ -83,15 +83,16 @@ Ghostty, and other terminal hosts.
 Daemon management uses one synchronous launcher in this order:
 
 - `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when explicitly set
-- `diffect-desktop` on `PATH`, including a package-manager installation
+- `diffect-desktop` on `PATH` when it resolves inside Applications or mise on macOS, or an AppImage/system installation location on Linux
 - the authoritative launcher recorded by a prior installed desktop launch
 
-The selected launcher runs `daemon ensure --json`. It reuses only the exact
-installed build, starts the service when absent, and reports build mismatches or
-a non-Diffect `13433` listener instead of starting a private daemon or choosing
-another port. The desktop single-instance hook focuses and navigates an existing
-window. If no desktop window can be opened, `/diffect` still returns the stable
-browser URL.
+Repository and workspace-level PATH launchers are ignored; use `DIFFECT_APP_PATH`
+when intentionally testing another executable. The selected launcher runs
+`daemon ensure --json`. It reuses only the exact installed build, starts the
+service when absent, and reports build mismatches or a non-Diffect `13433`
+listener instead of starting a private daemon or choosing another port. The
+desktop single-instance hook focuses and navigates an existing window. If no
+desktop window can be opened, `/diffect` still returns the stable browser URL.
 
 For source development, start `diffectd` explicitly and set `DIFFECT_URL` to its
 UI/API origin. Source checkouts never claim the production daemon implicitly.

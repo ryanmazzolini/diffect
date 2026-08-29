@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -912,7 +912,13 @@ export async function resolveDesktopLauncher(
     return { command: realpathSync(explicit), args: [] };
   }
 
-  const pathLauncher = await pathCommand(pi, "diffect-desktop", cwd, signal);
+  const pathLauncher = await pathCommand(
+    pi,
+    "diffect-desktop",
+    cwd,
+    signal,
+    { installedLauncher: true },
+  );
   if (pathLauncher) return { command: pathLauncher, args: [] };
 
   const recorded = await readInstalledLauncher();
@@ -941,6 +947,7 @@ async function pathCommand(
   name: string,
   cwd: string,
   signal?: AbortSignal,
+  options: { installedLauncher?: boolean } = {},
 ): Promise<string | null> {
   const lookupDirectory = homedir();
   const r = await pi.exec("bash", ["-lc", `command -v ${name}`], {
@@ -949,11 +956,40 @@ async function pathCommand(
     timeout: 5_000,
   });
   if (r.code !== 0 || !r.stdout.trim()) return null;
-  return resolveTrustedCommand(
+  const command = resolveTrustedCommand(
     r.stdout.trim(),
     lookupDirectory,
     commandTrustRoot(cwd),
   );
+  if (!command || !options.installedLauncher) return command;
+  return trustedLauncherRoots().some((root) => isInside(command, root))
+    ? command
+    : null;
+}
+
+function trustedLauncherRoots(): string[] {
+  const home = homedir();
+  const roots = [join(home, ".local/share/mise/installs")];
+  if (process.platform === "darwin") {
+    roots.push("/Applications", join(home, "Applications"));
+  } else if (process.platform === "linux") {
+    roots.push(
+      "/nix/store",
+      "/usr/bin",
+      "/usr/local/bin",
+      join(home, "Applications"),
+      join(home, ".local/bin"),
+    );
+  }
+  return [...new Set(
+    roots.filter(existsSync).map((root) => real(root)),
+  )];
+}
+
+function isInside(path: string, root: string): boolean {
+  const candidate = relative(root, path);
+  return candidate !== ".." && !candidate.startsWith(`..${sep}`) &&
+    !isAbsolute(candidate);
 }
 
 function commandTrustRoot(cwd: string): string {
