@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { parseSettings } from "../src/store/settings.js";
 import {
   buildPiWorkspaceResolutionRequest,
-  daemonWorkspaceArguments,
   decideWorkspaceCandidate,
   parseWorkspaceResolutionResponse,
   persistWorkspaceBinding,
@@ -216,14 +215,6 @@ describe("Pi workspace resolution client", () => {
         ],
       },
     });
-  });
-
-  it("starts an unseeded daemon before resolution", () => {
-    expect(daemonWorkspaceArguments()).toEqual(["--no-workspace"]);
-    expect(daemonWorkspaceArguments("/work/space")).toEqual([
-      "--workspace",
-      "/work/space",
-    ]);
   });
 });
 

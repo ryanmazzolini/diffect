@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const desktop = resolve(import.meta.dirname, "..");
+const root = resolve(desktop, "../..");
 const target = join(desktop, "src-tauri/target/release/bundle");
 let launcher;
 const platformEnv = {};
@@ -59,6 +60,15 @@ try {
     throw new Error(`unexpected ensure response: ${JSON.stringify(first)}`);
   }
   const firstLifecycle = lifecycle();
+  const installation = JSON.parse(
+    readFileSync(join(config, "diffect/installation.json"), "utf8"),
+  );
+  if (
+    installation.launcherPath !== launcher ||
+    installation.source !== (process.platform === "linux" ? "appimage" : "explicit")
+  ) {
+    throw new Error(`unexpected packaged launcher authority: ${JSON.stringify(installation)}`);
+  }
   const second = command("ensure");
   if (second.daemon.instanceId !== first.daemon.instanceId || lifecycle().pid !== firstLifecycle.pid) {
     throw new Error("a second packaged ensure did not reuse the daemon");
@@ -95,3 +105,19 @@ try {
   } catch {}
   rmSync(config, { recursive: true, force: true });
 }
+
+execFileSync(
+  "pnpm",
+  ["--filter", "@diffect/core", "exec", "vitest", "run", "test/pi-daemon-launch.test.ts", "--reporter=dot"],
+  {
+    cwd: root,
+    env: {
+      ...process.env,
+      ...platformEnv,
+      DIFFECT_PACKAGED_LAUNCHER: launcher,
+      DIFFECT_PACKAGED_SOURCE: process.platform === "linux" ? "appimage" : "explicit",
+    },
+    stdio: "inherit",
+    timeout: 120_000,
+  },
+);

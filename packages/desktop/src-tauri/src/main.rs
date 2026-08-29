@@ -31,7 +31,7 @@ struct InstalledBundle {
 
 struct LauncherIdentity {
     path: PathBuf,
-    source: &'static str,
+    source: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -53,9 +53,7 @@ fn packaged_resource_dir(package_info: &tauri::PackageInfo) -> Result<PathBuf, S
         .map_err(|e| format!("could not resolve the packaged resource directory: {e}"))
 }
 
-fn resolve_installed_bundle(
-    package_info: &tauri::PackageInfo,
-) -> Result<InstalledBundle, String> {
+fn resolve_installed_bundle(package_info: &tauri::PackageInfo) -> Result<InstalledBundle, String> {
     let current_exe = std::env::current_exe()
         .map_err(|e| format!("could not resolve the desktop executable: {e}"))?;
     let sidecar = current_exe
@@ -76,14 +74,22 @@ fn resolve_installed_bundle(
 }
 
 fn installed_launcher(current_exe: &Path) -> Result<LauncherIdentity, String> {
+    #[cfg(target_os = "macos")]
+    if is_macos_translocated(current_exe) {
+        return Err("move the translocated Diffect.app to /Applications or ~/Applications".into());
+    }
+
     if let Some(path) = std::env::var_os("DIFFECT_APP_PATH") {
         let path = PathBuf::from(path);
         if !path.is_absolute() || !path.is_file() {
             return Err("DIFFECT_APP_PATH must name an absolute desktop executable".into());
         }
+        let path = path
+            .canonicalize()
+            .map_err(|error| format!("could not resolve DIFFECT_APP_PATH: {error}"))?;
         return Ok(LauncherIdentity {
             path,
-            source: "explicit",
+            source: "explicit".into(),
         });
     }
 
@@ -95,12 +101,22 @@ fn installed_launcher(current_exe: &Path) -> Result<LauncherIdentity, String> {
         }
         return Ok(LauncherIdentity {
             path,
-            source: "appimage",
+            source: "appimage".into(),
         });
+    }
+
+    if let Some(identity) = recorded_launcher(current_exe) {
+        return Ok(identity);
     }
 
     #[cfg(target_os = "macos")]
     {
+        if is_mise_install(current_exe) {
+            return Ok(LauncherIdentity {
+                path: current_exe.to_path_buf(),
+                source: "package-manager".into(),
+            });
+        }
         let in_system_applications = current_exe.starts_with("/Applications");
         let in_user_applications = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -111,16 +127,58 @@ fn installed_launcher(current_exe: &Path) -> Result<LauncherIdentity, String> {
                     .into(),
             );
         }
-        return Ok(LauncherIdentity {
+        Ok(LauncherIdentity {
             path: current_exe.to_path_buf(),
-            source: "macos-app",
-        });
+            source: "macos-app".into(),
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
     Ok(LauncherIdentity {
         path: current_exe.to_path_buf(),
-        source: "package-manager",
+        source: "package-manager".into(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_translocated(path: &Path) -> bool {
+    path.components()
+        .any(|component| component.as_os_str() == "AppTranslocation")
+}
+
+#[cfg(target_os = "macos")]
+fn is_mise_install(path: &Path) -> bool {
+    let data = std::env::var_os("MISE_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".local/share/mise")));
+    data.is_some_and(|data| path.starts_with(data.join("installs")))
+}
+
+fn recorded_launcher(current_exe: &Path) -> Option<LauncherIdentity> {
+    #[cfg(target_os = "macos")]
+    if is_macos_translocated(current_exe) {
+        return None;
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".config")))?;
+    let value = serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(base.join("diffect/installation.json")).ok()?,
+    )
+    .ok()?;
+    let path = PathBuf::from(value.get("launcherPath")?.as_str()?);
+    let source = value.get("source")?.as_str()?;
+    if path != current_exe
+        || !matches!(
+            source,
+            "package-manager" | "macos-app" | "appimage" | "explicit"
+        )
+    {
+        return None;
+    }
+    Some(LauncherIdentity {
+        path,
+        source: source.to_string(),
     })
 }
 
@@ -142,7 +200,7 @@ fn manager_command(
 ) -> Command {
     let mut command = sidecar_command(bundle, args);
     command
-        .env("DIFFECT_INSTALL_SOURCE", launcher.source)
+        .env("DIFFECT_INSTALL_SOURCE", &launcher.source)
         .env("DIFFECT_LAUNCHER_PATH", &launcher.path)
         .env("DIFFECT_WEB_ROOT", &bundle.web_root);
     command
@@ -153,10 +211,7 @@ fn run_desktop_daemon_command(
     args: &[String],
 ) -> Result<i32, String> {
     let Some(command) = args.first() else {
-        return Err(format!(
-            "expected one of: {}",
-            DAEMON_COMMANDS.join(", ")
-        ));
+        return Err(format!("expected one of: {}", DAEMON_COMMANDS.join(", ")));
     };
     if !DAEMON_COMMANDS.contains(&command.as_str()) {
         return Err(format!("unknown daemon command: {command}"));
@@ -192,8 +247,7 @@ fn parse_ensured_origin(stdout: &[u8]) -> Result<Url, String> {
 fn ensure_installed_daemon(package_info: &tauri::PackageInfo) -> Result<Url, String> {
     let bundle = resolve_installed_bundle(package_info)?;
     let output = match installed_launcher(&bundle.current_exe) {
-        Ok(launcher) => manager_command(&bundle, &launcher, &["ensure".to_string()])
-            .output(),
+        Ok(launcher) => manager_command(&bundle, &launcher, &["ensure".to_string()]).output(),
         Err(authority_error) => {
             let output = sidecar_command(&bundle, &["attach".to_string()]).output();
             if let Ok(output) = &output {
@@ -1254,13 +1308,11 @@ mod tests {
     #[test]
     fn release_startup_ignores_development_origins() {
         let requested = "http://127.0.0.1:5173/attacker".parse().ok();
-        assert!(development_startup_origin(
-            false,
-            Some("http://127.0.0.1:5173"),
-            requested,
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            development_startup_origin(false, Some("http://127.0.0.1:5173"), requested,)
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(
             development_startup_origin(true, Some("http://127.0.0.1:5173"), None)
                 .unwrap()
@@ -1283,7 +1335,9 @@ mod tests {
         assert_eq!(url.path(), "/reviews/review-1");
         assert_eq!(url.fragment(), Some("thread-2"));
         let query = url.query_pairs().collect::<Vec<_>>();
-        assert!(query.iter().any(|pair| pair == &("repo".into(), "diffect".into())));
+        assert!(query
+            .iter()
+            .any(|pair| pair == &("repo".into(), "diffect".into())));
         assert_eq!(query.iter().filter(|(key, _)| key == "shell").count(), 1);
         assert_eq!(query.iter().filter(|(key, _)| key == "platform").count(), 1);
     }
@@ -1303,6 +1357,21 @@ mod tests {
         ] {
             assert!(parse_ensured_origin(invalid).is_err());
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_distinguishes_translocation_from_mise_installation() {
+        assert!(is_macos_translocated(Path::new(
+            "/private/var/folders/x/AppTranslocation/abc/d/Diffect.app/Contents/MacOS/diffect-desktop",
+        )));
+        assert!(!is_macos_translocated(Path::new(
+            "/Applications/Diffect.app/Contents/MacOS/diffect-desktop",
+        )));
+        let mise = home_dir().unwrap().join(
+            ".local/share/mise/installs/diffect/1.0.0/Diffect.app/Contents/MacOS/diffect-desktop",
+        );
+        assert!(is_mise_install(&mise));
     }
 
     #[test]
@@ -1371,34 +1440,33 @@ fn main() {
             report_website_pick,
             import_browser_bookmarks
         ])
-        .plugin(tauri_plugin_single_instance::init(move |app, argv, _cwd| {
-            let requested = requested_loopback_url(&argv);
-            let route = match (second_launch_origin.as_ref(), requested.as_ref()) {
-                (Some(origin), Some(requested)) => Some(route_at_origin(origin, requested)),
-                _ => None,
-            };
-            focus_window(app, route);
-        }))
+        .plugin(tauri_plugin_single_instance::init(
+            move |app, argv, _cwd| {
+                let requested = requested_loopback_url(&argv);
+                let route = match (second_launch_origin.as_ref(), requested.as_ref()) {
+                    (Some(origin), Some(requested)) => Some(route_at_origin(origin, requested)),
+                    _ => None,
+                };
+                focus_window(app, route);
+            },
+        ))
         .plugin(tauri_plugin_opener::init())
         .manage(WebsiteAllowedDomains(Arc::new(Mutex::new(Vec::new()))))
         .setup(move |app| {
             let app_origin = initial_url.origin();
             let handle = app.handle().clone();
-            let builder = WebviewWindowBuilder::new(
-                app,
-                "main",
-                WebviewUrl::External(initial_url.clone()),
-            )
-            .title("Diffect")
-            .inner_size(1280.0, 860.0)
-            .disable_drag_drop_handler()
-            .on_navigation(move |target| {
-                if is_main_window_navigation(target, &app_origin) {
-                    return true;
-                }
-                let _ = handle.opener().open_url(target.as_str(), None::<&str>);
-                false
-            });
+            let builder =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::External(initial_url.clone()))
+                    .title("Diffect")
+                    .inner_size(1280.0, 860.0)
+                    .disable_drag_drop_handler()
+                    .on_navigation(move |target| {
+                        if is_main_window_navigation(target, &app_origin) {
+                            return true;
+                        }
+                        let _ = handle.opener().open_url(target.as_str(), None::<&str>);
+                        false
+                    });
             #[cfg(target_os = "macos")]
             let builder = builder
                 .hidden_title(true)
