@@ -44,8 +44,13 @@ mise use -g 'github:ryanmazzolini/diffect[matching=macos-aarch64,strip_component
 
 Mise's GitHub backend ignores prereleases for `latest`. Run `mise upgrade` to
 install a newer stable release when one is available. You can instead download
-the platform asset directly from the release page; make a downloaded AppImage
-executable before launching it.
+the platform asset directly from the release page. Make a downloaded AppImage
+executable, or move `Diffect.app` to `/Applications` or `~/Applications`, before
+launching it.
+
+The installed release lazily starts one persistent UI/API daemon at
+`http://127.0.0.1:13433`. Desktop, pi, CLI, and browser links attach to that same
+build. Quitting the desktop leaves the daemon and links running.
 
 ## Layout
 
@@ -54,7 +59,7 @@ packages/
   shared/   contract types shared by daemon, CLI, and web UI
   core/     diffect CLI + diffectd daemon + git diff + event log
   web/      React + Vite browser UI served by diffectd
-  desktop/  Tauri shell over a private diffectd
+  desktop/  Tauri client and installed daemon launcher
   e2e/      Playwright coverage
 integrations/
   pi/       local pi package and tools
@@ -75,17 +80,13 @@ mise run daemon -- --workspace /path/to/repo
 `--workspace` defaults to the current directory. Drop it to review the repo
 you're standing in.
 
-For the desktop app:
+Source desktop runs are explicit and do not claim the installed daemon. For UI
+hot reload:
 
 ```sh
-mise run desktop
-```
-
-For UI hot reload:
-
-```sh
-mise run daemon   # terminal 1
-mise run dev      # terminal 2
+mise run daemon    # terminal 1: API on :7421
+mise run dev       # terminal 2: Vite on :5173
+mise run desktop   # terminal 3: desktop client on the Vite origin
 ```
 
 ## CLI
@@ -140,9 +141,12 @@ central store on first access; the original is left as a backup.
 
 ## Networking and security
 
-`diffectd` binds to `127.0.0.1` by default. There is no auth yet, so only expose
-it inside a trusted network if you override `--host`. Report vulnerabilities
-privately; see [SECURITY.md](SECURITY.md).
+The installed daemon binds to the fixed loopback origin
+`http://127.0.0.1:13433`. Lifecycle operations authenticate the exact managed
+process and the desktop accepts native commands only from its matching bundled
+UI. Explicit development daemons still default to loopback; only expose one to
+a trusted network if you override `--host`. Report vulnerabilities privately;
+see [SECURITY.md](SECURITY.md).
 
 ## License
 

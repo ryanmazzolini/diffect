@@ -12,9 +12,9 @@ Install this local pi package, then `/reload` and use:
 /diffect
 ```
 
-It finds the current Diffect workspace, reuses the running `diffectd` from
-`~/.config/diffect/daemon.json` when present (including the Tauri app's ephemeral
-port), otherwise starts one, registers the workspace, and opens Diffect at:
+It resolves the installed desktop launcher, synchronously ensures the persistent
+Diffect UI/API service at `http://127.0.0.1:13433`, registers the workspace, and
+opens Diffect at:
 
 ```text
 /?repo=<repo>&worktree=<worktree>&target=work
@@ -80,16 +80,21 @@ Feedback received while the daemon is fully stopped is not replayed automaticall
 Use `/diffect-review` as the manual fallback. The watch is independent of Herdr,
 Ghostty, and other terminal hosts.
 
-It reuses the daemon for whichever app is already running, then opens the UI
-with this launcher order:
+Daemon management uses one synchronous launcher in this order:
 
-- `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when set (use this to opt into a local dev build)
-- `diffect-desktop` on `PATH`, including a stable release installed by mise
-- macOS app lookup (`open -b app.diffect.desktop`, then `open -a Diffect`)
+- `DIFFECT_APP_PATH=/path/to/diffect-desktop`, when explicitly set
+- `diffect-desktop` on `PATH`, including a package-manager installation
+- the authoritative launcher recorded by a prior installed desktop launch
 
-The desktop app's single-instance hook makes the installed launcher focus and
-navigate an already-running dev or stable window. A stale local build is never
-started implicitly. If no app launcher works, it falls back to the browser.
+The selected launcher runs `daemon ensure --json`. It reuses only the exact
+installed build, starts the service when absent, and reports build mismatches or
+a non-Diffect `13433` listener instead of starting a private daemon or choosing
+another port. The desktop single-instance hook focuses and navigates an existing
+window. If no desktop window can be opened, `/diffect` still returns the stable
+browser URL.
+
+For source development, start `diffectd` explicitly and set `DIFFECT_URL` to its
+UI/API origin. Source checkouts never claim the production daemon implicitly.
 
 For global use:
 
@@ -97,7 +102,8 @@ For global use:
 pi install /path/to/diffect/integrations/pi
 ```
 
-Put `diffect`/`diffectd` on `PATH` or run it from a built Diffect checkout.
+Put the `diffect` CLI on `PATH` or run the integration from a built Diffect checkout.
+The managed daemon comes from the installed desktop release.
 
 ## Agent tools
 

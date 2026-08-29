@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -17,7 +17,6 @@ import {
 import { findLocalFile, resolveTrustedCommand } from "./local-files.js";
 import {
   buildPiWorkspaceResolutionRequest,
-  daemonWorkspaceArguments,
   decideWorkspaceCandidate,
   parseWorkspaceResolutionResponse,
   persistWorkspaceBinding,
@@ -25,7 +24,7 @@ import {
   type WorkspaceResolutionResponse,
 } from "./workspace-resolution.js";
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:7421";
+export const CANONICAL_LOCAL_ORIGIN = "http://127.0.0.1:13433";
 const DEFAULT_TARGET = "work";
 const MAX_OUTPUT = 50_000;
 const WATCH_ENTRY = "diffect-feedback-watch";
@@ -42,7 +41,6 @@ type WorkspaceResolveOptions = {
   interactive?: boolean;
   persistSelection?: boolean;
 };
-type EnsureDaemonOptions = { openApp?: boolean; seedWorkspace?: string };
 type WatchConfig = {
   enabled: boolean;
   workspaceRoot: string;
@@ -147,10 +145,7 @@ export default function diffectExtension(pi: ExtensionAPI) {
 
     try {
       const connectDaemon = async (signal: AbortSignal) => {
-        const url = await ensureDaemon(pi, config.workspaceRoot, signal, {
-          openApp: false,
-          seedWorkspace: config.workspaceRoot,
-        });
+        const url = await ensureDaemon(pi, config.workspaceRoot, signal);
         await registerWorkspace(url, config.workspaceRoot, signal);
         return url;
       };
@@ -523,9 +518,7 @@ async function diffectUrl(
     signal,
     options,
   );
-  const baseUrl = await ensureDaemon(pi, workspaceRoot, signal, {
-    seedWorkspace: workspaceRoot,
-  });
+  const baseUrl = await ensureDaemon(pi, workspaceRoot, signal);
   await registerWorkspace(baseUrl, workspaceRoot, signal);
   const loc = await locateRepo(baseUrl, workspaceRoot, anchorRoot, signal);
   const q = new URLSearchParams({ workspace: workspaceRoot, repo: loc.repo, target });
@@ -659,7 +652,7 @@ async function resolveReviewWorkspace(
   signal?: AbortSignal,
   options: WorkspaceResolveOptions = {},
 ): Promise<ReviewWorkspace> {
-  const baseUrl = await ensureDaemon(pi, ctx.cwd, signal, { openApp: false });
+  const baseUrl = await ensureDaemon(pi, ctx.cwd, signal);
   const sessionManager = ctx.sessionManager;
   const request = buildPiWorkspaceResolutionRequest(
     {
@@ -765,68 +758,64 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-async function ensureDaemon(
+export async function ensureDaemon(
   pi: ExtensionAPI,
   cwd: string,
   signal?: AbortSignal,
-  options: EnsureDaemonOptions = {},
 ): Promise<string> {
   const configured = process.env.DIFFECT_URL?.trim();
   if (configured) {
-    if (await isDiffectd(configured, signal)) return configured;
-    throw new Error(`DIFFECT_URL is not reachable: ${configured}`);
+    const url = configured.replace(/\/$/, "");
+    if (await isDiffectd(url, signal)) return url;
+    throw new Error(`DIFFECT_URL is not a ready Diffect UI/API service: ${configured}`);
   }
 
-  const marked = await liveMarkedDaemon(signal);
-  if (marked) return marked;
+  const launcher = await resolveDesktopLauncher(pi, cwd, signal);
+  const result = await pi.exec(
+    launcher.command,
+    [...launcher.args, "daemon", "ensure", "--json"],
+    { cwd: homedir(), signal, timeout: 30_000 },
+  );
+  if (result.code !== 0) {
+    throw new Error(
+      result.stderr.trim() || result.stdout.trim() || `Diffect launcher exited ${result.code}`,
+    );
+  }
+  return parseManagedEnsureOutput(result.stdout);
+}
 
+export function parseManagedEnsureOutput(stdout: string): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout);
+  } catch {
+    throw new Error("Diffect launcher returned invalid JSON");
+  }
+  const daemon = isRecord(value) && isRecord(value.daemon) ? value.daemon : null;
   if (
-    options.openApp !== false &&
-    options.seedWorkspace &&
-    (await openDiffectApp(pi, options.seedWorkspace, undefined, signal))
+    !daemon ||
+    daemon.service !== "diffect" ||
+    daemon.origin !== CANONICAL_LOCAL_ORIGIN ||
+    daemon.lifecycle !== "ready" ||
+    daemon.web !== true ||
+    typeof daemon.version !== "string" ||
+    typeof daemon.buildId !== "string" ||
+    typeof daemon.instanceId !== "string"
   ) {
-    for (let i = 0; i < 80; i++) {
-      await sleep(100, signal);
-      const url = await liveMarkedDaemon(signal);
-      if (url) return url;
-    }
+    throw new Error("Diffect launcher did not return the ready canonical UI/API service");
   }
-
-  if (await isDiffectd(DEFAULT_BASE_URL, signal)) return DEFAULT_BASE_URL;
-
-  const daemon = await findDaemon(pi, cwd, signal);
-  spawn(
-    daemon.command,
-    [
-      ...daemon.args,
-      ...daemonWorkspaceArguments(options.seedWorkspace),
-      "--host",
-      "127.0.0.1",
-      "--port",
-      "0",
-    ],
-    {
-      cwd,
-      detached: true,
-      stdio: "ignore",
-      env: process.env,
-    },
-  ).unref();
-
-  for (let i = 0; i < 40; i++) {
-    await sleep(100, signal);
-    const url = await liveMarkedDaemon(signal);
-    if (url) return url;
-  }
-  throw new Error("diffectd did not become ready");
+  return CANONICAL_LOCAL_ORIGIN;
 }
 
 async function isDiffectd(baseUrl: string, signal?: AbortSignal): Promise<boolean> {
   try {
-    const res = await fetch(`${baseUrl}/workspace`, { signal });
+    const res = await fetch(`${baseUrl}/health`, {
+      headers: { accept: "application/json" },
+      signal,
+    });
     if (!res.ok) return false;
-    const json = (await res.json()) as { repos?: unknown };
-    return Array.isArray(json.repos);
+    const health = (await res.json()) as Record<string, unknown>;
+    return health.service === "diffect" && health.lifecycle === "ready" && health.web === true;
   } catch {
     return false;
   }
@@ -910,15 +899,41 @@ async function findCli(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Pro
   throw new Error("diffect CLI not found. Build Diffect or put `diffect` on PATH.");
 }
 
-async function findDaemon(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<Command> {
-  const local = findLocalFile(
-    "packages/core/dist/daemon-bin.js",
-    fileURLToPath(import.meta.url),
+export async function resolveDesktopLauncher(
+  pi: ExtensionAPI,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<Command> {
+  const explicit = process.env.DIFFECT_APP_PATH?.trim();
+  if (explicit) {
+    if (!isAbsolute(explicit) || !existsSync(explicit)) {
+      throw new Error("DIFFECT_APP_PATH must name an absolute Diffect desktop executable");
+    }
+    return { command: realpathSync(explicit), args: [] };
+  }
+
+  const pathLauncher = await pathCommand(pi, "diffect-desktop", cwd, signal);
+  if (pathLauncher) return { command: pathLauncher, args: [] };
+
+  const recorded = await readInstalledLauncher();
+  if (recorded) return { command: recorded, args: [] };
+  throw new Error(
+    "Diffect desktop launcher not found. Set DIFFECT_APP_PATH, put diffect-desktop on PATH, or launch the installed app once.",
   );
-  if (local) return nodeCommand(local);
-  const pathDaemon = await pathCommand(pi, "diffectd", cwd, signal);
-  if (pathDaemon) return { command: pathDaemon, args: [] };
-  throw new Error("diffectd not found. Build Diffect or put `diffectd` on PATH.");
+}
+
+async function readInstalledLauncher(): Promise<string | null> {
+  try {
+    const parsed = JSON.parse(await readFile(installationPath(), "utf8")) as {
+      launcherPath?: unknown;
+    };
+    if (typeof parsed.launcherPath !== "string" || !isAbsolute(parsed.launcherPath)) {
+      return null;
+    }
+    return existsSync(parsed.launcherPath) ? realpathSync(parsed.launcherPath) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function pathCommand(
@@ -934,7 +949,22 @@ async function pathCommand(
     timeout: 5_000,
   });
   if (r.code !== 0 || !r.stdout.trim()) return null;
-  return resolveTrustedCommand(r.stdout.trim(), lookupDirectory, cwd);
+  return resolveTrustedCommand(
+    r.stdout.trim(),
+    lookupDirectory,
+    commandTrustRoot(cwd),
+  );
+}
+
+function commandTrustRoot(cwd: string): string {
+  const start = real(cwd);
+  let directory = start;
+  while (true) {
+    if (existsSync(join(directory, ".git"))) return directory;
+    const parent = dirname(directory);
+    if (parent === directory) return start;
+    directory = parent;
+  }
 }
 
 function nodeCommand(file: string): Command {
@@ -944,23 +974,9 @@ function nodeCommand(file: string): Command {
     : { command: "node", args: [file] };
 }
 
-async function liveMarkedDaemon(signal?: AbortSignal): Promise<string | null> {
-  const marker = await readDaemonMarker();
-  return marker && (await isDiffectd(marker.url, signal)) ? marker.url : null;
-}
-
-async function readDaemonMarker(): Promise<{ url: string } | null> {
-  try {
-    const parsed = JSON.parse(await readFile(daemonMarkerPath(), "utf8")) as { url?: unknown };
-    return typeof parsed.url === "string" ? { url: parsed.url } : null;
-  } catch {
-    return null;
-  }
-}
-
-function daemonMarkerPath(): string {
+function installationPath(): string {
   const base = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
-  return join(base, "diffect", "daemon.json");
+  return join(base, "diffect", "installation.json");
 }
 
 async function openDiffectApp(
@@ -970,11 +986,10 @@ async function openDiffectApp(
   signal?: AbortSignal,
 ): Promise<boolean> {
   const args = url ? [url] : [];
-  const envPath = process.env.DIFFECT_APP_PATH?.trim();
-  if (envPath && existsSync(envPath) && spawnDetached(envPath, args, cwd)) return true;
-
-  const pathApp = await pathCommand(pi, "diffect-desktop", cwd, signal);
-  if (pathApp && spawnDetached(pathApp, args, cwd)) return true;
+  const launcher = await resolveDesktopLauncher(pi, cwd, signal).catch(() => null);
+  if (launcher && spawnDetached(launcher.command, [...launcher.args, ...args], cwd)) {
+    return true;
+  }
 
   if (process.platform === "darwin") {
     for (const openArgs of diffectAppOpenArgs(url)) {
@@ -1033,21 +1048,6 @@ function real(path: string): string {
   } catch {
     return resolve(path);
   }
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolveSleep, reject) => {
-    if (signal?.aborted) return reject(new Error("cancelled"));
-    const t = setTimeout(resolveSleep, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        reject(new Error("cancelled"));
-      },
-      { once: true },
-    );
-  });
 }
 
 async function responseError(res: Response): Promise<string> {

@@ -225,12 +225,6 @@ export async function persistWorkspaceBinding(
   throw new Error("Diffect settings kept changing; run /diffect-space again");
 }
 
-export function daemonWorkspaceArguments(workspaceRoot?: string): string[] {
-  return workspaceRoot
-    ? ["--workspace", workspaceRoot]
-    : ["--no-workspace"];
-}
-
 async function settingsRequestError(response: Response): Promise<string> {
   const body = await response.json().catch(() => null) as unknown;
   if (body && typeof body === "object" && !Array.isArray(body)) {
