@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { managedProcessExists } from "../src/daemon-manager.js";
 import { runDaemon } from "../src/daemon-start.js";
 import { readManagedDaemon } from "../src/store/managed-daemon.js";
 
@@ -119,7 +120,7 @@ describe("persistent daemon manager", () => {
     expect(restarted.daemon.instanceId).not.toBe(first.daemon.instanceId);
     expect(restarted.daemon).toMatchObject({ version: "1.1.0", buildId: "release-2" });
     expect(await (await fetch(`${origin}/`)).text()).toContain("Release 2");
-    expect(processExists(oldPid)).toBe(false);
+    expect(managedProcessExists(oldPid)).toBe(false);
 
     activeBuild = {
       version: "1.0.0",
@@ -160,7 +161,7 @@ describe("persistent daemon manager", () => {
     expect(await fetchJson(`${origin}/ui-state`)).toMatchObject({
       workspaceRecency: { "/held-during-restart": 123 },
     });
-    expect(processExists(oldPid)).toBe(false);
+    expect(managedProcessExists(oldPid)).toBe(false);
   }, 30_000);
 
   it("keeps unmanaged diagnostic markers separate from lifecycle credentials", async () => {
@@ -311,15 +312,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("no test port");
   await new Promise<void>((done) => server.close(() => done()));
   return address.port;
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function portOpen(target: number): Promise<boolean> {

@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createConnection } from "node:net";
+import { readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -390,7 +391,7 @@ async function waitForReady(
           `another Diffect build claimed ${origin} during startup`,
         );
       }
-    } else if (state.kind === "conflict" && !processExists(childPid)) {
+    } else if (state.kind === "conflict" && !managedProcessExists(childPid)) {
       throw portConflict(origin);
     }
     await delay(50);
@@ -405,13 +406,13 @@ async function waitForStopped(
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const state = await probeDaemon(origin);
-    if (state.kind === "conflict" && !processExists(record.pid)) {
+    if (state.kind === "conflict" && !managedProcessExists(record.pid)) {
       throw portConflict(origin);
     }
     if (state.kind === "diffect" && state.health.instanceId !== record.instanceId) {
       throw new DaemonLifecycleError("another Diffect daemon claimed the canonical origin during restart");
     }
-    if (state.kind === "absent" && !processExists(record.pid)) return;
+    if (state.kind === "absent" && !managedProcessExists(record.pid)) return;
     await delay(50);
   }
   throw new DaemonLifecycleError(
@@ -475,7 +476,7 @@ function parseHealth(value: unknown, expectedOrigin: string): DaemonHealth | nul
 }
 
 async function terminateUnreadyChild(pid: number): Promise<void> {
-  if (!processExists(pid)) return;
+  if (!managedProcessExists(pid)) return;
   try {
     process.kill(pid, "SIGTERM");
   } catch {
@@ -483,7 +484,7 @@ async function terminateUnreadyChild(pid: number): Promise<void> {
   }
   const deadline = Date.now() + 1_000;
   while (Date.now() < deadline) {
-    if (!processExists(pid)) return;
+    if (!managedProcessExists(pid)) return;
     await delay(25);
   }
   // This process never reached ready, so it has accepted no client work.
@@ -491,16 +492,27 @@ async function terminateUnreadyChild(pid: number): Promise<void> {
     process.kill(pid, "SIGKILL");
   } catch {}
   const killDeadline = Date.now() + 1_000;
-  while (processExists(pid) && Date.now() < killDeadline) await delay(25);
+  while (managedProcessExists(pid) && Date.now() < killDeadline) await delay(25);
 }
 
-function processExists(pid: number): boolean {
+export function managedProcessExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+  if (process.platform !== "linux") return true;
+  try {
+    return !linuxProcStatIsExited(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    return true;
+  }
+}
+
+export function linuxProcStatIsExited(stat: string): boolean {
+  const commandEnd = stat.lastIndexOf(")");
+  return commandEnd >= 0 && stat[commandEnd + 2] === "Z";
 }
 
 function portInUse(origin: string): Promise<boolean> {
