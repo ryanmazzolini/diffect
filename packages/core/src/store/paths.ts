@@ -32,6 +32,21 @@ export function repoStoreDir(repoRoot: string): string {
   return join(configDir(), "workspaces", hashRepoPath(repoRoot));
 }
 
+/** Root containing every repository-owned store. */
+export function repositoryStoresDir(): string {
+  return join(configDir(), "workspaces");
+}
+
+/** Isolated clean Review storage for one repository. */
+export function reviewStoreDir(repoRoot: string): string {
+  return join(repoStoreDir(repoRoot), "reviews", "v1");
+}
+
+/** One Review's append-only event stream. */
+export function reviewEventsPath(repoRoot: string, reviewId: string): string {
+  return join(reviewStoreDir(repoRoot), `${reviewId}.jsonl`);
+}
+
 /** Per-space central store directory: `<configDir>/spaces/<hash>/`. */
 export function spaceStoreDir(spaceRoot: string): string {
   return join(configDir(), "spaces", hashPath(spaceRoot));

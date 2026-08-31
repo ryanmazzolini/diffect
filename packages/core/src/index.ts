@@ -5,6 +5,7 @@ export * from "./git/refs.js";
 export * from "./reviews/event-log.js";
 export * from "./reviews/ids.js";
 export * from "./reviews/refresh.js";
+export * from "./reviews/review-service.js";
 export * from "./store/paths.js";
 export * from "./store/daemon-marker.js";
 export * from "./store/registry.js";

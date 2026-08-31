@@ -2,6 +2,8 @@
 // and the browser SPA. Keeping these in one place stops the three frontends and
 // the file store from drifting apart.
 
+export * from "./reviews.js";
+
 /** Current schema version for the threads.jsonl event log. */
 export const THREAD_SCHEMA_VERSION = 2 as const;
 
