@@ -1,35 +1,36 @@
 # <img src="packages/desktop/src-tauri/icons/icon.png" alt="" width="36" height="36"> Diffect
 
 [![CI](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml/badge.svg)](https://github.com/ryanmazzolini/diffect/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ryanmazzolini/diffect)](https://github.com/ryanmazzolini/diffect/releases/latest)
 
-Browser + desktop code review for repos, worktrees, and multi-repo AI coding
-spaces.
-
-Diffect runs beside the code — on your laptop, dev box, or trusted remote host —
-and opens a GitHub-style review UI in the browser or desktop app.
-
-- review `work`, `staged`, `unstaged`, refs, or base↔compare ranges
-- review one repo or a whole folder of repos/worktrees as one task space
-- leave durable inline comments that re-anchor or go stale as code changes
-- let agents read and update the same threads; pi is the first integration
-- keep review state in local files under `~/.config/diffect/`
+Diffect is a local-first code review surface for humans and coding agents to collaborate.
 
 <p align="center">
-  <img src="docs/Screenshot.png" alt="Diffect review UI showing a diff with inline comments and a thread sidebar" width="900">
+  <img src="docs/code-review.png" alt="Diffect desktop reviewing a split code diff with file and thread sidebars" width="900">
 </p>
 
-## Status
+Diffect runs as a desktop (Tauri) app or web-ui daemon. It doesn't ship with any embedded AI conversation panes. Instead, use your favourite harness and follow along live in diffect.
 
-Diffect is experimental but usable from a source checkout or a downloadable
-desktop build. Hosted review, GitHub sync, auth, signed installers, and
-auto-updates are not built yet. The current macOS downloads are ad-hoc signed,
-so macOS may ask you to confirm the first launch.
+There is a native pi extension for proactive commenting + resolution, which provides a real-time surface between agents.
 
-## Install the desktop app
+### Why
 
-Each [GitHub release](https://github.com/ryanmazzolini/diffect/releases) includes
-a Linux x86_64 AppImage and zipped macOS apps for Apple Silicon and Intel.
-Release assets include SHA-256 checksums and GitHub build provenance.
+Most AI review tools start with a pull request. I wanted to review work earlier, locally and with faster feedback loops.
+
+Diffect is similar to other local code-review tools, but this isn't a TUI, and the workflow is work-space oriented instead of single-repo-oriented.
+
+## Download
+
+[Download the latest release](https://github.com/ryanmazzolini/diffect/releases/latest)
+for:
+
+- **macOS:** zipped apps for Apple Silicon and Intel
+- **Linux:** x86_64 AppImage
+
+Every release includes SHA-256 checksums and GitHub build-provenance
+attestations. The macOS apps are currently ad-hoc signed, so macOS may ask you to
+confirm the first launch. Signed installers, notarization, and auto-updates are
+not built yet.
 
 To install the latest stable release as `diffect-desktop` with
 [mise](https://mise.jdx.dev):
@@ -43,71 +44,104 @@ mise use -g 'github:ryanmazzolini/diffect[matching=macos-aarch64,strip_component
 ```
 
 Mise's GitHub backend ignores prereleases for `latest`. Run `mise upgrade` to
-install a newer stable release when one is available. You can instead download
-the platform asset directly from the release page; make a downloaded AppImage
+install a newer stable release. If you download an AppImage directly, make it
 executable before launching it.
 
-## Layout
+## Status
 
-```text
-packages/
-  shared/   contract types shared by daemon, CLI, and web UI
-  core/     diffect CLI + diffectd daemon + git diff + event log
-  web/      React + Vite browser UI served by diffectd
-  desktop/  Tauri shell over a private diffectd
-  e2e/      Playwright coverage
-integrations/
-  pi/       local pi package and tools
+Diffect is **experimental** but usable from a source checkout or downloadable
+desktop build. Hosted review, GitHub sync, and remote authentication are not
+built in (yet?).
+
+## Features
+
+### Workspace review
+Diffect provides typical review UI functions. Additionally you can:
+
+- Review all the repositories and Git worktrees in a root workspace
+- **Follow changes** while an agent works across your local files
+- Browse any workspace file and make quick edits
+- Keep a separate pull request draft for each repository.
+
+### Working with agents
+
+Any agent can integrate with `diffect` via the CLI to leave comments, list comments, create a PR draft etc.
+
+The bundled [pi extension](integrations/pi/README.md) is more tightly integrated. Connect a pi session with `/diffect-connect` and new comments will trigger the agent automatically.
+
+### UI Inspection
+
+The desktop app provides a simple website review tool, with element picker and selection screen-shot tools. Switch among desktop, tablet, and mobile viewports, and keep frequently reviewed pages in bookmarks and history.
+
+<p align="center">
+  <img src="docs/website-review.png" alt="Diffect website review selecting an element on a local web page" width="900">
+</p>
+
+## CLI
+
+The CLI is not packaged separately yet. After you [set up a source checkout](#set-up-a-source-checkout),
+build it and add an alias:
+
+```sh
+pnpm build
+alias diffect="node /path/to/diffect/packages/core/dist/cli.js"
 ```
 
-## Run from source
+You can then use it from any repository:
 
-Tooling is pinned with [mise](https://mise.jdx.dev). Dependencies install with
-lifecycle scripts disabled and a 3-day npm release-age cooldown.
+```sh
+cd /path/to/repo
+diffect list --status open
+diffect comment --file src/a.ts --line 42 --severity must-fix --body "…"
+diffect reply <id> --agent claude --body "fixed"
+diffect resolve <id> --summary "fixed in this change"
+```
+
+By default, Diffect reviews all work on the current branch, including staged,
+unstaged, and untracked files. Use `--target` to review only staged or unstaged
+changes, another branch or commit, or a comparison such as `main..feature`. Use
+`--repo` or `--worktree` to choose a specific checkout in a larger workspace.
+
+## Development
+
+### Set up a source checkout
+
+This repository uses [mise](https://mise.jdx.dev) to install the right versions
+of Node, pnpm, and Rust. For safer installs, it blocks dependency install
+scripts and waits three days before installing a newly published package.
 
 ```sh
 mise install
 pnpm install
+```
+
+### Run the app
+
+To run Diffect in your browser:
+
+```sh
 mise run daemon -- --workspace /path/to/repo
 # open http://127.0.0.1:7421
 ```
 
-`--workspace` defaults to the current directory. Drop it to review the repo
-you're standing in.
+Leave out `--workspace` to review the repository in your current directory.
 
-For the desktop app:
+To run the desktop app:
 
 ```sh
 mise run desktop
 ```
 
-For UI hot reload:
+For browser UI changes with hot reload, use two terminals:
 
 ```sh
 mise run daemon   # terminal 1
 mise run dev      # terminal 2
 ```
 
-## CLI
+### Checks
 
-Until packages are published, alias the built CLI from a checkout:
-
-```sh
-pnpm build
-alias diffect="node /path/to/diffect/packages/core/dist/cli.js"
-
-cd /path/to/repo
-diffect list --status open
-diffect comment --file src/a.ts --line 42 --severity must-fix --body "…"
-diffect reply <id> --agent pi --body "fixed"
-diffect resolve <id> --summary "fixed in this change"
-```
-
-The default target is `work` (committed-since-base + unstaged + untracked). Pick
-another with `--target staged|unstaged|<ref>|<a>..<b>`, and a specific checkout
-with `--repo`/`--worktree`.
-
-## Develop
+Before opening a pull request, run the full set of checks:
 
 ```sh
 mise run build
@@ -115,39 +149,44 @@ mise run test
 mise run desktop:check
 ```
 
-Release Please maintains a release PR from Conventional Commits on `main`.
-Merging that reviewed PR creates a draft release; GitHub Actions builds and
-attests every desktop asset, then publishes the release only after all platform
-builds succeed. A failed draft can be retried from the Release workflow by
-providing its `vX.Y.Z` tag.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the rest of the contributor notes.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor notes and
-[integrations/pi](integrations/pi/README.md) for agent usage.
+### Releases
 
-## Where reviews live
+Release Please keeps a release pull request up to date from the commit messages
+on `main`. Merging it creates a draft GitHub release. GitHub Actions then builds
+the desktop app for every supported platform and publishes the release only if
+all the builds succeed.
 
-Review state is a per-user store at `$XDG_CONFIG_HOME/diffect/` (default
-`~/.config/diffect/`). Repo threads live in
-`workspaces/<hash>/threads.jsonl`; space-level threads live in
-`spaces/<hash>/threads.jsonl`; attachments live in `attachments/`; and
-`workspaces.json` records known workspace paths. The hashes are derived from
-absolute paths, but the files stay host-private and are not committed with your
-code.
+If a build fails, rerun the Release workflow with the draft release tag, such as
+`vX.Y.Z`.
 
-The CLI, daemon, desktop app, and agents all read/write that same store. A
-legacy in-tree `.reviews/threads.jsonl` from older versions is migrated into the
-central store on first access; the original is left as a backup.
+## Review data
+
+Diffect keeps review data in `$XDG_CONFIG_HOME/diffect/`, or
+`~/.config/diffect/` by default. It is stored outside your repositories and is
+not committed with your code.
+
+The desktop app, browser UI, CLI, and agent integrations all use these same
+files:
+
+- Repository comments: `workspaces/<hash>/threads.jsonl`
+- Workspace comments: `spaces/<hash>/threads.jsonl`
+- Attachments: `attachments/`
+- Known workspaces: `workspaces.json`
+
+The hashes come from the full path to each workspace and stay local to your
+machine. If Diffect finds review data from an older version in
+`.reviews/threads.jsonl`, it copies the data into the current store and leaves
+the original file in place as a backup.
 
 ## Networking and security
 
-`diffectd` binds to `127.0.0.1` by default. There is no auth yet, so only expose
-it inside a trusted network if you override `--host`. Report vulnerabilities
-privately; see [SECURITY.md](SECURITY.md).
+By default, `diffectd` only accepts connections from the same machine
+(`127.0.0.1`). It does not have authentication yet. If you change `--host`, only
+expose it inside a network you trust.
 
-## License
-
-Apache-2.0. See [LICENSE](LICENSE). Vendored editor icons are attributed in
-[third-party assets](docs/third-party-assets.md).
+Report security problems privately; see [SECURITY.md](SECURITY.md).
 
 ## Related projects
 
@@ -160,3 +199,8 @@ Apache-2.0. See [LICENSE](LICENSE). Vendored editor icons are attributed in
 - [diffity](https://diffity.com) by [Kamran Ahmed](https://kamranahmed.se) — a
   GitHub-style git diff viewer in the browser, and the visual inspiration for
   Diffect's diff view.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE). Vendored editor icons are attributed in
+[third-party assets](docs/third-party-assets.md).
